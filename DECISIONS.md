@@ -1,0 +1,106 @@
+# Decisions
+
+Dated, append-only. Each entry says what was chosen, what it was chosen over,
+and why.
+
+## 2026-09-17 — SnapTrade Personal keys go through a signed REST client, not the SDK
+
+`snaptrade-typescript-sdk` marks `userId` and `userSecret` as required on every
+call, but a Personal API key identifies the user by the key itself and the two
+fields should not be sent at all
+([docs](https://docs.snaptrade.com/docs/personal-vs-commercial)). Passing empty
+strings is a guess at how the server treats them.
+
+`src/sources/snaptrade.ts` therefore implements the documented auth directly:
+`Signature: base64(HMAC-SHA256(encodeURI(consumerKey), stableJSON({content, path, query})))`,
+with `clientId` and `timestamp` in the query string. This is byte-for-byte the
+scheme the SDK's own `requestAfterHook` uses — `test/snaptrade-sign.test.ts`
+asserts that against an independent implementation — so we are not inventing a
+protocol, only choosing which fields to omit.
+
+`SNAPTRADE_TRANSPORT=sdk` plus `SNAPTRADE_USER_ID`/`SNAPTRADE_USER_SECRET`
+remains available for a Commercial key, where the fields are real.
+
+Alternative rejected: keep the SDK and cast `{} as never`. It compiles, but it
+sends `userId=&userSecret=` on the wire, which is a different request from the
+one the docs describe.
+
+## 2026-09-17 — Nightly sync runs in-process, not as a cron daemon
+
+The container runs one process. Adding busybox cron means a second process, a
+second copy of the environment to keep in step, and a failure mode where the
+daemon is alive but the sync never fires and nothing notices.
+
+`src/scheduler.ts` schedules a `setTimeout` to the next `CRON_HOUR:CRON_MINUTE`
+and re-arms after each run. Every run appends a line to `sync.log` next to the
+database, which is the file the build plan says to check the morning after a
+deploy, so the observable contract is unchanged.
+
+Cost: a container restart between the scheduled time and the next tick skips
+that night's run. Acceptable for a personal server that can also be refreshed
+on demand with `sync_now`.
+
+## 2026-09-17 — Transactions are stored Plaid-style and negated on read
+
+Storage keeps exactly what Plaid sent (positive = money out) so that re-syncing
+is idempotent and a stored row can be compared against the API without
+reasoning about who flipped what. Every read model in `src/queries.ts` negates,
+so Claude and the user only ever see the intuitive convention: negative is money
+leaving. `accounts.balance` uses the opposite, also intuitive, convention —
+assets positive, liabilities negative — so that `SUM(balance_cad)` is net worth
+with no CASE expression.
+
+Both conventions are asserted in tests rather than only documented.
+
+## 2026-09-17 — Contribution detection reports, it does not guess
+
+A bank transfer into Wealthsimple is visible from the Plaid side but carries no
+information about which registered account received it. Subtracting it from
+RRSP room would be wrong whenever it was a TFSA top-up, and over-reporting
+remaining room is the expensive direction of the error (CRA penalties).
+
+So `get_contribution_room` returns three separate numbers:
+`contributed_detected_cad` (brokerage activity tagged `CONTRIBUTION`/`DEPOSIT`,
+attributable to a specific account), `contributed_manual_cad` (set by the user)
+and `unattributed_brokerage_transfers_cad` (the bank-side heuristic, shown but
+never subtracted). A manual figure always wins, and `confidence` says which
+basis was used.
+
+## 2026-09-17 — Owner tags are written on insert only
+
+`upsertAccount` sets `owner` from `DEFAULT_OWNER` when a row is created and
+never touches it again. A nightly sync that clobbered a hand-set `spouse` tag
+would silently corrupt every by-owner number, and the corruption would look
+like a market move rather than a bug.
+
+## 2026-09-17 — Accounts are deactivated, never deleted
+
+A closed brokerage account, a removed Plaid Item or a failed sync sets
+`active = 0`. History, owner tags and past transactions survive, and
+`list_accounts` can still show them with `include_inactive`. Accounts under an
+Item that failed *this* run are deliberately left active — a `login_required`
+bank still holds real money, and dropping it from net worth would report a
+sudden fictional loss.
+
+## 2026-09-17 — A wrong MCP secret returns 404, not 401
+
+The secret in the URL path is the entire auth model, so the endpoint should not
+advertise that it exists. Comparison is over SHA-256 digests via
+`timingSafeEqual`, which is constant time and does not leak length.
+
+## 2026-09-17 — Separators are flattened before classifying account types
+
+Found by a test, not in production: SnapTrade reports raw types like `CA_TFSA`
+and `CREDIT_CARD`, and `_` is a word character, so `/\btfsa\b/` does not match.
+`guessRegistered()` and `classifyAccount()` now flatten `_ - / . ,` to spaces
+first. Without this, every Wealthsimple account would have been filed as `NA`
+and `by_registered_type` would have been one useless bucket.
+
+## 2026-09-17 — TypeScript is stripped at dev time and compiled for the image
+
+`node --experimental-strip-types` runs `.ts` directly for `npm run dev` and the
+scripts, while `tsc` emits `dist/` for the Docker image. That needs
+`allowImportingTsExtensions` + `rewriteRelativeImportExtensions`, so source
+imports say `./db.ts` and the build rewrites them to `./db.js`.
+`erasableSyntaxOnly` is on so nothing that type stripping cannot handle (enums,
+parameter properties) can creep in.

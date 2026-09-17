@@ -1,0 +1,87 @@
+/** Central env parsing. Nothing else in the codebase reads process.env directly. */
+
+function str(name: string, fallback = ''): string {
+  const v = process.env[name];
+  return v === undefined || v === '' ? fallback : v;
+}
+
+function bool(name: string, fallback: boolean): boolean {
+  const v = process.env[name];
+  if (v === undefined || v === '') return fallback;
+  return /^(1|true|yes|on)$/i.test(v.trim());
+}
+
+function int(name: string, fallback: number): number {
+  const v = process.env[name];
+  if (v === undefined || v === '') return fallback;
+  const n = Number.parseInt(v, 10);
+  return Number.isFinite(n) ? n : fallback;
+}
+
+function list(name: string, fallback: string[]): string[] {
+  const v = process.env[name];
+  if (v === undefined || v === '') return fallback;
+  return v
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean);
+}
+
+export type OwnerTag = 'me' | 'spouse' | 'joint';
+
+export const config = {
+  port: int('PORT', 8787),
+  mcpSecret: str('MCP_SECRET'),
+  dbPath: str('DB_PATH', 'data/finmcp.db'),
+  mcpRateLimit: int('MCP_RATE_LIMIT', 60),
+  logLevel: str('LOG_LEVEL', 'info'),
+
+  baseCurrency: str('BASE_CURRENCY', 'CAD').toUpperCase(),
+  defaultOwner: str('DEFAULT_OWNER', 'me') as OwnerTag,
+
+  cronEnabled: bool('CRON_ENABLED', true),
+  cronHour: int('CRON_HOUR', 4),
+  cronMinute: int('CRON_MINUTE', 15),
+  backupKeepDays: int('BACKUP_KEEP_DAYS', 14),
+
+  snaptrade: {
+    clientId: str('SNAPTRADE_CLIENT_ID'),
+    consumerKey: str('SNAPTRADE_CONSUMER_KEY'),
+    transport: str('SNAPTRADE_TRANSPORT', 'rest') as 'rest' | 'sdk',
+    userId: str('SNAPTRADE_USER_ID'),
+    userSecret: str('SNAPTRADE_USER_SECRET'),
+    excludeCards: bool('EXCLUDE_SNAPTRADE_CARDS', true),
+    balanceHistory: bool('SNAPTRADE_BALANCE_HISTORY', false),
+    baseUrl: str('SNAPTRADE_BASE_URL', 'https://api.snaptrade.com/api/v1'),
+  },
+
+  plaid: {
+    clientId: str('PLAID_CLIENT_ID'),
+    secret: str('PLAID_SECRET'),
+    env: str('PLAID_ENV', 'production'),
+    products: list('PLAID_PRODUCTS', ['transactions']),
+    countryCodes: list('PLAID_COUNTRY_CODES', ['US', 'CA']),
+    linkPort: int('PLAID_LINK_PORT', 8788),
+    redirectUri: str('PLAID_REDIRECT_URI'),
+    transactionDays: int('PLAID_TRANSACTION_DAYS', 730),
+  },
+
+  wise: {
+    token: str('WISE_API_TOKEN'),
+    baseUrl: str('WISE_API_BASE', 'https://api.transferwise.com'),
+  },
+
+  tokenEncKey: str('TOKEN_ENC_KEY'),
+} as const;
+
+export function snaptradeConfigured(): boolean {
+  return Boolean(config.snaptrade.clientId && config.snaptrade.consumerKey);
+}
+
+export function plaidConfigured(): boolean {
+  return Boolean(config.plaid.clientId && config.plaid.secret);
+}
+
+export function wiseConfigured(): boolean {
+  return Boolean(config.wise.token);
+}

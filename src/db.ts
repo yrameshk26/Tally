@@ -1,0 +1,244 @@
+/**
+ * SQLite storage. One file, one household, no migrations framework — the
+ * schema is created with CREATE TABLE IF NOT EXISTS and evolved through the
+ * idempotent steps in `migrate()`.
+ *
+ * Sign convention (CLAUDE.md): assets are positive and liabilities negative in
+ * `accounts.balance`. Transactions are stored Plaid-style (positive = money
+ * leaving the account) and negated when read out.
+ */
+import Database from 'better-sqlite3';
+import { mkdirSync } from 'node:fs';
+import { dirname } from 'node:path';
+import { config } from './config.ts';
+import { encryptToken, isEncrypted } from './lib/crypto.ts';
+import { log } from './lib/logger.ts';
+
+export type DB = Database.Database;
+
+export const SCHEMA = `
+CREATE TABLE IF NOT EXISTS accounts (
+  id                TEXT PRIMARY KEY,
+  source            TEXT NOT NULL,
+  institution       TEXT,
+  name              TEXT,
+  mask              TEXT,
+  account_category  TEXT,
+  account_subtype   TEXT,
+  registered_type   TEXT NOT NULL DEFAULT 'NA',
+  currency          TEXT NOT NULL DEFAULT 'CAD',
+  balance           REAL NOT NULL DEFAULT 0,
+  balance_cad       REAL NOT NULL DEFAULT 0,
+  available         REAL,
+  owner             TEXT NOT NULL DEFAULT 'me',
+  active            INTEGER NOT NULL DEFAULT 1,
+  status            TEXT,
+  item_id           TEXT,
+  first_seen        TEXT NOT NULL,
+  updated_at        TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_accounts_source ON accounts(source);
+CREATE INDEX IF NOT EXISTS idx_accounts_owner ON accounts(owner);
+
+CREATE TABLE IF NOT EXISTS holdings (
+  id               INTEGER PRIMARY KEY AUTOINCREMENT,
+  account_id       TEXT NOT NULL,
+  symbol           TEXT,
+  description      TEXT,
+  asset_type       TEXT,
+  quantity         REAL NOT NULL DEFAULT 0,
+  price            REAL,
+  currency         TEXT NOT NULL DEFAULT 'CAD',
+  market_value     REAL NOT NULL DEFAULT 0,
+  market_value_cad REAL NOT NULL DEFAULT 0,
+  cost_basis       REAL,
+  cost_basis_cad   REAL,
+  updated_at       TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_holdings_account ON holdings(account_id);
+CREATE INDEX IF NOT EXISTS idx_holdings_symbol ON holdings(symbol);
+
+CREATE TABLE IF NOT EXISTS transactions (
+  id                TEXT PRIMARY KEY,
+  account_id        TEXT NOT NULL,
+  date              TEXT NOT NULL,
+  name              TEXT,
+  merchant          TEXT,
+  amount            REAL NOT NULL,
+  currency          TEXT NOT NULL DEFAULT 'CAD',
+  amount_cad        REAL NOT NULL DEFAULT 0,
+  category          TEXT,
+  category_detailed TEXT,
+  pending           INTEGER NOT NULL DEFAULT 0,
+  updated_at        TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_tx_account_date ON transactions(account_id, date);
+CREATE INDEX IF NOT EXISTS idx_tx_date ON transactions(date);
+
+CREATE TABLE IF NOT EXISTS activities (
+  id           TEXT PRIMARY KEY,
+  account_id   TEXT NOT NULL,
+  date         TEXT NOT NULL,
+  type         TEXT,
+  description  TEXT,
+  symbol       TEXT,
+  amount       REAL NOT NULL DEFAULT 0,
+  currency     TEXT NOT NULL DEFAULT 'CAD',
+  amount_cad   REAL NOT NULL DEFAULT 0,
+  updated_at   TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_activities_account_date ON activities(account_id, date);
+CREATE INDEX IF NOT EXISTS idx_activities_type ON activities(type);
+
+CREATE TABLE IF NOT EXISTS fx_rates (
+  pair       TEXT PRIMARY KEY,
+  rate       REAL NOT NULL,
+  as_of      TEXT NOT NULL,
+  fetched_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS snapshots (
+  id                     INTEGER PRIMARY KEY AUTOINCREMENT,
+  ts                     TEXT NOT NULL,
+  total_assets_cad       REAL NOT NULL,
+  total_liabilities_cad  REAL NOT NULL,
+  net_worth_cad          REAL NOT NULL,
+  by_owner               TEXT,
+  by_registered_type     TEXT,
+  origin                 TEXT NOT NULL DEFAULT 'sync'
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_snapshots_day ON snapshots(substr(ts,1,10), origin);
+
+CREATE TABLE IF NOT EXISTS plaid_items (
+  item_id             TEXT PRIMARY KEY,
+  institution_id      TEXT,
+  institution_name    TEXT,
+  access_token        TEXT NOT NULL,
+  status              TEXT NOT NULL DEFAULT 'ok',
+  error_code          TEXT,
+  error_message       TEXT,
+  cursor              TEXT,
+  consent_expiration  TEXT,
+  last_synced_at      TEXT,
+  created_at          TEXT NOT NULL,
+  updated_at          TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS card_details (
+  account_id         TEXT PRIMARY KEY,
+  statement_balance  REAL,
+  minimum_payment    REAL,
+  due_date           TEXT,
+  last_payment_amount REAL,
+  last_payment_date  TEXT,
+  apr_percentage     REAL,
+  is_overdue         INTEGER,
+  updated_at         TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS room (
+  person             TEXT NOT NULL,
+  account_type       TEXT NOT NULL,
+  year               INTEGER NOT NULL,
+  limit_amount       REAL NOT NULL,
+  contributed_manual REAL NOT NULL DEFAULT 0,
+  note               TEXT,
+  updated_at         TEXT NOT NULL,
+  PRIMARY KEY (person, account_type, year)
+);
+
+CREATE TABLE IF NOT EXISTS sync_runs (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  started_at  TEXT NOT NULL,
+  finished_at TEXT,
+  ok          INTEGER NOT NULL DEFAULT 0,
+  report      TEXT
+);
+
+CREATE TABLE IF NOT EXISTS meta (
+  key   TEXT PRIMARY KEY,
+  value TEXT NOT NULL
+);
+`;
+
+let handle: DB | null = null;
+
+export function openDb(path = config.dbPath): DB {
+  mkdirSync(dirname(path) || '.', { recursive: true });
+  const db = new Database(path);
+  db.pragma('journal_mode = WAL');
+  db.pragma('foreign_keys = ON');
+  db.pragma('busy_timeout = 5000');
+  return db;
+}
+
+export function initDb(db: DB): DB {
+  db.exec(SCHEMA);
+  migrate(db);
+  return db;
+}
+
+export function getDb(): DB {
+  if (!handle) handle = initDb(openDb());
+  return handle;
+}
+
+export function closeDb(): void {
+  handle?.close();
+  handle = null;
+}
+
+/** Idempotent schema/data migrations. Safe to run on every boot. */
+export function migrate(db: DB): void {
+  // Columns added after the first release. ALTER TABLE ADD COLUMN throws if the
+  // column is already there, which is the cheapest "if not exists" sqlite gives.
+  const addColumn = (table: string, column: string, decl: string): void => {
+    const cols = db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>;
+    if (!cols.some((c) => c.name === column)) {
+      db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${decl}`);
+    }
+  };
+  addColumn('accounts', 'available', 'REAL');
+  addColumn('plaid_items', 'consent_expiration', 'TEXT');
+  addColumn('room', 'note', 'TEXT');
+
+  encryptExistingTokens(db);
+}
+
+/**
+ * Phase 7 hardening: once TOKEN_ENC_KEY is set, rewrite any plaintext access
+ * token in place. Running this twice does nothing because encryptToken() is a
+ * no-op on an already-encrypted value.
+ */
+export function encryptExistingTokens(db: DB, key = config.tokenEncKey): number {
+  if (!key) return 0;
+  const rows = db.prepare('SELECT item_id, access_token FROM plaid_items').all() as Array<{
+    item_id: string;
+    access_token: string;
+  }>;
+  const upd = db.prepare('UPDATE plaid_items SET access_token = ? WHERE item_id = ?');
+  let changed = 0;
+  const tx = db.transaction(() => {
+    for (const row of rows) {
+      if (isEncrypted(row.access_token)) continue;
+      upd.run(encryptToken(row.access_token, key), row.item_id);
+      changed += 1;
+    }
+  });
+  tx();
+  if (changed > 0) log.info(`encrypted ${changed} plaid access token(s) at rest`);
+  return changed;
+}
+
+export function getMeta(db: DB, key: string): string | null {
+  const row = db.prepare('SELECT value FROM meta WHERE key = ?').get(key) as
+    | { value: string }
+    | undefined;
+  return row?.value ?? null;
+}
+
+export function setMeta(db: DB, key: string, value: string): void {
+  db.prepare(
+    'INSERT INTO meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value',
+  ).run(key, value);
+}

@@ -1,0 +1,4 @@
+[
+  { "person": "me", "account_type": "RRSP", "year": 2026, "limit": 115568, "note": "CRA notice of assessment 2025" },
+  { "person": "me", "account_type": "TFSA", "year": 2026, "limit": 80676.52, "note": "CRA My Account, Jan 2026" }
+]

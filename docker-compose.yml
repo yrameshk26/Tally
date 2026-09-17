@@ -1,0 +1,17 @@
+# Local parity with the Dokploy deployment. Dokploy itself builds from the
+# Dockerfile and supplies env + volume through its own UI.
+services:
+  tally:
+    build: .
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8787:8787"
+    env_file: .env
+    environment:
+      DB_PATH: /data/finmcp.db
+      PORT: "8787"
+    volumes:
+      - tally-data:/data
+
+volumes:
+  tally-data:

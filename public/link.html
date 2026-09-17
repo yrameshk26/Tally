@@ -1,0 +1,155 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>tally — Plaid Link</title>
+    <script src="https://cdn.plaid.com/link/v2/stable/link-initialize.js"></script>
+    <style>
+      :root { color-scheme: light dark; --fg: #1a1a1a; --bg: #fafaf8; --line: #e2e2dd; --accent: #2f6f4f; }
+      @media (prefers-color-scheme: dark) {
+        :root { --fg: #ececec; --bg: #16181a; --line: #2e3236; --accent: #7fc8a0; }
+      }
+      * { box-sizing: border-box; }
+      body { margin: 0; padding: 2.5rem 1rem; background: var(--bg); color: var(--fg);
+             font: 15px/1.55 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif; }
+      main { max-width: 46rem; margin: 0 auto; }
+      h1 { font-size: 1.5rem; margin: 0 0 .25rem; letter-spacing: -.01em; }
+      p.sub { margin: 0 0 2rem; opacity: .7; }
+      section { border: 1px solid var(--line); border-radius: 10px; padding: 1.25rem 1.5rem; margin-bottom: 1.25rem; }
+      h2 { font-size: 1rem; margin: 0 0 .75rem; }
+      button { font: inherit; font-weight: 600; padding: .6rem 1.1rem; border-radius: 8px;
+               border: 1px solid var(--accent); background: var(--accent); color: #fff; cursor: pointer; }
+      button.secondary { background: transparent; color: var(--fg); border-color: var(--line); }
+      button:disabled { opacity: .5; cursor: progress; }
+      input { font: inherit; padding: .55rem .7rem; border: 1px solid var(--line); border-radius: 8px;
+              background: transparent; color: inherit; width: 100%; max-width: 28rem; }
+      table { width: 100%; border-collapse: collapse; font-size: .92rem; }
+      th, td { text-align: left; padding: .45rem .5rem; border-bottom: 1px solid var(--line); }
+      th { font-weight: 600; opacity: .7; font-size: .8rem; text-transform: uppercase; letter-spacing: .04em; }
+      .ok { color: var(--accent); font-weight: 600; }
+      .bad { color: #c0392b; font-weight: 600; }
+      #log { white-space: pre-wrap; font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+             font-size: .85rem; opacity: .85; margin-top: 1rem; }
+      .row { display: flex; gap: .6rem; flex-wrap: wrap; align-items: center; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>tally — Plaid Link</h1>
+      <p class="sub">Local only. Connect up to 10 Items, then copy <code>data/finmcp.db</code> to the server volume.</p>
+
+      <section>
+        <h2>Connect a new institution</h2>
+        <div class="row">
+          <button id="connect">Connect a bank or card</button>
+          <span id="count"></span>
+        </div>
+      </section>
+
+      <section>
+        <h2>Repair an existing connection</h2>
+        <p class="sub" style="margin-bottom:.75rem">
+          Paste a token from <code>plaid_relink_url</code>, or use the Repair button in the table below.
+        </p>
+        <div class="row">
+          <input id="token" placeholder="link-production-…" />
+          <button id="resume" class="secondary">Resume with token</button>
+        </div>
+      </section>
+
+      <section>
+        <h2>Linked Items</h2>
+        <table>
+          <thead><tr><th>Institution</th><th>Status</th><th>Last sync</th><th></th></tr></thead>
+          <tbody id="items"><tr><td colspan="4">loading…</td></tr></tbody>
+        </table>
+      </section>
+
+      <div id="log"></div>
+    </main>
+
+    <script>
+      const logEl = document.getElementById('log');
+      const say = (m) => { logEl.textContent += m + '\n'; };
+
+      async function api(path, body) {
+        const res = await fetch(path, body
+          ? { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }
+          : undefined);
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || res.statusText);
+        return data;
+      }
+
+      function open(token) {
+        const handler = Plaid.create({
+          token,
+          receivedRedirectUri: window.location.href.includes('oauth-return') ? window.location.href : undefined,
+          onSuccess: async (publicToken) => {
+            try {
+              const r = await api('/api/exchange', { public_token: publicToken });
+              say('linked ' + (r.institution_name || r.item_id) + ' — ' + r.items + ' item(s) total');
+              localStorage.removeItem('tally_link_token');
+              refresh();
+            } catch (e) { say('exchange failed: ' + e.message); }
+          },
+          onExit: (err) => { if (err) say('exited: ' + err.error_code + ' ' + (err.error_message || '')); },
+        });
+        handler.open();
+      }
+
+      async function refresh() {
+        const items = await api('/api/items');
+        document.getElementById('count').textContent = items.length + ' of 10 Items used';
+        const tbody = document.getElementById('items');
+        tbody.innerHTML = items.length ? '' : '<tr><td colspan="4">none yet</td></tr>';
+        for (const i of items) {
+          const tr = document.createElement('tr');
+          const cls = i.status === 'ok' ? 'ok' : 'bad';
+          tr.innerHTML =
+            '<td>' + i.institution + '</td>' +
+            '<td class="' + cls + '">' + i.status + (i.error_code ? ' (' + i.error_code + ')' : '') + '</td>' +
+            '<td>' + (i.last_synced_at ? i.last_synced_at.slice(0, 16).replace('T', ' ') : '—') + '</td>' +
+            '<td></td>';
+          const btn = document.createElement('button');
+          btn.className = 'secondary';
+          btn.textContent = 'Repair';
+          btn.onclick = async () => {
+            try {
+              const r = await api('/api/relink', { item_id: i.item_id });
+              localStorage.setItem('tally_link_token', r.link_token);
+              open(r.link_token);
+            } catch (e) { say('relink failed: ' + e.message); }
+          };
+          tr.lastElementChild.appendChild(btn);
+          tbody.appendChild(tr);
+        }
+      }
+
+      document.getElementById('connect').onclick = async (ev) => {
+        ev.target.disabled = true;
+        try {
+          const r = await api('/api/link-token');
+          localStorage.setItem('tally_link_token', r.link_token);
+          open(r.link_token);
+        } catch (e) { say('could not create link token: ' + e.message); }
+        ev.target.disabled = false;
+      };
+
+      document.getElementById('resume').onclick = () => {
+        const t = document.getElementById('token').value.trim();
+        if (t) { localStorage.setItem('tally_link_token', t); open(t); }
+      };
+
+      // OAuth banks bounce back to /oauth-return; resume with the stored token.
+      if (window.location.pathname === '/oauth-return') {
+        const stored = localStorage.getItem('tally_link_token');
+        if (stored) { say('resuming OAuth flow…'); open(stored); }
+        else { say('no stored link token — start the connection again from the home page.'); }
+      }
+
+      refresh().catch((e) => say('could not list items: ' + e.message));
+    </script>
+  </body>
+</html>
