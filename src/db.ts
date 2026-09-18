@@ -191,6 +191,41 @@ CREATE TABLE IF NOT EXISTS sessions (
 );
 CREATE INDEX IF NOT EXISTS idx_sessions_expires ON sessions(expires_at);
 
+CREATE TABLE IF NOT EXISTS oauth_clients (
+  client_id      TEXT PRIMARY KEY,
+  client_name    TEXT,
+  redirect_uris  TEXT NOT NULL,
+  created_at     TEXT NOT NULL,
+  last_used_at   TEXT
+);
+
+CREATE TABLE IF NOT EXISTS oauth_codes (
+  code            TEXT PRIMARY KEY,
+  client_id       TEXT NOT NULL,
+  redirect_uri    TEXT NOT NULL,
+  code_challenge  TEXT NOT NULL,
+  challenge_method TEXT NOT NULL DEFAULT 'S256',
+  scope           TEXT,
+  resource        TEXT,
+  username        TEXT NOT NULL,
+  expires_at      TEXT NOT NULL,
+  used            INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE TABLE IF NOT EXISTS oauth_tokens (
+  id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+  access_hash         TEXT NOT NULL UNIQUE,
+  refresh_hash        TEXT UNIQUE,
+  client_id           TEXT NOT NULL,
+  username            TEXT NOT NULL,
+  scope               TEXT,
+  expires_at          TEXT NOT NULL,
+  refresh_expires_at  TEXT,
+  created_at          TEXT NOT NULL,
+  last_used_at        TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_oauth_tokens_client ON oauth_tokens(client_id);
+
 CREATE TABLE IF NOT EXISTS meta (
   key   TEXT PRIMARY KEY,
   value TEXT NOT NULL
