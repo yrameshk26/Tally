@@ -155,6 +155,13 @@ CREATE TABLE IF NOT EXISTS sync_runs (
   report      TEXT
 );
 
+CREATE TABLE IF NOT EXISTS settings (
+  key         TEXT PRIMARY KEY,
+  value       TEXT NOT NULL,
+  is_secret   INTEGER NOT NULL DEFAULT 0,
+  updated_at  TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS meta (
   key   TEXT PRIMARY KEY,
   value TEXT NOT NULL
