@@ -17,8 +17,10 @@ dashboard action only the owner can do.
 - [x] `by_registered_type` totals in the sync report
 - [x] USD positions converted to CAD; options priced at 100 shares
 - [x] Balance-history backfill behind `SNAPTRADE_BALANCE_HISTORY`
-- [ ] Run against the live API; confirm ~$184k, RRSP ~$134k, LIRA ~$31k, TFSA ~$16k
-- [ ] Confirm XEQT is ~87% of invested value
+- [x] Run against the live API — $184,391.90: RRSP $134,399.57, LIRA $31,313.42,
+      TFSA $15,643.88, DPSP $3,028.36. Matches the plan's ballpark.
+- [x] XEQT is 95.5% of invested value ($167,452 of $175,434). Invested sits ~$9k
+      below net worth because managed portfolios report balance but no positions.
 
 ## Phase 3 — Plaid ⏸ needs Trial plan approval + `PLAID_CLIENT_ID`/`PLAID_SECRET`
 - [x] Link helper on :8788 with OAuth return and one-click repair
@@ -39,7 +41,7 @@ dashboard action only the owner can do.
 - [x] `room` table, `get_contribution_room`, `set_contributed`, `set_room_limit`
 - [x] `get_cashflow` with transfers and card payments excluded by default
 - [x] Snapshot backfill path
-- [ ] Tag the spouse's accounts once SnapTrade is live
+- [x] Tagged the spouse's accounts — me $176,880.01 / spouse $7,511.89
 - [ ] Add the spouse's RRSP/TFSA limits to `room.json`
 
 ## Phase 6 — deploy ⏸ needs the Hetzner box
@@ -81,5 +83,7 @@ dashboard action only the owner can do.
       `type` field really is `personal`/`business` on a live token.
 - [ ] SnapTrade `/accounts/{id}/activities` pagination is assumed to be
       offset/limit with a bare array; confirm and drop the `{data}` fallback.
+- [ ] Managed-portfolio holdings (DPSP, managed TFSA, group RRSP) have no
+      position breakdown from SnapTrade. Check whether an add-on exposes them.
 - [ ] Consider a `get_income_summary` tool once a year of activity has
       accumulated (dividends + interest by account).

@@ -133,3 +133,40 @@ Now configurable via `TRUST_PROXY` (hop count, default 0). It is deliberately
 not defaulted to a trusting value: with `trust proxy` enabled, `X-Forwarded-For`
 is attacker-controlled unless a proxy you actually run is rewriting it, so the
 safe default is to trust nothing and make the operator opt in.
+
+## 2026-09-18 — SnapTrade positions: right endpoint, wrong field name
+
+`get_holdings` returned zero against $184k of ETFs while balances were correct.
+Three separate mistakes, worth recording because each looked like the last one
+was fixed:
+
+1. `/accounts/{id}/holdings` returned nothing usable. The data is at
+   `/accounts/{id}/positions/all`, with cash from `/accounts/{id}/balances`.
+2. The position shape is not what the SDK's older types describe. The security
+   is under `instrument`, numerics arrive as **strings**, and `cost_basis` is
+   **per unit**, not a position total.
+3. The envelope field is **`results`**, not `positions`. A tool that
+   re-serialises SnapTrade responses had renamed it, and reading that rendering
+   as if it were the API cost an extra round trip.
+
+The lesson generalised into code: `extractPositions()` accepts `results`,
+`positions`, `data` or a bare array and never throws, and the sync report now
+counts which endpoint served each account so an empty result is diagnosable
+from the report rather than from container logs.
+
+Related: an account with a balance but no position detail is **not** an error.
+Wealthsimple's managed portfolios, crypto wallets and cards do not expose the
+older per-asset endpoint. Their balances are right; only the breakdown is
+missing. This is why invested value sits about $9k below net worth — the DPSP,
+managed TFSA and group RRSP contribute balance with no holdings.
+
+## 2026-09-18 — Verify deployed code, not deployment status
+
+Twice during this work a "deploy=done" response was followed by a sync that hit
+the previous container, producing results that looked like a failed fix. Worse,
+an attempt to check the container's code grepped a base64-encoded response and
+concluded — wrongly — that the deploy was stale.
+
+Deployment status is not evidence that new code is running. Read the artefact:
+`docker.readContainerFile` on `/app/dist/...`, base64-decoded, grepped for a
+symbol that only exists in the new version. Then sync.
