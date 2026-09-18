@@ -12,3 +12,6 @@ data/
 .DS_Store
 coverage/
 room.json
+
+# demo database — regenerate with `npm run demo`
+data/demo.db*

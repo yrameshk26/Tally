@@ -8,7 +8,9 @@ things are the way they are.
 **This repository is public.** Nothing committed here may contain a real
 balance, account number, contribution-room figure, institution login, API key or
 personal domain — not in code, not in docs, not in a test fixture, not in an
-example file. Test fixtures use obviously fake values; `docs/BUILD_PLAN.md` and
+example file, **and not in a screenshot**. `docs/screenshots/` is generated from
+`npm run demo`, which is entirely fictional; never replace one with a capture of
+a live instance. Test fixtures use obviously fake values; `docs/BUILD_PLAN.md` and
 `room.example.json` use illustrative ones. Check before you commit, because
 history is public too.
 
@@ -121,7 +123,7 @@ src/
                   pages, logo
   auth/           password, TOTP, sessions
   lib/            logger, money, registered-type classifier, token crypto, html
-scripts/          db-init, sync, backup
+scripts/          db-init, sync, backup, demo (fictional data, no network)
 test/             vitest — pure logic, fixtures, and the HTTP endpoint
 .github/          CI, dependabot, issue templates, FUNDING.yml
 ```

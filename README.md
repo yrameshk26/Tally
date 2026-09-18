@@ -14,6 +14,36 @@ There is also an optional web UI — sign-in, provider credentials, Plaid Link,
 and an overview with charts — but it exists to *run* the server, not to replace
 Claude. Everything the UI shows is available as a tool.
 
+![The overview: net worth, allocation, holdings, cards and income versus spend](docs/screenshots/overview.png)
+
+## Try it in two minutes, with no credentials
+
+Plaid Production access takes days and a signed agreement. So the repo ships a
+demo: a household's worth of invented accounts, holdings and six months of
+transactions, with nothing touching the network.
+
+```bash
+git clone https://github.com/yrameshk26/Tally.git && cd Tally
+npm install
+npm run demo        # writes data/demo.db and prints the command to start it
+```
+
+Every institution, merchant and figure in it is fictional, and it refuses to run
+against a database that already holds real accounts.
+
+<details>
+<summary>More screenshots</summary>
+
+**Transactions** — filter, group, and correct what the bank got wrong.
+
+![The transactions workspace](docs/screenshots/transactions.png)
+
+**Merchants** — every merchant, its category, and where the money goes.
+
+![The merchants directory with expenses by category](docs/screenshots/merchants.png)
+
+</details>
+
 | Source | What it covers | Auth | Cost |
 |---|---|---|---|
 | SnapTrade Personal | Wealthsimple (RRSP, LIRA, TFSA, DPSP, group plans), Questrade, Coinbase — balances, positions, activity | clientId + consumerKey | free |
@@ -367,15 +397,24 @@ Read [SECURITY.md](SECURITY.md) before deploying. The short version:
 
 ## Development
 
+| Command | Does |
+|---|---|
+| `npm run demo` | Seed a fictional database to try it without credentials |
+| `npm run dev` | Run the server from TypeScript |
+| `npm run check` | Typecheck + 307 tests |
+| `npm run sync` | One-shot sync; exits non-zero if a source errored |
+| `npm run db:init` | Create the database, seeding `room.json` if present |
+| `npm run hash-password` | Print an `ADMIN_PASSWORD_HASH` |
+| `npm run link` | Plaid Link helper on :8788 — local machine only |
+| `npm run backup` | Manual sqlite backup + prune |
+
 ```bash
-npm run check      # typecheck + 287 tests
-npm test
-npm run typecheck
+npm run check
 ```
 
 Tests cover FX sign and rounding, the registered-type classifier, Plaid sign
 normalisation, token encryption, SnapTrade request signing and holdings
-mapping, fixture-based net-worth aggregation against the real household's
+mapping, fixture-based net-worth aggregation against a fixed household
 shape, profiles and the schema migrations, the OAuth authorization server
 (PKCE, code replay, token rotation), the rendered pages (escaping, no inline
 handlers under the CSP), the summary's section selection, correction precedence
@@ -394,6 +433,23 @@ adapters for other institutions and other countries' registered-account types ar
 the most useful thing anyone could add.
 
 Please report vulnerabilities privately — see [SECURITY.md](SECURITY.md).
+
+**Good places to start**, roughly by usefulness:
+
+- **A source adapter for an institution this does not reach.** The contract is
+  small — `src/sources/*.ts` fetch, map to the shared row shapes in
+  `src/store.ts`, and report per-source status. Read-only, always.
+- **Registered-account types for another tax regime.** The classifier in
+  `src/lib/registered.ts` knows RRSP, TFSA, LIRA, DPSP and FHSA — it is
+  Canada-shaped, and an ISA or a 401(k) would each be a small patch.
+- **A bug you hit against a real bank.** These are the hardest to find and the
+  most valuable to report, because nobody can test every institution.
+- **`sync_now` times out** in MCP clients: the Plaid loop is strictly sequential
+  and takes ~150s for a dozen banks. Bounded concurrency plus returning early
+  would fix it.
+
+`CLAUDE.md` is the architecture document — the layout tree, and the rules that
+exist because breaking one caused a real outage.
 
 ## Supporting the project
 
