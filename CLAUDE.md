@@ -18,8 +18,11 @@ history is public too.
    place an order, transfer money, or change a setting at an institution. Never
    call SnapTrade order endpoints. Plaid products are limited to
    `transactions`, `liabilities` and `statements` — never `auth`, `transfer` or
-   `payment`. Statements is read-only and off by default; it is a link-time
-   product, so enabling it requires re-consenting each Item.
+   `payment`. Statements is read-only and off by default. It is a **link-time**
+   product: both `createLinkToken` and `createUpdateLinkToken` must name it, or
+   enabling it does nothing for existing Items and every call returns
+   `ADDITIONAL_CONSENT_REQUIRED`. Repair is the consent path, not just the
+   re-auth path. `test/statements.test.ts` asserts both call sites.
 2. **Statement PDFs are never persisted.** `src/sources/statements.ts` streams
    them through memory and hands them to the caller. No cache, no temp file, no
    database column, no log of their contents — one file carries the full account

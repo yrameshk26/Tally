@@ -463,7 +463,17 @@ export async function createLinkToken(
   return res.data.link_token;
 }
 
-/** Update-mode token: re-authenticates an existing Item without re-linking. */
+/**
+ * Update-mode token: re-authenticates an existing Item without re-linking, and
+ * collects consent for any product enabled since it was first linked.
+ *
+ * That second job is not optional. Plaid fixes an Item's consented product set
+ * at link time, so turning on Statements does nothing for the twelve banks you
+ * already have — every call returns ADDITIONAL_CONSENT_REQUIRED until the user
+ * re-consents through Link. Update mode is the supported way to add one:
+ * Plaid's own guidance is that `products` is omitted in update mode *unless*
+ * you are adding a product such as Statements, Assets or Income.
+ */
 export async function createUpdateLinkToken(
   db: DB,
   itemId: string,
@@ -480,6 +490,11 @@ export async function createUpdateLinkToken(
     country_codes: plaidCountryCodes(),
     language: 'en',
     access_token: accessTokenFor(item),
+    // Naming statements here is what turns a repair into a consent grant. An
+    // Item that already has it simply re-consents, which is harmless.
+    ...(statementsEnabled()
+      ? { products: ['statements' as Products], statements: statementWindow() }
+      : {}),
     ...((redirectUri ?? config.plaid.redirectUri) ? { redirect_uri: redirectUri ?? config.plaid.redirectUri } : {}),
   });
   return res.data.link_token;

@@ -559,6 +559,7 @@ export function connectionsPage(opts: {
   plaidEnv: string;
   products: string[];
   optionalProducts: string[];
+  statementsEnabled: boolean;
   countryCodes: string[];
   csrf: string;
   nonce: string;
@@ -620,6 +621,13 @@ export function connectionsPage(opts: {
         <span class="muted">(${String(opts.items.length)} of ${String(PLAID_ITEM_CAP)} Plaid Items
         for this profile)</span></h2>
       ${
+        opts.statementsEnabled
+          ? html`<p class="sub-line">Statements are enabled. Plaid fixes an Item's products when it
+              is linked, so a bank connected before that shows no statements until you
+              <strong>Repair</strong> it — that re-consents it, whether or not its login is broken.</p>`
+          : raw('')
+      }
+      ${
         opts.unsynced > 0
           ? notice(
               'warn',
@@ -649,6 +657,7 @@ export function connectionsPage(opts: {
                     }</td>
                     <td class="num"><div class="row tight">
                       <button class="secondary" type="button"
+                        title="Re-authenticate this bank, and grant consent for any product enabled since it was linked"
                         data-relink="${String(i['item_id'])}">Repair</button>
                       <form method="post" action="/connections/remove" class="inline-form"
                             data-confirm="Disconnect ${String(i['institution'] ?? 'this bank')}? Its access token is revoked at Plaid and its accounts leave your net worth. Transaction history is kept.">

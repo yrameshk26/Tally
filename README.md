@@ -103,9 +103,10 @@ question:
 | `fx_rates` | The rates every balance was converted at |
 
 **Statements** are off by default. Add `statements` to `PLAID_OPTIONAL_PRODUCTS`,
-then re-consent each bank under Connections — Plaid fixes the product set when an
-Item is linked, so an existing connection cannot serve a statement without going
-through Link again. The PDF is streamed through memory and handed to the caller:
+then use **Connections → Repair** on each bank. Plaid fixes the product set when
+an Item is linked, so an existing connection returns `ADDITIONAL_CONSENT_REQUIRED`
+until it is re-consented; Repair asks for the newly enabled product as well as
+re-authenticating, and works on a healthy connection too. The PDF is streamed through memory and handed to the caller:
 it is never written to disk, cached, or stored in the database. SnapTrade has no
 statements endpoint, so brokerage statements stay a manual download.
 
@@ -333,7 +334,7 @@ Read [SECURITY.md](SECURITY.md) before deploying. The short version:
 ## Development
 
 ```bash
-npm run check      # typecheck + 278 tests
+npm run check      # typecheck + 282 tests
 npm test
 npm run typecheck
 ```

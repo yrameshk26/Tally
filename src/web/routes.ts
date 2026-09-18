@@ -109,6 +109,7 @@ import {
   plaidProducts,
   plaidStatus,
 } from '../sources/plaid.ts';
+import { statementsEnabled } from '../sources/statements.ts';
 import { runSync } from '../sync.ts';
 import { loadRates } from '../fx.ts';
 import { createFailureLimiter } from '../ratelimit.ts';
@@ -568,6 +569,7 @@ export function createWebRouter(db: DB): express.Router {
         plaidEnv: plaidCreds(db, profile.id).env,
         products: plaidProducts().map(String),
         optionalProducts: plaidOptionalProducts().map(String),
+        statementsEnabled: statementsEnabled(),
         countryCodes: plaidCountryCodes().map(String),
         csrf: req.session!.csrf,
         nonce: req.nonce ?? '',

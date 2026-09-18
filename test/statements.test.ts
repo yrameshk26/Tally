@@ -81,3 +81,39 @@ describe('configuration', () => {
     expect(MAX_STATEMENT_BYTES).toBeLessThanOrEqual(16 * 1024 * 1024);
   });
 });
+
+describe('update mode must ask for the statements product', () => {
+  const source = readFileSync(new URL('../src/sources/plaid.ts', import.meta.url), 'utf8');
+
+  function body(fn: string): string {
+    const start = source.indexOf(`export async function ${fn}(`);
+    expect(start, `${fn} not found`).toBeGreaterThan(-1);
+    const next = source.indexOf('\nexport ', start + 10);
+    return source.slice(start, next === -1 ? undefined : next);
+  }
+
+  it('createUpdateLinkToken names statements, or Repair silently does nothing for it', () => {
+    // Plaid fixes an Item's consented products at link time. A repair that omits
+    // `products` re-authenticates the login and nothing else, so every
+    // statements call keeps returning ADDITIONAL_CONSENT_REQUIRED — which is
+    // exactly the bug this asserts against.
+    const fn = body('createUpdateLinkToken');
+    expect(fn).toContain('statementsEnabled()');
+    expect(fn).toContain("products: ['statements'");
+    expect(fn).toContain('statements: statementWindow()');
+  });
+
+  it('createLinkToken asks for the window too, which Plaid requires', () => {
+    const fn = body('createLinkToken');
+    expect(fn).toContain('statementsEnabled()');
+    expect(fn).toContain('statements: statementWindow()');
+  });
+
+  it('both paths gate on the setting, so statements stays off by default', () => {
+    for (const fn of ['createLinkToken', 'createUpdateLinkToken']) {
+      const text = body(fn);
+      const idx = text.indexOf('statements: statementWindow()');
+      expect(text.slice(0, idx), fn).toContain('statementsEnabled()');
+    }
+  });
+});

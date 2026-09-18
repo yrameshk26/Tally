@@ -182,9 +182,14 @@ one disappears from the picker. Keep required minimal and put everything
 nice-to-have in `PLAID_OPTIONAL_PRODUCTS`, which is fetched best-effort and never
 blocks a link.
 
-**Products are fixed when an Item is linked.** Adding `statements` later only
-affects banks you link or repair afterwards; existing connections must be
-re-consented through Link.
+**Products are fixed when an Item is linked.** Enabling `statements` later does
+nothing for banks you already have — every call returns
+`ADDITIONAL_CONSENT_REQUIRED` until each one is re-consented.
+
+To grant it, use **Connections → Repair** on each bank. Repair runs Link in
+update mode and asks for the newly enabled product as well as re-authenticating,
+so it works on a healthy connection, not only a broken one. You will go through
+the bank's login once per Item.
 
 ### Linking banks
 
