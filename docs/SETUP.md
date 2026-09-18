@@ -196,8 +196,15 @@ the bank flow. That is a separate button from **Repair**, which only
 re-authenticates a broken login — they are kept apart so a consent configuration
 Plaid rejects can never stop you fixing a login.
 
-If the consent flow errors, **disconnect the bank and add it again**. A fresh
-link always carries the full product set, and is the reliable path.
+**Not every bank offers statements.** Support is per institution — BMO (US),
+for example, does not, and no amount of re-consenting will change that. The
+Connections page marks those *no statements* and hides the button, because the
+attempt can only fail. `list_statements` says the same rather than advising a
+re-consent that cannot work.
+
+If the consent flow errors on a bank that *should* support it, **disconnect it
+and add it again**. A fresh link always carries the full product set, and is the
+reliable path.
 
 ### Linking banks
 

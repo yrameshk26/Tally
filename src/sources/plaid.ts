@@ -45,6 +45,8 @@ export type PlaidItemRow = {
   error_message: string | null;
   cursor: string | null;
   consent_expiration: string | null;
+  /** JSON array of the products this institution offers; null = not looked up. */
+  institution_products: string | null;
   last_synced_at: string | null;
   profile_id: string;
 };
@@ -213,15 +215,32 @@ export function plaidErrorDetail(e: unknown): string {
     return e instanceof Error ? e.message : String(e);
   }
   const base = `${body.error_code}: ${body.display_message ?? body.error_message ?? ''}`.trim();
-  const hint = HINTS[body.error_code];
+  const hint = HINTS[body.error_code] ?? contextualHint(base);
   return hint ? `${base} — ${hint}` : base;
+}
+
+/**
+ * Some codes, INVALID_FIELD above all, cover unrelated failures. Reading the
+ * message is the only way to pick a hint that points at the right fix.
+ */
+function contextualHint(message: string): string | undefined {
+  const m = message.toLowerCase();
+  if (m.includes('redirect')) {
+    return 'add the exact redirect URI shown below to Plaid dashboard → Developers → API → Allowed redirect URIs, then try again';
+  }
+  if (m.includes('not supported by')) {
+    return 'this institution does not offer that product, so no amount of re-consenting will help — it is a limit of the bank, not your setup';
+  }
+  return undefined;
 }
 
 const HINTS: Record<string, string> = {
   INVALID_API_KEYS:
     'check PLAID_CLIENT_ID and PLAID_SECRET under Settings, and that the secret matches PLAID_ENV (a Sandbox secret will not work against production)',
-  INVALID_FIELD:
-    'if this mentions redirect_uri, add the exact URI shown below to Plaid dashboard → Developers → API → Allowed redirect URIs, then try again',
+  // INVALID_FIELD covers everything from a bad redirect URI to an unsupported
+  // product, so its hint is chosen from the message in plaidErrorDetail rather
+  // than stated here — a redirect-URI instruction on a product error sends the
+  // reader to the wrong dashboard page.
   INVALID_PRODUCT:
     'your Plaid account does not have this product enabled — remove it from PLAID_PRODUCTS, or request access in the dashboard',
   PRODUCTS_NOT_SUPPORTED:
@@ -313,6 +332,10 @@ export async function syncPlaid(
 
       const tx = await syncItemTransactions(db, item, token, fx, profileId);
       txCount += tx.added + tx.modified;
+
+      // Cheap, once a night, and it is what lets the UI stop offering an action
+      // the bank cannot perform.
+      await refreshInstitutionProducts(db, item);
 
       let liabilities: number | undefined;
       if (config.plaid.products.includes('liabilities')) {
@@ -459,6 +482,58 @@ async function syncLiabilities(
 }
 
 // --- Link helpers (used only by link-server.ts, never by the MCP server) ----
+
+/**
+ * What the institution itself offers, cached on the Item.
+ *
+ * Product support is per bank, not per account: BMO (US) simply does not do
+ * statements, so re-consenting it can never work. Knowing that turns "use
+ * Repair to re-consent" — advice that cannot succeed — into an honest "this
+ * bank does not offer it". Refreshed on each sync; a lookup failure leaves the
+ * cache untouched rather than recording a wrong answer.
+ */
+export async function refreshInstitutionProducts(db: DB, item: PlaidItemRow): Promise<string[] | null> {
+  if (!item.institution_id) return null;
+  try {
+    const res = await plaidClient(db, item.profile_id).institutionsGetById({
+      institution_id: item.institution_id,
+      country_codes: plaidCountryCodes(),
+    });
+    const products = (res.data.institution.products ?? []).map(String);
+    db.prepare('UPDATE plaid_items SET institution_products = ?, updated_at = ? WHERE item_id = ?').run(
+      JSON.stringify(products),
+      nowISO(),
+      item.item_id,
+    );
+    return products;
+  } catch (e) {
+    log.warn('plaid: institution lookup failed', {
+      institution: item.institution_name ?? item.institution_id,
+    });
+    return null;
+  }
+}
+
+/** Cached answer only. Null means unknown — callers must not read that as "no". */
+export function institutionProducts(item: PlaidItemRow): string[] | null {
+  if (!item.institution_products) return null;
+  try {
+    const v = JSON.parse(item.institution_products) as unknown;
+    return Array.isArray(v) ? v.map(String) : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Tri-state on purpose. An unknown institution still gets the button: hiding a
+ * capability we have not checked is worse than an action that might fail with a
+ * clear message.
+ */
+export function supportsStatements(item: PlaidItemRow): boolean | null {
+  const products = institutionProducts(item);
+  return products === null ? null : products.includes('statements');
+}
 
 export async function createLinkToken(
   db: DB,
@@ -690,6 +765,7 @@ export function plaidStatus(db: DB, profileId?: string): Array<Record<string, un
     status: i.status,
     error_code: i.error_code,
     last_synced_at: i.last_synced_at,
+    supports_statements: supportsStatements(i),
     accounts: (
       db.prepare('SELECT COUNT(*) AS n FROM accounts WHERE item_id = ?').get(i.item_id) as {
         n: number;

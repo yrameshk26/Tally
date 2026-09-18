@@ -16,7 +16,13 @@ import { createHash } from 'node:crypto';
 import type { DB } from '../db.ts';
 import { config } from '../config.ts';
 import { errMessage, log } from '../lib/logger.ts';
-import { accessTokenFor, listItems, plaidClient, plaidErrorDetail } from './plaid.ts';
+import {
+  accessTokenFor,
+  listItems,
+  plaidClient,
+  plaidErrorDetail,
+  supportsStatements,
+} from './plaid.ts';
 import type { PlaidItemRow } from './plaid.ts';
 
 export type StatementRef = {
@@ -83,6 +89,15 @@ export async function listStatements(
 
   for (const item of items) {
     const label = item.institution_name ?? item.item_id;
+    // A bank that does not offer statements cannot be made to: skip the call
+    // rather than returning an error that tells the user to re-consent.
+    if (supportsStatements(item) === false) {
+      unavailable.push({
+        institution: label,
+        reason: `${label} does not offer statements through Plaid. This is a limit of the bank, not your setup — re-consenting cannot enable it.`,
+      });
+      continue;
+    }
     try {
       const res = await plaidClient(db, item.profile_id).statementsList({
         access_token: accessTokenFor(item),

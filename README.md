@@ -107,7 +107,9 @@ then use **Connections → Enable statements** on each bank. Plaid fixes the
 consented product set when an Item is linked, so an existing connection returns
 `ADDITIONAL_CONSENT_REQUIRED` until it re-consents. That button is separate from
 **Repair**, which only re-authenticates a broken login; disconnecting and adding
-the bank again also works and is the reliable fallback. The PDF is streamed through memory and handed to the caller:
+the bank again also works and is the reliable fallback. Support is per
+institution — a bank that does not offer statements through Plaid is marked as
+such rather than being offered an action that cannot succeed. The PDF is streamed through memory and handed to the caller:
 it is never written to disk, cached, or stored in the database. SnapTrade has no
 statements endpoint, so brokerage statements stay a manual download.
 
@@ -335,7 +337,7 @@ Read [SECURITY.md](SECURITY.md) before deploying. The short version:
 ## Development
 
 ```bash
-npm run check      # typecheck + 282 tests
+npm run check      # typecheck + 286 tests
 npm test
 npm run typecheck
 ```

@@ -125,3 +125,41 @@ describe('consent is asked for, without taking Repair down with it', () => {
     expect(fn).toContain('statements: statementWindow()');
   });
 });
+
+describe('institution support is per bank, and tri-state', () => {
+  const plaid = readFileSync(new URL('../src/sources/plaid.ts', import.meta.url), 'utf8');
+  const stmts = readFileSync(new URL('../src/sources/statements.ts', import.meta.url), 'utf8');
+
+  it('treats unknown as "offer it anyway", never as a no', () => {
+    // Hiding a capability we have not checked is worse than an action that
+    // might fail with a clear message.
+    expect(plaid).toContain('products === null ? null : products.includes');
+    expect(stmts).toContain("supportsStatements(item) === false");
+  });
+
+  it('skips the API call for a bank that cannot serve statements', () => {
+    // BMO (US) does not offer the product. Calling anyway returns an error that
+    // tells the user to re-consent — advice that can never succeed.
+    const i = stmts.indexOf('supportsStatements(item) === false');
+    const after = stmts.slice(i, i + 500);
+    expect(after).toContain('does not offer statements');
+    expect(after).toContain('continue;');
+  });
+
+  it('does not send a redirect-URI hint for an unrelated INVALID_FIELD', () => {
+    // "statements not supported by BMO (US) — add the redirect URI to the
+    // dashboard" sent the reader to the wrong page entirely.
+    expect(plaid).toContain('function contextualHint');
+    const hints = plaid.slice(plaid.indexOf('const HINTS'), plaid.indexOf('const HINTS') + 900);
+    expect(hints).not.toContain('INVALID_FIELD:');
+  });
+
+  it('caches the lookup rather than calling Plaid per page render', () => {
+    expect(plaid).toContain('institution_products');
+    expect(plaid).toContain('refreshInstitutionProducts');
+    // A failed lookup must leave the cache alone, not record a wrong answer.
+    const fn = plaid.slice(plaid.indexOf('export async function refreshInstitutionProducts'));
+    const body = fn.slice(0, fn.indexOf('\nexport '));
+    expect(body).toContain('return null;');
+  });
+});

@@ -338,6 +338,9 @@ export function migrate(db: DB): void {
   // trust the institution.
   addColumn('accounts', 'currency_override', 'TEXT');
   addColumn('plaid_items', 'consent_expiration', 'TEXT');
+  // JSON array of the products the institution itself offers. Null = not yet
+  // looked up; an empty array is a real answer (the bank offers none of them).
+  addColumn('plaid_items', 'institution_products', 'TEXT');
   addColumn('room', 'note', 'TEXT');
   addColumn('sessions', 'pending', "INTEGER NOT NULL DEFAULT 0");
 

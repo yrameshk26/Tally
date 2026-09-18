@@ -626,9 +626,11 @@ export function connectionsPage(opts: {
               products when it is linked, so a bank connected before that returns
               <code>ADDITIONAL_CONSENT_REQUIRED</code> until you use
               <strong>Enable statements</strong> on it and complete the bank flow. That is separate
-              from <strong>Repair</strong>, which only re-authenticates a broken login. If the
-              consent flow errors, disconnecting and adding the bank again always works —
-              a fresh link carries the full product set.</p>`
+              from <strong>Repair</strong>, which only re-authenticates a broken login.
+              Statement support is per bank — one marked <em>no statements</em> does not offer
+              them through Plaid at all, and nothing you do here will change that. If the consent
+              flow errors on a bank that should support it, disconnecting and adding it again
+              always works, because a fresh link carries the full product set.</p>`
           : raw('')
       }
       ${
@@ -664,10 +666,18 @@ export function connectionsPage(opts: {
                         title="Re-authenticate this bank's login"
                         data-relink="${String(i['item_id'])}">Repair</button>
                       ${
-                        opts.statementsEnabled
+                        // Tri-state: false hides the button because the bank
+                        // cannot do it; null still offers it, since not having
+                        // checked is not the same as a no.
+                        opts.statementsEnabled && i['supports_statements'] !== false
                           ? html`<button class="secondary" type="button"
                               title="Ask this bank for consent to fetch statements"
                               data-consent="${String(i['item_id'])}">Enable statements</button>`
+                          : raw('')
+                      }
+                      ${
+                        opts.statementsEnabled && i['supports_statements'] === false
+                          ? html`<span class="muted sub-line">no statements</span>`
                           : raw('')
                       }
                       <form method="post" action="/connections/remove" class="inline-form"
