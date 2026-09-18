@@ -2,8 +2,12 @@
 
 A personal, read-only **net-worth MCP server** for Claude. It aggregates
 brokerages, banks, cards and multi-currency balances into one CAD picture and
-exposes it to Claude as MCP tools — no dashboard, no budgeting UI. Claude is
-the UI.
+exposes it to Claude as MCP tools. Ask Claude "how am I doing?" and it answers
+from your own accounts.
+
+There is also an optional web UI — sign-in, provider credentials, Plaid Link,
+and an overview with charts — but it exists to *run* the server, not to replace
+Claude. Everything the UI shows is available as a tool.
 
 | Source | What it covers | Auth | Cost |
 |---|---|---|---|
@@ -30,21 +34,55 @@ you hold the tokens, you agree to your own providers' terms. See
 
 ## Tools
 
+Start with **`get_financial_summary`** — it answers a broad question in one call
+instead of six, and narrows to exactly what you asked for:
+
+```jsonc
+// the headline picture
+{ }
+// everything, two years of it
+{ "sections": ["all"], "months": 24 }
+// just one thing, for one person
+{ "sections": ["cashflow"], "profile": "spouse", "start": "2026-01-01", "end": "2026-06-30" }
+```
+
+Its sections: `net_worth`, `profiles`, `accounts`, `cards`, `holdings`,
+`holdings_by_account`, `activities`, `cashflow`, `transactions`, `history`,
+`contribution_room`, `connections`, `fx`, `sync`. Omit `sections` and you get
+the headline set; the response names what it left out so nothing is hidden, and
+row sections are capped and say when they truncated.
+
+The narrow tools are still there, and are the right call for a specific
+question:
+
 | Tool | Does |
 |---|---|
-| `get_net_worth` | Total in CAD, split by owner, registered type, source, institution |
+| `get_financial_summary` | The whole picture in one call, `sections` to narrow it |
+| `get_net_worth` | Total in CAD, split by profile, registered type, source, institution |
 | `get_net_worth_history` | Daily snapshots |
-| `list_accounts` | Every account with balance, currency, registered type, owner, card details |
-| `get_holdings` | Positions rolled up by symbol with concentration % and unrealized P&L |
-| `get_transactions` | Bank/card transactions — negative is money out |
-| `get_cashflow` | Income vs spend by month, category, merchant, owner |
+| `list_accounts` | Every account with balance, currency, registered type, profile, card details |
+| `get_holdings` | Positions by symbol with concentration % and unrealized P&L, or `by_account` |
+| `get_transactions` | Bank and card transactions — negative is money out |
+| `get_activities` | Brokerage movements: dividends, interest, buys, sells, fees, contributions |
+| `get_cashflow` | Income vs spend by month, category, merchant, profile |
 | `get_contribution_room` | Remaining RRSP/TFSA/FHSA room per person |
 | `set_contributed`, `set_room_limit` | Correct the room figures by hand |
 | `list_profiles`, `create_profile`, `rename_profile`, `delete_profile` | Manage profiles |
 | `move_account` | Re-attribute an account to another profile |
 | `plaid_status`, `plaid_relink_url` | Item health and one-click repair |
 | `sync_now`, `sync_report` | Refresh on demand; tell the user how stale data is |
+| `backup_now` | A consistent sqlite snapshot, safe against a live server |
 | `fx_rates` | The rates every balance was converted at |
+
+Two conventions worth knowing before reading a number:
+
+- **Assets are positive, liabilities negative** in every balance. In
+  `get_transactions` and `get_cashflow` a negative amount means money *left* the
+  account; in `get_activities` the brokerage's own sign is kept, so a dividend
+  is positive.
+- **Invested can sit below balance.** A managed portfolio reports its value
+  without breaking out positions, so its money shows up in net worth but not in
+  holdings. `get_holdings` with `by_account: true` shows both side by side.
 
 Nothing here can move money. See rule 1 in `CLAUDE.md`.
 
@@ -142,12 +180,22 @@ ADMIN_PASSWORD_HASH=$argon2id$v=19$m=19456,p=1,t=2$...
 TOKEN_ENC_KEY=...              # required: encrypts stored secrets and the TOTP seed
 ```
 
-Five pages: **Profiles** (up to 5, each with its own provider credentials),
-**Overview** (net worth, accounts, cards with statement and due
-dates, holdings), **Connections** (Plaid Link to add banks and cards, item
-health, one-click repair), **Settings** (provider credentials, stored encrypted
-in the database and overriding the environment without a redeploy) and
-**Security** (two-factor enrolment, active sessions, sign out everywhere).
+Five pages:
+
+- **Overview** — net worth, assets, liabilities and invested; net worth over
+  time; allocation by registered type; largest holdings; income vs spend by
+  month; cards and loans with limit, utilisation, statement, minimum and due
+  date; every account and every position. Each chart has a table view, so no
+  number is gated behind a hover.
+- **Connections** — Plaid Link to add banks and cards, Item health, one-click
+  repair, disconnect.
+- **Profiles** — up to 5, each with its own provider credentials; move an
+  account between them.
+- **Settings** — provider credentials, stored encrypted in the database and
+  overriding the environment without a redeploy, with a "test all providers"
+  check.
+- **Security** — two-factor enrolment, active sessions, authorized MCP clients,
+  sign out everywhere.
 
 **Turn on two-factor authentication.** A single password is otherwise the only
 thing between the public internet and every balance, transaction and stored
@@ -186,7 +234,7 @@ Read [SECURITY.md](SECURITY.md) before deploying. The short version:
 ## Development
 
 ```bash
-npm run check      # typecheck + 93 tests
+npm run check      # typecheck + 233 tests
 npm test
 npm run typecheck
 ```
@@ -194,8 +242,10 @@ npm run typecheck
 Tests cover FX sign and rounding, the registered-type classifier, Plaid sign
 normalisation, token encryption, SnapTrade request signing and holdings
 mapping, fixture-based net-worth aggregation against the real household's
-shape, and the HTTP endpoint end to end (auth, 405 on GET, rate limiting,
-`tools/list`).
+shape, profiles and the schema migrations, the OAuth authorization server
+(PKCE, code replay, token rotation), the rendered pages (escaping, no inline
+handlers under the CSP), the summary's section selection, and the HTTP endpoint
+end to end (auth, 405 on GET, rate limiting, `tools/list`, a tool call).
 
 ## License
 

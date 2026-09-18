@@ -20,7 +20,10 @@ household (owner + spouse). Read `docs/BUILD_PLAN.md` for the phased plan and
    anywhere else. Missing rate → report it, never silently pass the native
    number off as CAD.
 5. **One household, one process.** No multi-tenant code, no user table, no
-   auth framework. The MCP secret in the URL path is the whole auth model.
+   auth framework. One admin signs in; profiles are buckets within that
+   household, not separate users. Auth for `/mcp` is OAuth 2.1 (see
+   `src/oauth.ts`); the `/mcp/<MCP_SECRET>` path route is legacy and is turned
+   off with `MCP_ALLOW_PATH_SECRET=false`.
 6. **Never scrape.** Wealthsimple's private GraphQL API is off limits;
    SnapTrade only.
 7. **After every task:** `npm run typecheck && npm test`. Both must be clean
@@ -35,6 +38,7 @@ household (owner + spouse). Read `docs/BUILD_PLAN.md` for the phased plan and
 src/
   index.ts        express + MCP streamable HTTP (stateless), rate limit, auth
   mcp.ts          the tool surface — the only place tools are declared
+  summary.ts      composes the read models into one picture (get_financial_summary)
   config.ts       the only module that reads process.env
   db.ts           sqlite schema + idempotent migrations
   store.ts        upserts shared by every source adapter
@@ -44,9 +48,15 @@ src/
   snapshots.ts    net-worth totals + daily history rows
   scheduler.ts    in-process nightly sync
   backup.ts       nightly sqlite backup + prune
+  oauth.ts        OAuth 2.1 AS: DCR, PKCE, code/token issuance and rotation
+  credentials.ts  provider secrets, encrypted at rest, per profile
+  profiles.ts     up to 5 profiles; create/rename/delete, move an account
+  settings.ts     DB-stored settings that override the environment
   link-server.ts  LOCAL ONLY Plaid Link helper
   sources/        snaptrade.ts, plaid.ts, wise.ts
-  lib/            logger, money, registered-type classifier, token crypto
+  web/            routes, pages, layout (CSS tokens), charts, OAuth pages, logo
+  auth/           password, TOTP, sessions
+  lib/            logger, money, registered-type classifier, token crypto, html
 scripts/          db-init, sync, backup
 test/             vitest — pure logic, fixtures, and the HTTP endpoint
 ```
