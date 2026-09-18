@@ -334,7 +334,7 @@ Read [SECURITY.md](SECURITY.md) before deploying. The short version:
 ## Development
 
 ```bash
-npm run check      # typecheck + 282 tests
+npm run check      # typecheck + 281 tests
 npm test
 npm run typecheck
 ```
