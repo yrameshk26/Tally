@@ -567,6 +567,44 @@ export async function syncNewItem(
   return res.data.accounts.length;
 }
 
+/**
+ * Healthy Items that have never been read.
+ *
+ * An Item in this state shows zero accounts and no balance, which is
+ * indistinguishable from a broken connection. It should only ever exist for the
+ * seconds between linking and the initial fetch — anything still here later
+ * means that fetch failed, or the row predates it being done at link time.
+ * Items awaiting repair are excluded: they cannot sync until re-authenticated.
+ */
+export function unsyncedItems(db: DB): PlaidItemRow[] {
+  return db
+    .prepare("SELECT * FROM plaid_items WHERE last_synced_at IS NULL AND status = 'ok'")
+    .all() as PlaidItemRow[];
+}
+
+/** Best-effort catch-up for the above. Never throws; reports what it managed. */
+export async function syncUnsyncedItems(
+  db: DB,
+  rates: RateMap,
+): Promise<{ attempted: number; recovered: number }> {
+  const pending = unsyncedItems(db);
+  let recovered = 0;
+  for (const item of pending) {
+    try {
+      await syncNewItem(db, item.item_id, rates, item.profile_id);
+      recovered += 1;
+    } catch (e) {
+      log.warn(`catch-up sync failed for ${item.institution_name ?? item.item_id}`, {
+        error: errMessage(e),
+      });
+    }
+  }
+  if (pending.length) {
+    log.info(`catch-up sync: ${recovered}/${pending.length} previously unread Item(s)`);
+  }
+  return { attempted: pending.length, recovered };
+}
+
 export function plaidStatus(db: DB, profileId?: string): Array<Record<string, unknown>> {
   return listItems(db, profileId).map((i) => ({
     item_id: i.item_id,

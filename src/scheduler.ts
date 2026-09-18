@@ -13,6 +13,9 @@ import { getDb } from './db.ts';
 import { errMessage, log } from './lib/logger.ts';
 import { formatReport, runSync } from './sync.ts';
 import { pruneBackups, writeBackup } from './backup.ts';
+import { syncUnsyncedItems } from './sources/plaid.ts';
+import { loadRates } from './fx.ts';
+import { plaidReady } from './credentials.ts';
 
 export function syncLogPath(): string {
   return join(dirname(config.dbPath) || '.', 'sync.log');
@@ -52,7 +55,25 @@ export async function nightly(): Promise<void> {
   }
 }
 
+/**
+ * Catch up any Item that was linked but never read — see unsyncedItems(). Runs
+ * shortly after boot rather than at boot, so a restart during a link does not
+ * leave a bank showing zero accounts until the nightly sync.
+ */
+export function startCatchUp(delayMs = 20_000): NodeJS.Timeout | null {
+  const db = getDb();
+  if (!plaidReady(db)) return null;
+  const t = setTimeout(() => {
+    void syncUnsyncedItems(db, loadRates(db)).catch((e) =>
+      log.warn(`catch-up sync failed (${errMessage(e)})`),
+    );
+  }, delayMs);
+  t.unref();
+  return t;
+}
+
 export function startScheduler(): () => void {
+  startCatchUp();
   if (!config.cronEnabled) {
     log.info('nightly sync disabled (CRON_ENABLED=false)');
     return () => {};

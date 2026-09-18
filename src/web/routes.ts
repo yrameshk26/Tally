@@ -75,6 +75,7 @@ import {
   plaidOptionalProducts,
   removeItem,
   syncNewItem,
+  unsyncedItems,
   plaidProducts,
   plaidStatus,
 } from '../sources/plaid.ts';
@@ -399,6 +400,7 @@ export function createWebRouter(db: DB): express.Router {
       overviewPage({
         totals,
         profiles: listProfiles(db),
+        nonce: req.nonce ?? '',
         accounts: listAccounts(db),
         holdings: getHoldings(db),
         lastSync: last?.finished_at ?? null,
@@ -503,6 +505,7 @@ export function createWebRouter(db: DB): express.Router {
         profiles: listProfiles(db),
         activeProfile: profile,
         items: plaidStatus(db, profile.id),
+        unsynced: unsyncedItems(db).filter((i) => i.profile_id === profile.id).length,
         snaptradeReady: snaptradeReady(db, profile.id),
         plaidReady: plaidReady(db, profile.id),
         wiseReady: wiseReady(db, profile.id),

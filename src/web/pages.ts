@@ -73,6 +73,7 @@ export function loginPage(opts: {
 export function overviewPage(opts: {
   totals: NetWorthTotals;
   profiles: Profile[];
+  nonce: string;
   accounts: AccountView[];
   holdings: HoldingsResult;
   lastSync: string | null;
@@ -85,6 +86,28 @@ export function overviewPage(opts: {
   const assets = accounts.filter((a) => a.balance_cad >= 0);
 
   const profileName = (id: string): string => opts.profiles.find((p) => p.id === id)?.name ?? id;
+
+  /**
+   * Re-attribute an account. `data-autosubmit` rather than an inline onchange:
+   * a nonce-based CSP blocks inline event handlers outright, so the handler
+   * that used to live here never ran and the dropdown did nothing.
+   */
+  const profileCell = (a: AccountView): SafeHtml =>
+    opts.profiles.length > 1
+      ? html`<form method="post" action="/accounts/move" class="row tight">
+          ${csrfField(opts.csrf)}
+          <input type="hidden" name="account_id" value="${a.id}">
+          <select name="profile" data-autosubmit aria-label="Profile for ${a.name ?? a.id}">
+            ${join(
+              opts.profiles.map(
+                (pr) =>
+                  html`<option value="${pr.id}"${pr.id === a.profile ? raw(' selected') : raw('')}>${pr.name}</option>`,
+              ),
+            )}
+          </select>
+          <noscript><button class="secondary" type="submit">Move</button></noscript>
+        </form>`
+      : html`<span class="muted">${profileName(a.profile)}</span>`;
   const bucket = (
     label: string,
     rec: Record<string, number>,
@@ -142,12 +165,13 @@ export function overviewPage(opts: {
         ? html`<section>
             <h2>Cards and loans</h2>
             <div class="table-wrap"><table>
-              <thead><tr><th>Account</th><th>Institution</th><th class="num">Balance</th><th class="num">Statement</th><th class="num">Minimum</th><th>Due</th></tr></thead>
+              <thead><tr><th>Account</th><th>Institution</th><th>Profile</th><th class="num">Balance</th><th class="num">Statement</th><th class="num">Minimum</th><th>Due</th></tr></thead>
               <tbody>${join(
                 cards.map(
                   (c) => html`<tr>
                     <td>${c.name ?? c.id}${c.mask ? html` <span class="muted">••${c.mask}</span>` : raw('')}</td>
                     <td class="muted">${c.institution ?? '—'}</td>
+                    <td>${profileCell(c)}</td>
                     <td class="num">${sign(c.balance_cad)}</td>
                     <td class="num">${c.card?.['statement_balance'] != null ? money(Number(c.card['statement_balance'])) : html`<span class="muted">—</span>`}</td>
                     <td class="num">${c.card?.['minimum_payment'] != null ? money(Number(c.card['minimum_payment'])) : html`<span class="muted">—</span>`}</td>
@@ -175,22 +199,7 @@ export function overviewPage(opts: {
                     <td>${a.name ?? a.id}${a.mask ? html` <span class="muted">••${a.mask}</span>` : raw('')}</td>
                     <td class="muted">${a.institution ?? '—'}</td>
                     <td><span class="pill">${a.registered_type}</span></td>
-                    <td>${
-                      opts.profiles.length > 1
-                        ? html`<form method="post" action="/accounts/move" class="row tight">
-                            ${csrfField(opts.csrf)}
-                            <input type="hidden" name="account_id" value="${a.id}">
-                            <select name="profile" onchange="this.form.submit()">
-                              ${join(
-                                opts.profiles.map(
-                                  (pr) =>
-                                    html`<option value="${pr.id}"${pr.id === a.profile ? raw(' selected') : raw('')}>${pr.name}</option>`,
-                                ),
-                              )}
-                            </select>
-                          </form>`
-                        : html`<span class="muted">${a.profile}</span>`
-                    }</td>
+                    <td>${profileCell(a)}</td>
                     <td class="num">${sign(a.balance_cad)}${a.currency !== 'CAD' ? html`<div class="sub-line">${a.balance.toLocaleString()} ${a.currency}</div>` : raw('')}</td>
                   </tr>`,
                 ),
@@ -198,6 +207,18 @@ export function overviewPage(opts: {
             </table></div>`
       }
     </section>
+
+    ${
+      opts.profiles.length > 1
+        ? raw(
+            `<script nonce="${opts.nonce}">` +
+              `for(const el of document.querySelectorAll('select[data-autosubmit]'))` +
+              `el.addEventListener('change',()=>el.form.submit());` +
+              `</scr` +
+              `ipt>`,
+          )
+        : raw('')
+    }
 
     ${
       holdings.positions.length
@@ -428,6 +449,7 @@ export function profilesPage(opts: {
 export function connectionsPage(opts: {
   profiles: Profile[];
   activeProfile: Profile;
+  unsynced: number;
   items: Array<Record<string, unknown>>;
   snaptradeReady: boolean;
   wiseReady: boolean;
@@ -494,6 +516,16 @@ export function connectionsPage(opts: {
 
     <section>
       <h2>Banks and cards <span class="muted">(${String(opts.items.length)} of 10 Plaid Items)</span></h2>
+      ${
+        opts.unsynced > 0
+          ? notice(
+              'warn',
+              `${opts.unsynced} connection(s) have not been read yet, so they show no accounts. ` +
+                'This normally resolves itself within a minute of linking — if it persists, use ' +
+                'Refresh now on the Overview.',
+            )
+          : raw('')
+      }
       ${
         opts.items.length === 0
           ? html`<p class="muted">Nothing linked yet.</p>`

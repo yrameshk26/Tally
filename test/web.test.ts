@@ -474,3 +474,42 @@ describe('connector URL', () => {
     expect(res.status).toBe(403);
   });
 });
+
+describe('never-synced Plaid items', () => {
+  it('detects an Item that was linked but never read, and ignores broken ones', async () => {
+    const { unsyncedItems } = await import('../src/sources/plaid.ts');
+    const db = getDb();
+    const ins = db.prepare(
+      `INSERT OR REPLACE INTO plaid_items
+         (item_id, institution_name, access_token, status, last_synced_at, profile_id, created_at, updated_at)
+       VALUES (?, ?, 'tok', ?, ?, 'me', '', '')`,
+    );
+    ins.run('fresh', 'Newly linked', 'ok', null);
+    ins.run('read', 'Already read', 'ok', '2026-09-18T02:00:00Z');
+    // Awaiting repair: it cannot sync until re-authenticated, so chasing it
+    // would just log failures forever.
+    ins.run('broken', 'Needs repair', 'login_required', null);
+
+    const pending = unsyncedItems(db).map((i) => i.item_id);
+    expect(pending).toContain('fresh');
+    expect(pending).not.toContain('read');
+    expect(pending).not.toContain('broken');
+
+    for (const id of ['fresh', 'read', 'broken']) {
+      db.prepare('DELETE FROM plaid_items WHERE item_id = ?').run(id);
+    }
+  });
+});
+
+describe('no inline event handlers anywhere', () => {
+  it('never emits on*= attributes, which a nonce CSP blocks silently', async () => {
+    const { cookie } = await login();
+    // This class of bug is invisible: the markup looks right, the handler just
+    // never runs. The profile dropdown shipped broken for exactly this reason.
+    for (const path of ['/', '/connections', '/settings', '/security', '/profiles']) {
+      const body = await (await fetch(`${base}${path}`, { headers: { cookie } })).text();
+      const handlers = body.match(/<[^>]+\son[a-z]+\s*=/gi) ?? [];
+      expect(handlers, `${path} has inline handlers: ${handlers.join(', ')}`).toEqual([]);
+    }
+  });
+});
