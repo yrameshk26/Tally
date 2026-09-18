@@ -369,12 +369,18 @@ td .nowrap,td.nowrap{white-space:nowrap}
 .suggestions{margin:.75rem 0 0;padding-left:1.1rem;color:var(--fg-muted);font-size:var(--step--1)}
 .msg{margin:0 0 1.25rem;padding:1rem 1.1rem;border-radius:var(--radius);border:1px solid var(--line)}
 /* The user's own words sit tinted and narrower; the answer gets full width. */
+/* Shrink to the message: a one-line question in a full-width bubble reads as
+   an empty box with text in the corner. */
 .msg.user{background:color-mix(in oklch,var(--accent) 7%,transparent);border-color:transparent;
-  margin-left:auto;max-width:44rem;white-space:pre-wrap}
+  margin-left:auto;width:fit-content;max-width:44rem;white-space:pre-wrap}
 .msg.assistant{background:var(--panel)}
 .msg-body>*:first-child{margin-top:0}
 .msg-body>*:last-child{margin-bottom:0}
 .msg-body table{margin:.5rem 0}
+/* Links inside a reply are the only place the page has no styled anchor, so
+   without this they fall back to the UA blue — unreadable on the dark surface. */
+.msg-body a{color:var(--accent);text-decoration:underline;text-underline-offset:2px}
+.msg-body a:hover{filter:brightness(1.15)}
 .msg-body h3,.msg-body h4,.msg-body h5{margin:1.1rem 0 .4rem}
 .msg-body blockquote{margin:.6rem 0;padding-left:.9rem;border-left:2px solid var(--line);
   color:var(--fg-muted)}

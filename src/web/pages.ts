@@ -388,6 +388,7 @@ export function settingsPage(opts: {
   profiles: Profile[];
   activeProfile: Profile;
   csrf: string;
+  isDefaultProfile: boolean;
   flash?: SafeHtml;
   encryptionReady: boolean;
   checks?: CredentialCheckView[] | null;
@@ -443,6 +444,23 @@ export function settingsPage(opts: {
       ${group('SnapTrade — brokerages', ['SNAPTRADE_CLIENT_ID', 'SNAPTRADE_CONSUMER_KEY', 'SNAPTRADE_TRANSPORT'])}
       ${group('Plaid — banks and cards', ['PLAID_CLIENT_ID', 'PLAID_SECRET', 'PLAID_ENV'])}
       ${group('Wise — multi-currency', ['WISE_API_TOKEN'])}
+      ${
+        // Install-level, not per profile: llmConfig always reads the default
+        // profile, so offering these fields elsewhere would silently write a key
+        // nothing ever reads.
+        opts.isDefaultProfile
+          ? html`${group('Assistant — optional built-in chat', [
+              'LLM_PROVIDER',
+              'LLM_API_KEY',
+              'LLM_MODEL',
+              'LLM_BASE_URL',
+            ])}
+            <p class="hint">Leaving these blank keeps the assistant off, which is the default.
+              Filling them in means this server sends balances and transactions to that provider
+              on every message — a different trade from the rest of the app, where data only
+              leaves in response to a request your own MCP client made.</p>`
+          : raw('')
+      }
       <input type="hidden" name="profile" value="${opts.activeProfile.id}">
       <div class="row"><button type="submit">Save credentials</button>
         <span class="muted">Secrets are encrypted at rest and never displayed again.</span></div>

@@ -112,6 +112,33 @@ before enabling anything. The PDF is streamed through memory and handed to the c
 it is never written to disk, cached, or stored in the database. SnapTrade has no
 statements endpoint, so brokerage statements stay a manual download.
 
+## The built-in assistant
+
+Off unless you configure it, and worth understanding before you do.
+
+Everything else here keeps your data on this server: Claude reaches it through
+MCP, with your consent, one request at a time. A built-in assistant inverts
+that — it sends balances and transactions to whichever provider holds the API
+key, on every message. If you already use Claude, the MCP connector gives you
+the same answers without a second copy of your data leaving the box. This exists
+for people who would rather not, or who want a different model.
+
+| Setting | Value |
+|---|---|
+| `LLM_PROVIDER` | `anthropic`, `openai`, `openrouter`, or `custom` |
+| `LLM_API_KEY` | secret, encrypted at rest like every other provider key |
+| `LLM_MODEL` | blank uses the provider default |
+| `LLM_BASE_URL` | only for a custom or self-hosted OpenAI-compatible endpoint |
+
+Set them under **Settings** (on the default profile — the assistant is
+install-level, not per profile) and use **Test all providers** to prove the key,
+base URL and model name together.
+
+It runs the same tool registry as MCP, so it cannot reach a capability MCP does
+not have and cannot move money. Tool results are not replayed into later
+requests — they are large, they go stale the moment a sync runs, and the model
+can call the tool again; what it keeps is which tools it already used.
+
 ## Correcting what the bank got wrong
 
 Institutions send bad data, and a nightly sync overwrites anything written back
@@ -284,6 +311,10 @@ Five pages:
   picker, filter to uncategorised only, and add categories of your own. Above it,
   expenses by category as a ranked bar chart plus a totals table with each
   category's share.
+- **Assistant** (optional, off by default) — a built-in chat that answers from
+  your accounts using the same read-only tools the MCP server exposes. Replies
+  render as Markdown with tables and charts, every answer shows which tools it
+  called and what they returned, and ⌘P prints a clean transcript.
 - **Connections** — Plaid Link to add banks and cards, Item health, one-click
   repair, disconnect.
 - **Profiles** — up to 5, each with its own provider credentials; move an
@@ -347,7 +378,8 @@ mapping, fixture-based net-worth aggregation against the real household's
 shape, profiles and the schema migrations, the OAuth authorization server
 (PKCE, code replay, token rotation), the rendered pages (escaping, no inline
 handlers under the CSP), the summary's section selection, correction precedence
-and reach, category assignment and its match precision, the per-profile Plaid
+and reach, category assignment and its match precision, the Markdown renderer
+against hostile input, the per-profile Plaid
 Item allowance, the guarantee that statement
 PDFs are never persisted (asserted against the source), and the HTTP endpoint
 end to end (auth, 405 on GET, rate limiting, `tools/list`, a tool call).

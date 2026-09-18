@@ -18,11 +18,8 @@ history is public too.
    place an order, transfer money, or change a setting at an institution. Never
    call SnapTrade order endpoints. Plaid products are limited to
    `transactions`, `liabilities` and `statements` — never `auth`, `transfer` or
-   `payment`. Statements is read-only, off by default, and sent as
-   `additional_consented_products` — never in `products` (which hides
-   institutions lacking it) or `optional_products` (which initialises and bills
-   it on every Item). Consent is fixed at link time, so existing Items return
-   `ADDITIONAL_CONSENT_REQUIRED` until each re-consents.
+   `payment`. Statements is read-only and off by default; see rule 3 for the
+   only link-token shape Plaid accepts for it.
 2. **Institution support is tri-state, and unknown is not no.** Plaid product
    support is per bank; `supportsStatements` returns true/false/null and null
    must still offer the action, because not having checked is not a no. A bank
@@ -37,37 +34,44 @@ history is public too.
    product is disconnected and added again. `test/statements.test.ts` pins the
    shape of both link paths — a change here cannot be verified by tests alone,
    so make it behind a setting that is off by default.
-4. **Statement PDFs are never persisted.** `src/sources/statements.ts` streams
+4. **Assistant output is rendered by `src/web/markdown.ts`, never a library.**
+   It renders text from a third-party model built on institution-supplied data.
+   Input is escaped *first* and tags are only ever emitted by that file, so
+   there is no HTML passthrough to misconfigure — every general-purpose renderer
+   has one, a flag away from unsafe. Link schemes other than http(s) are
+   refused. Do not swap it for a library, and do not add a raw-HTML escape
+   hatch.
+5. **Statement PDFs are never persisted.** `src/sources/statements.ts` streams
    them through memory and hands them to the caller. No cache, no temp file, no
    database column, no log of their contents — one file carries the full account
    number, the mailing address and every line item. `test/statements.test.ts`
    asserts this against the source; do not weaken it.
-5. **Secrets live in `.env` only.** Never log an access token, consumer key or
+6. **Secrets live in `.env` only.** Never log an access token, consumer key or
    secret. `src/lib/logger.ts` redacts them; do not bypass it. Never commit
    `data/`, `.env` or `room.json`.
-6. **Filing a merchant uses `match_type: 'merchant'`, never `contains`.**
+7. **Filing a merchant uses `match_type: 'merchant'`, never `contains`.**
    A contains rule for `Amazon` also captures `Amazon Web Services`, so
    assigning a category from the Merchants tab must match the directory's own
    key exactly. `contains` stays the right choice for deliberately merging
    misspellings. `setMerchantCategory` also updates the rule that produced a
    merchant's name rather than adding a second — a renamed merchant cannot be
    matched by a new rule on its new name, since rules see the raw bank text.
-7. **Signs.** Assets positive, liabilities negative in `accounts.balance`.
+8. **Signs.** Assets positive, liabilities negative in `accounts.balance`.
    Transactions are stored Plaid-style (positive = money out) and negated on
    read. If you touch a source adapter, add a sign test.
-8. **All FX goes through `src/fx.ts`.** No ad-hoc multiplication by a rate
+9. **All FX goes through `src/fx.ts`.** No ad-hoc multiplication by a rate
    anywhere else. Missing rate → report it, never silently pass the native
    number off as CAD.
-9. **One household, one process.** No multi-tenant code, no user table, no
+10. **One household, one process.** No multi-tenant code, no user table, no
    auth framework. One admin signs in; profiles are buckets within that
    household, not separate users. Auth for `/mcp` is OAuth 2.1 (see
    `src/oauth.ts`); the `/mcp/<MCP_SECRET>` path route is legacy and is turned
    off with `MCP_ALLOW_PATH_SECRET=false`.
-10. **Never scrape.** Wealthsimple's private GraphQL API is off limits;
+11. **Never scrape.** Wealthsimple's private GraphQL API is off limits;
    SnapTrade only.
-11. **After every task:** `npm run typecheck && npm test`. Both must be clean
+12. **After every task:** `npm run typecheck && npm test`. Both must be clean
    before committing. Conventional commits, one per completed task.
-12. **Docs ship with the change, in the same commit.** Any new or changed
+13. **Docs ship with the change, in the same commit.** Any new or changed
    feature updates `README.md` and this file before the commit — never "later",
    never a follow-up commit. Concretely:
    - a new or renamed MCP tool → the tool table in README.md
@@ -79,7 +83,7 @@ history is public too.
    - a changed test count → the Development section
    The test is whether someone reading only these two files would be surprised
    by the code. If yes, the docs are not done.
-13. **The Link helper never deploys.** `src/link-server.ts` runs on the
+14. **The Link helper never deploys.** `src/link-server.ts` runs on the
    developer's machine only. Port 8788 must not be exposed and the file is
    deleted from the Docker image.
 
@@ -95,6 +99,9 @@ src/
   summary.ts      composes the read models into one picture (get_financial_summary)
   overrides.ts    hand corrections (merchant rules, per-transaction, currency,
                   user categories), applied on read so a sync never undoes them
+  llm/            optional built-in assistant: provider adapters (Anthropic and
+                  OpenAI-compatible), the agentic loop over tools/registry, and
+                  conversation storage
   config.ts       the only module that reads process.env
   db.ts           sqlite schema + idempotent migrations
   store.ts        upserts shared by every source adapter
@@ -110,7 +117,8 @@ src/
   settings.ts     DB-stored settings that override the environment
   link-server.ts  LOCAL ONLY Plaid Link helper
   sources/        snaptrade.ts, plaid.ts, wise.ts, statements.ts (never persisted)
-  web/            routes, pages, layout (CSS tokens), charts, OAuth pages, logo
+  web/            routes, pages, layout (CSS tokens), charts, markdown, OAuth
+                  pages, logo
   auth/           password, TOTP, sessions
   lib/            logger, money, registered-type classifier, token crypto, html
 scripts/          db-init, sync, backup

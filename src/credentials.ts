@@ -52,7 +52,7 @@ export function wiseReady(db: DB, profileId = DEFAULT_PROFILE_ID): boolean {
 
 
 export type CredentialCheck = {
-  provider: 'snaptrade' | 'plaid' | 'wise';
+  provider: 'snaptrade' | 'plaid' | 'wise' | 'assistant';
   configured: boolean;
   ok: boolean;
   detail: string;
@@ -127,6 +127,30 @@ export async function testCredentials(
       });
     } catch (e) {
       out.push({ provider: 'wise', configured: true, ok: false, detail: errMessage(e) });
+    }
+  }
+
+  // The assistant is install-level rather than per profile, so it is only
+  // checked once, on the default profile's settings page.
+  if (profileId === DEFAULT_PROFILE_ID) {
+    const { llmConfig, llmReady, complete } = await import('./llm/provider.ts');
+    const cfg = llmConfig(db);
+    if (!llmReady(db)) {
+      out.push({ provider: 'assistant', configured: false, ok: false, detail: 'not configured' });
+    } else {
+      try {
+        // One token against the configured model: enough to prove the key, the
+        // base URL and the model name together, which is what actually fails.
+        const reply = await complete(cfg, 'Reply with the single word: ok.', [{ role: 'user', text: 'ping' }], [], 20_000);
+        out.push({
+          provider: 'assistant',
+          configured: true,
+          ok: true,
+          detail: `${cfg.provider} answered as ${reply.model}`,
+        });
+      } catch (e) {
+        out.push({ provider: 'assistant', configured: true, ok: false, detail: errMessage(e) });
+      }
     }
   }
 
