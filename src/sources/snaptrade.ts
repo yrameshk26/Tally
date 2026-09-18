@@ -251,7 +251,7 @@ export type SnapTradeReport = {
   cards_deactivated?: number;
   holdings?: number;
   holdings_errors?: number;
-  positions_source?: string;
+  positions_sources?: Record<string, number>;
   deactivated?: number;
   by_registered_type?: Record<string, number>;
   total_cad?: number;
@@ -344,14 +344,24 @@ export async function syncSnapTrade(db: DB, rates: RateMap): Promise<SnapTradeRe
       let positions = extractPositions(
         await snaptradeGet<unknown>(db, `/accounts/${acct.id}/positions/all`),
       );
-      let source = 'unified';
+      let source = positions.length ? 'unified' : 'none';
       if (positions.length === 0) {
-        positions = extractPositions(
-          await snaptradeGet<unknown>(db, `/accounts/${acct.id}/positions`),
-        );
-        source = positions.length ? 'legacy' : 'none';
+        try {
+          positions = extractPositions(
+            await snaptradeGet<unknown>(db, `/accounts/${acct.id}/positions`),
+          );
+          if (positions.length) source = 'legacy';
+        } catch (e) {
+          // Not every account type exposes the older endpoint — managed
+          // portfolios, crypto wallets and cards commonly do not. An account
+          // with a balance but no position detail is normal, not a failure:
+          // its balance still counts in net worth, it just has no breakdown.
+          log.debug(`snaptrade: no positions endpoint for ${acct.id} (${errMessage(e)})`);
+        }
       }
-      report.positions_source = source;
+      const sources = report.positions_sources ?? {};
+      sources[source] = (sources[source] ?? 0) + 1;
+      report.positions_sources = sources;
       // Balances are a separate call and are allowed to fail: the account total
       // already came from /accounts, so a missing cash row costs detail, not
       // correctness.
