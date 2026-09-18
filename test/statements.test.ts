@@ -154,6 +154,17 @@ describe('institution support is per bank, and tri-state', () => {
     expect(hints).not.toContain('INVALID_FIELD:');
   });
 
+  it('looks the institution up even when the Item itself is broken', () => {
+    // What a bank offers has nothing to do with whether this connection's login
+    // has expired, and the lookup needs no access token. Inside the try block,
+    // a login_required Item stayed "unknown" forever.
+    const sync = plaid.slice(plaid.indexOf('export async function syncPlaid'));
+    const call = sync.indexOf('refreshInstitutionProducts(db, item)');
+    const tryBlock = sync.indexOf('    try {');
+    expect(call).toBeGreaterThan(-1);
+    expect(call, 'the lookup must precede the try block').toBeLessThan(tryBlock);
+  });
+
   it('caches the lookup rather than calling Plaid per page render', () => {
     expect(plaid).toContain('institution_products');
     expect(plaid).toContain('refreshInstitutionProducts');

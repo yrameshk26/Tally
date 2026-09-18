@@ -292,6 +292,11 @@ export async function syncPlaid(
 
   for (const item of items) {
     const label = item.institution_name ?? item.item_id;
+    // Outside the try: what an institution offers is a property of the bank,
+    // not of this connection's health, and it needs no access token. Leaving it
+    // inside meant a broken Item never learned whether it could do statements —
+    // so the one bank we knew could not stayed marked "unknown".
+    await refreshInstitutionProducts(db, item);
     try {
       const token = accessTokenFor(item);
       const balances = await api.accountsBalanceGet({ access_token: token });
@@ -332,10 +337,6 @@ export async function syncPlaid(
 
       const tx = await syncItemTransactions(db, item, token, fx, profileId);
       txCount += tx.added + tx.modified;
-
-      // Cheap, once a night, and it is what lets the UI stop offering an action
-      // the bank cannot perform.
-      await refreshInstitutionProducts(db, item);
 
       let liabilities: number | undefined;
       if (config.plaid.products.includes('liabilities')) {
