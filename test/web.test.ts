@@ -4,6 +4,7 @@
  * institution-supplied string.
  */
 import { mkdtempSync } from 'node:fs';
+import { inlineHandlers } from './helpers.ts';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { AddressInfo } from 'node:net';
@@ -495,9 +496,9 @@ describe('no inline event handlers anywhere', () => {
     const { cookie } = await login();
     // This class of bug is invisible: the markup looks right, the handler just
     // never runs. The profile dropdown shipped broken for exactly this reason.
-    for (const path of ['/', '/connections', '/settings', '/security', '/profiles']) {
+    for (const path of ['/', '/transactions', '/connections', '/settings', '/security', '/profiles']) {
       const body = await (await fetch(`${base}${path}`, { headers: { cookie } })).text();
-      const handlers = body.match(/<[^>]+\son[a-z]+\s*=/gi) ?? [];
+      const handlers = inlineHandlers(body);
       expect(handlers, `${path} has inline handlers: ${handlers.join(', ')}`).toEqual([]);
     }
   });

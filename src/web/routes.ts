@@ -13,6 +13,8 @@
 import express, { type NextFunction, type Request, type Response } from 'express';
 import { randomBytes } from 'node:crypto';
 import type { DB } from '../db.ts';
+import type { TransactionView } from '../queries.ts';
+import type { MerchantRule } from '../overrides.ts';
 import { config } from '../config.ts';
 import { errMessage, log } from '../lib/logger.ts';
 import { html, raw } from '../lib/html.ts';
@@ -25,6 +27,8 @@ import {
   profilesPage,
   securityPage,
   settingsPage,
+  transactionsPage,
+  type TxFilters,
 } from './pages.ts';
 import {
   MAX_PROFILES,
@@ -69,8 +73,21 @@ import {
   getHoldings,
   getNetWorth,
   getNetWorthHistory,
+  getTransactions,
+  groupByCategory,
+  groupByMerchant,
+  knownCategories,
   listAccounts,
 } from '../queries.ts';
+import {
+  addMerchantRule,
+  deleteMerchantRule,
+  listMerchantRules,
+  ruleImpact,
+  setAccountCurrency,
+  setTransactionOverride,
+} from '../overrides.ts';
+import { daysAgoISO, todayISO } from '../lib/money.ts';
 import {
   createLinkToken,
   PLAID_ITEM_CAP,
@@ -679,6 +696,150 @@ export function createWebRouter(db: DB): express.Router {
         303,
         moved
           ? `/?ok=${encodeURIComponent('Account moved.')}`
+          : `/?err=${encodeURIComponent('No such account.')}`,
+      );
+    } catch (e) {
+      res.redirect(303, `/?err=${encodeURIComponent(errMessage(e))}`);
+    }
+  });
+
+  // --- transactions --------------------------------------------------------
+
+  /**
+   * Filters come from the query string so a filtered view is a shareable,
+   * bookmarkable URL, and so an edit can post back to exactly where the user
+   * was. `back` is validated as a same-site path before any redirect.
+   */
+  const readFilters = (req: Ctx): TxFilters => {
+    const q = req.query as Record<string, string | undefined>;
+    const str = (k: string): string => (typeof q[k] === 'string' ? q[k].slice(0, 120) : '');
+    const date = (k: string, fallback: string): string =>
+      /^\d{4}-\d{2}-\d{2}$/.test(str(k)) ? str(k) : fallback;
+    const dir = str('direction');
+    const grp = str('group');
+    return {
+      start: date('start', daysAgoISO(90)),
+      end: date('end', todayISO()),
+      profile: str('profile'),
+      account_id: str('account_id'),
+      category: str('category'),
+      search: str('search'),
+      direction: dir === 'out' || dir === 'in' ? dir : 'all',
+      min_amount: /^\d+(\.\d+)?$/.test(str('min_amount')) ? str('min_amount') : '',
+      group: grp === 'merchant' || grp === 'category' ? grp : 'none',
+    };
+  };
+
+  /** Never redirect to whatever a form said; only to our own transactions view. */
+  const backTo = (body: Record<string, unknown>, message: string, key = 'ok'): string => {
+    const raw = String(body['back'] ?? '/transactions');
+    const path = raw.startsWith('/transactions') ? raw : '/transactions';
+    const sep = path.includes('?') ? '&' : '?';
+    return `${path}${sep}${key}=${encodeURIComponent(message)}`;
+  };
+
+  /** Above this, the totals stop describing the filter and start lying about it. */
+  const TX_PAGE_LIMIT = 1000;
+
+  router.get('/transactions', requireAuth, (req: Ctx, res: Response) => {
+    const f = readFilters(req);
+    const rows = getTransactions(db, {
+      start: f.start,
+      end: f.end,
+      ...(f.profile ? { profile: f.profile } : {}),
+      ...(f.account_id ? { account_id: f.account_id } : {}),
+      ...(f.category ? { category: f.category } : {}),
+      ...(f.search ? { search: f.search } : {}),
+      ...(f.min_amount ? { min_amount_cad: Number(f.min_amount) } : {}),
+      limit: TX_PAGE_LIMIT,
+    }).filter((t) =>
+      f.direction === 'out' ? t.amount_cad < 0 : f.direction === 'in' ? t.amount_cad > 0 : true,
+    );
+
+    render(
+      req,
+      res,
+      'Transactions',
+      transactionsPage({
+        nonce: req.nonce ?? '',
+        csrf: req.session?.csrf ?? '',
+        filters: f,
+        rows,
+        merchants: groupByMerchant(rows),
+        categoryGroups: groupByCategory(rows),
+        accounts: listAccounts(db, {}),
+        categories: knownCategories(db),
+        profiles: listProfiles(db),
+        rules: listMerchantRules(db).map((r: MerchantRule) => ({
+          ...r,
+          matching_transactions: ruleImpact(db, r),
+        })),
+        truncated: rows.length >= TX_PAGE_LIMIT,
+        flash: raw(flash(req, 'ok').value + flash(req, 'err').value),
+      }),
+      '/transactions',
+    );
+  });
+
+  router.post('/transactions/override', requireAuth, requireCsrf, (req: Ctx, res: Response) => {
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    try {
+      setTransactionOverride(db, String(body['transaction_id'] ?? ''), {
+        merchant: String(body['merchant'] ?? '').trim() || null,
+        category: String(body['category'] ?? '').trim() || null,
+      });
+      res.redirect(303, backTo(body, 'Transaction updated.'));
+    } catch (e) {
+      res.redirect(303, backTo(body, errMessage(e), 'err'));
+    }
+  });
+
+  router.post('/transactions/rule', requireAuth, requireCsrf, (req: Ctx, res: Response) => {
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    try {
+      const pattern = String(body['pattern'] ?? '').trim();
+      const merchant = String(body['merchant'] ?? '').trim();
+      const category = String(body['category'] ?? '').trim();
+      const affected = ruleImpact(db, { pattern });
+      addMerchantRule(db, {
+        pattern,
+        merchant: merchant || null,
+        category: category || null,
+      });
+      res.redirect(
+        303,
+        backTo(body, `Rule added — ${String(affected)} transaction(s) now read as “${merchant || pattern}”.`),
+      );
+    } catch (e) {
+      res.redirect(303, backTo(body, errMessage(e), 'err'));
+    }
+  });
+
+  router.post('/transactions/rule/delete', requireAuth, requireCsrf, (req: Ctx, res: Response) => {
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    try {
+      const id = Number(body['rule_id']);
+      res.redirect(
+        303,
+        deleteMerchantRule(db, id)
+          ? backTo(body, 'Rule deleted.')
+          : backTo(body, 'No such rule.', 'err'),
+      );
+    } catch (e) {
+      res.redirect(303, backTo(body, errMessage(e), 'err'));
+    }
+  });
+
+  router.post('/accounts/currency', requireAuth, requireCsrf, (req: Ctx, res: Response) => {
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    try {
+      const code = String(body['currency'] ?? '').trim();
+      const id = String(body['account_id'] ?? '');
+      const done = setAccountCurrency(db, id, code === '' ? null : code);
+      res.redirect(
+        303,
+        done
+          ? `/?ok=${encodeURIComponent(code ? `Account now read as ${code.toUpperCase()}.` : 'Currency override cleared.')}`
           : `/?err=${encodeURIComponent('No such account.')}`,
       );
     } catch (e) {

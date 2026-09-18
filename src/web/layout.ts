@@ -10,6 +10,7 @@ export type Nav = { href: string; label: string };
 
 export const NAV: Nav[] = [
   { href: '/', label: 'Overview' },
+  { href: '/transactions', label: 'Transactions' },
   { href: '/connections', label: 'Connections' },
   { href: '/profiles', label: 'Profiles' },
   { href: '/settings', label: 'Settings' },
@@ -311,6 +312,28 @@ ol.steps strong{color:var(--fg)}
 .legend .swatch.s1{background:var(--s1)}.legend .swatch.s2{background:var(--s2)}
 .legend .swatch.s3{background:var(--s3)}.legend .swatch.s4{background:var(--s4)}
 .legend .swatch.s5{background:var(--s5)}.legend .swatch.s6{background:var(--s6)}
+/* Filter bar: one row above the results, wrapping on narrow screens rather
+   than scrolling, because a hidden filter is a filter nobody applies. */
+.filters{display:flex;flex-wrap:wrap;gap:.6rem .75rem;align-items:flex-end;
+  padding:.85rem 1rem;margin:0 0 1.25rem;border:1px solid var(--line);
+  border-radius:var(--r);background:var(--panel)}
+.filters label{display:flex;flex-direction:column;gap:.25rem;
+  font-size:var(--step--1);color:var(--fg-muted)}
+.filters input,.filters select{min-width:8.5rem}
+.filters input[type=search]{min-width:13rem}
+.filters button{align-self:flex-end}
+.btn-link{align-self:flex-end;padding:.5rem .35rem;font-size:var(--step--1);color:var(--fg-muted)}
+.btn-link:hover{color:var(--fg)}
+/* Inline edit inside a table cell: compact, and never wider than its column. */
+.cell-input{min-width:9rem;max-width:14rem}
+/* A date that wraps onto two lines makes every row taller than it needs to be. */
+td .nowrap,td.nowrap{white-space:nowrap}
+.row.tight{gap:.35rem;flex-wrap:nowrap;align-items:center}
+.row.tight select{max-width:12rem}
+@media(max-width:640px){
+  .filters label{flex:1 1 9rem}
+  .row.tight{flex-wrap:wrap}
+}
 .chart-table{margin-top:.75rem}
 .chart-table summary{cursor:pointer;font-size:var(--step--1);color:var(--fg-muted);
   padding:.25rem 0;list-style-position:inside}

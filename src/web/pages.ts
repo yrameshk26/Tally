@@ -5,7 +5,16 @@
  */
 import { esc, html, join, money, raw, type SafeHtml } from '../lib/html.ts';
 import { csrfField, notice } from './layout.ts';
-import { isLiabilityAccount, type AccountView, type HoldingsResult } from '../queries.ts';
+import {
+  isLiabilityAccount,
+  type AccountView,
+  type CategoryGroup,
+  type HoldingsResult,
+  type MerchantGroup,
+  type TransactionView,
+} from '../queries.ts';
+import type { MerchantRule } from '../overrides.ts';
+import { round2 } from '../lib/money.ts';
 import { PLAID_ITEM_CAP } from '../sources/plaid.ts';
 import type { NetWorthTotals } from '../snapshots.ts';
 import type { ManagedKey } from '../settings.ts';
@@ -106,6 +115,30 @@ export function overviewPage(opts: {
    * a nonce-based CSP blocks inline event handlers outright, so the handler
    * that used to live here never ran and the dropdown did nothing.
    */
+  /**
+   * Correct a currency the institution got wrong. Only offered where it could
+   * be wrong — a CAD account with no override needs no control, and a row of
+   * dropdowns on every account would invite exactly the mistake this fixes.
+   */
+  const currencyCell = (a: AccountView): SafeHtml => {
+    if (a.currency === 'CAD' && !a.currency_override) return raw('');
+    const choices = ['', 'CAD', 'USD', 'GBP', 'EUR'];
+    return html`<form method="post" action="/accounts/currency" class="row tight">
+      ${csrfField(opts.csrf)}
+      <input type="hidden" name="account_id" value="${a.id}">
+      <select name="currency" data-autosubmit aria-label="Currency for ${a.name ?? a.id}">
+        ${join(
+          choices.map((c) =>
+            c === ''
+              ? html`<option value=""${a.currency_override ? raw('') : raw(' selected')}>as reported (${a.currency})</option>`
+              : html`<option value="${c}"${c === a.currency_override ? raw(' selected') : raw('')}>read as ${c}</option>`,
+          ),
+        )}
+      </select>
+      <noscript><button class="secondary" type="submit">Set</button></noscript>
+    </form>`;
+  };
+
   const profileCell = (a: AccountView): SafeHtml =>
     opts.profiles.length > 1
       ? html`<form method="post" action="/accounts/move" class="row tight">
@@ -227,13 +260,14 @@ export function overviewPage(opts: {
         ? html`<section>
             <h2>Cards and loans</h2>
             <div class="table-wrap"><table>
-              <thead><tr><th>Account</th><th>Institution</th><th>Profile</th><th class="num">Balance</th><th class="num">Limit</th><th class="num">Used</th><th class="num">Statement</th><th class="num">Minimum</th><th>Due</th></tr></thead>
+              <thead><tr><th>Account</th><th>Institution</th><th>Profile</th><th>Currency</th><th class="num">Balance</th><th class="num">Limit</th><th class="num">Used</th><th class="num">Statement</th><th class="num">Minimum</th><th>Due</th></tr></thead>
               <tbody>${join(
                 cards.map(
                   (c) => html`<tr>
                     <td>${c.name ?? c.id}${c.mask ? html` <span class="muted">••${c.mask}</span>` : raw('')}</td>
                     <td class="muted">${c.institution ?? '—'}</td>
                     <td>${profileCell(c)}</td>
+                    <td>${currencyCell(c)}</td>
                     <td class="num">${sign(c.balance_cad)}</td>
                     <td class="num">${c.credit_limit != null ? money(c.credit_limit) : html`<span class="muted">—</span>`}</td>
                     <td class="num">${c.utilization_pct != null ? html`${c.utilization_pct.toFixed(0)}%` : html`<span class="muted">—</span>`}</td>
@@ -256,7 +290,7 @@ export function overviewPage(opts: {
               <a href="/settings">Settings</a>, then link institutions under
               <a href="/connections">Connections</a>.</p>`
           : html`<div class="table-wrap"><table>
-              <thead><tr><th>Account</th><th>Institution</th><th>Type</th><th>Profile</th><th class="num">Balance</th></tr></thead>
+              <thead><tr><th>Account</th><th>Institution</th><th>Type</th><th>Profile</th><th>Currency</th><th class="num">Balance</th></tr></thead>
               <tbody>${join(
                 assets.map(
                   (a) => html`<tr>
@@ -264,6 +298,7 @@ export function overviewPage(opts: {
                     <td class="muted">${a.institution ?? '—'}</td>
                     <td><span class="pill">${a.registered_type}</span></td>
                     <td>${profileCell(a)}</td>
+                    <td>${currencyCell(a)}</td>
                     <td class="num">${sign(a.balance_cad)}${a.currency !== 'CAD' ? html`<div class="sub-line">${a.balance.toLocaleString()} ${a.currency}</div>` : raw('')}</td>
                   </tr>`,
                 ),
@@ -869,4 +904,260 @@ export function securityPage(opts: {
         <button class="danger" type="submit">Sign out everywhere</button>
       </form>
     </section>`;
+}
+
+// --- transactions -----------------------------------------------------------
+
+export type TxFilters = {
+  start: string;
+  end: string;
+  profile: string;
+  account_id: string;
+  category: string;
+  search: string;
+  direction: 'all' | 'out' | 'in';
+  min_amount: string;
+  group: 'none' | 'merchant' | 'category';
+};
+
+/** The filter bar. One row of controls above the results, per the viz method. */
+function filterBar(f: TxFilters, accounts: AccountView[], categories: string[], profiles: Profile[]): SafeHtml {
+  const opt = (value: string, label: string, selected: boolean): SafeHtml =>
+    html`<option value="${value}"${selected ? raw(' selected') : raw('')}>${label}</option>`;
+  return html`<form method="get" action="/transactions" class="filters">
+    <label>From <input type="date" name="start" value="${f.start}"></label>
+    <label>To <input type="date" name="end" value="${f.end}"></label>
+    <label>Search
+      <input type="search" name="search" value="${f.search}" placeholder="merchant or description">
+    </label>
+    <label>Account
+      <select name="account_id">
+        ${opt('', 'All accounts', f.account_id === '')}
+        ${join(accounts.map((a) => opt(a.id, `${a.name ?? a.id}${a.mask ? ` ••${a.mask}` : ''}`, a.id === f.account_id)))}
+      </select>
+    </label>
+    <label>Category
+      <select name="category">
+        ${opt('', 'All categories', f.category === '')}
+        ${join(categories.map((c) => opt(c, c, c === f.category)))}
+      </select>
+    </label>
+    ${
+      profiles.length > 1
+        ? html`<label>Profile
+            <select name="profile">
+              ${opt('', 'All profiles', f.profile === '')}
+              ${join(profiles.map((p) => opt(p.id, p.name, p.id === f.profile)))}
+            </select>
+          </label>`
+        : raw('')
+    }
+    <label>Direction
+      <select name="direction">
+        ${opt('all', 'In and out', f.direction === 'all')}
+        ${opt('out', 'Money out', f.direction === 'out')}
+        ${opt('in', 'Money in', f.direction === 'in')}
+      </select>
+    </label>
+    <label>Min $ <input type="number" name="min_amount" value="${f.min_amount}" min="0" step="1" class="w-sm"></label>
+    <label>Group
+      <select name="group">
+        ${opt('none', 'No grouping', f.group === 'none')}
+        ${opt('merchant', 'By merchant', f.group === 'merchant')}
+        ${opt('category', 'By category', f.group === 'category')}
+      </select>
+    </label>
+    <button type="submit">Apply</button>
+    <a class="btn-link" href="/transactions">Reset</a>
+  </form>`;
+}
+
+export function transactionsPage(opts: {
+  nonce: string;
+  csrf: string;
+  filters: TxFilters;
+  rows: TransactionView[];
+  merchants: MerchantGroup[];
+  categoryGroups: CategoryGroup[];
+  accounts: AccountView[];
+  categories: string[];
+  profiles: Profile[];
+  rules: Array<MerchantRule & { matching_transactions: number }>;
+  truncated: boolean;
+  flash?: SafeHtml;
+}): SafeHtml {
+  const f = opts.filters;
+  const spend = round2(opts.rows.filter((r) => r.amount_cad < 0).reduce((s, r) => s + -r.amount_cad, 0));
+  const received = round2(opts.rows.filter((r) => r.amount_cad > 0).reduce((s, r) => s + r.amount_cad, 0));
+
+  /** Edit one row in place. Same data-autosubmit pattern as the profile cell. */
+  const editCell = (t: TransactionView): SafeHtml => html`<form method="post" action="/transactions/override" class="row tight">
+    ${csrfField(opts.csrf)}
+    <input type="hidden" name="transaction_id" value="${t.id}">
+    <input type="hidden" name="back" value="${currentQuery(f)}">
+    <input type="text" name="merchant" value="${t.merchant ?? ''}" aria-label="Merchant"
+      placeholder="${t.name ?? 'merchant'}" class="cell-input">
+    <select name="category" aria-label="Category">
+      <option value="">—</option>
+      ${join(
+        opts.categories.map(
+          (c) => html`<option value="${c}"${c === (t.category ?? '') ? raw(' selected') : raw('')}>${c}</option>`,
+        ),
+      )}
+    </select>
+    <button class="secondary" type="submit">Save</button>
+  </form>`;
+
+  const ruleForm = (merchant: string, category: string): SafeHtml => html`<form method="post" action="/transactions/rule" class="row tight">
+    ${csrfField(opts.csrf)}
+    <input type="hidden" name="pattern" value="${merchant}">
+    <input type="hidden" name="back" value="${currentQuery(f)}">
+    <input type="text" name="merchant" value="${merchant}" aria-label="Rename every match to" class="cell-input">
+    <select name="category" aria-label="Category for every match">
+      <option value="">keep category</option>
+      ${join(opts.categories.map((c) => html`<option value="${c}"${c === category ? raw(' selected') : raw('')}>${c}</option>`))}
+    </select>
+    <button class="secondary" type="submit">Apply to all</button>
+  </form>`;
+
+  return html`
+    <h1>Transactions</h1>
+    <p class="sub">
+      Every bank and card movement, after your corrections. Negative is money out.
+      Brokerage dividends and trades live under Holdings, not here.
+    </p>
+    ${opts.flash ?? raw('')}
+
+    ${filterBar(f, opts.accounts, opts.categories, opts.profiles)}
+
+    <div class="kpis">
+      <div class="kpi"><div class="label">Money out</div><div class="value neg">${money(-spend)}</div></div>
+      <div class="kpi"><div class="label">Money in</div><div class="value pos">${money(received)}</div></div>
+      <div class="kpi"><div class="label">Net</div><div class="value ${received - spend >= 0 ? 'pos' : 'neg'}">${money(round2(received - spend))}</div></div>
+      <div class="kpi"><div class="label">Transactions</div><div class="value">${String(opts.rows.length)}</div></div>
+    </div>
+
+    ${
+      opts.truncated
+        ? notice(
+            'warn',
+            'Showing the first 1,000 matches. Narrow the date range or add a filter to see the rest — ' +
+              'the totals above cover only what is shown.',
+          )
+        : raw('')
+    }
+
+    ${
+      f.group === 'merchant'
+        ? html`<section>
+            <h2>By merchant <span class="muted">(${String(opts.merchants.length)})</span></h2>
+            <p class="sub-line">Two spellings of one company appear as two rows. Rename either one
+              and apply it to all to merge them, for this history and everything that arrives later.</p>
+            <div class="table-wrap"><table>
+              <thead><tr><th>Merchant</th><th class="num">Out</th><th class="num">In</th><th class="num">Count</th><th>Seen</th><th>Merge or rename</th></tr></thead>
+              <tbody>${join(
+                opts.merchants.map(
+                  (m) => html`<tr>
+                    <td>${m.merchant}${m.corrected ? html` <span class="pill">corrected</span>` : raw('')}</td>
+                    <td class="num neg">${m.spend_cad ? money(-m.spend_cad) : html`<span class="muted">—</span>`}</td>
+                    <td class="num pos">${m.received_cad ? money(m.received_cad) : html`<span class="muted">—</span>`}</td>
+                    <td class="num">${String(m.count)}</td>
+                    <td class="muted nowrap">${m.first === m.last ? m.first : `${m.first} → ${m.last}`}</td>
+                    <td>${ruleForm(m.merchant, m.categories[0] ?? '')}</td>
+                  </tr>`,
+                ),
+              )}</tbody>
+            </table></div>
+          </section>`
+        : raw('')
+    }
+
+    ${
+      f.group === 'category'
+        ? html`<section>
+            <h2>By category <span class="muted">(${String(opts.categoryGroups.length)})</span></h2>
+            <div class="table-wrap"><table>
+              <thead><tr><th>Category</th><th class="num">Out</th><th class="num">In</th><th class="num">Merchants</th><th class="num">Count</th></tr></thead>
+              <tbody>${join(
+                opts.categoryGroups.map(
+                  (c) => html`<tr>
+                    <td>${c.category}</td>
+                    <td class="num neg">${c.spend_cad ? money(-c.spend_cad) : html`<span class="muted">—</span>`}</td>
+                    <td class="num pos">${c.received_cad ? money(c.received_cad) : html`<span class="muted">—</span>`}</td>
+                    <td class="num">${String(c.merchants)}</td>
+                    <td class="num">${String(c.count)}</td>
+                  </tr>`,
+                ),
+              )}</tbody>
+            </table></div>
+          </section>`
+        : raw('')
+    }
+
+    <section>
+      <h2>${f.group === 'none' ? 'Transactions' : 'All matching transactions'}</h2>
+      ${
+        opts.rows.length === 0
+          ? html`<p class="muted">Nothing matches these filters.</p>`
+          : html`<div class="table-wrap"><table>
+              <thead><tr><th>Date</th><th>Merchant</th><th>Account</th><th class="num">Amount</th><th>Category and merchant</th></tr></thead>
+              <tbody>${join(
+                opts.rows.map(
+                  (t) => html`<tr>
+                    <td class="muted nowrap">${t.date}${t.pending ? html` <span class="pill">pending</span>` : raw('')}</td>
+                    <td>
+                      ${t.merchant ?? t.name ?? '—'}
+                      ${t.corrected_by ? html`<span class="pill">${t.corrected_by === 'rule' ? 'rule' : 'edited'}</span>` : raw('')}
+                      ${t.merchant && t.name && t.merchant !== t.name ? html`<div class="sub-line">${t.name}</div>` : raw('')}
+                    </td>
+                    <td class="muted">${t.account ?? '—'}${t.currency !== 'CAD' ? html` <span class="pill">${t.currency}</span>` : raw('')}</td>
+                    <td class="num ${t.amount_cad < 0 ? 'neg' : 'pos'}">${money(t.amount_cad)}</td>
+                    <td>${editCell(t)}</td>
+                  </tr>`,
+                ),
+              )}</tbody>
+            </table></div>`
+      }
+    </section>
+
+    <section>
+      <h2>Merchant rules <span class="muted">(${String(opts.rules.length)})</span></h2>
+      <p class="sub-line">Applied in order, first match wins, to everything already stored and
+        everything that arrives later. An edit to a single transaction still beats every rule.</p>
+      ${
+        opts.rules.length === 0
+          ? html`<p class="muted">No rules yet. Group by merchant above and use “Apply to all”.</p>`
+          : html`<div class="table-wrap"><table>
+              <thead><tr><th>Matches</th><th>Becomes</th><th>Category</th><th class="num">Transactions</th><th></th></tr></thead>
+              <tbody>${join(
+                opts.rules.map(
+                  (r) => html`<tr>
+                    <td><code>${r.pattern}</code> <span class="muted">(${r.match_type})</span></td>
+                    <td>${r.merchant ?? html`<span class="muted">unchanged</span>`}</td>
+                    <td>${r.category ?? html`<span class="muted">unchanged</span>`}</td>
+                    <td class="num">${String(r.matching_transactions)}</td>
+                    <td class="num">
+                      <form method="post" action="/transactions/rule/delete" class="inline-form"
+                        data-confirm="Delete this rule? Matching transactions revert to what the bank reported.">
+                        ${csrfField(opts.csrf)}
+                        <input type="hidden" name="rule_id" value="${String(r.id)}">
+                        <input type="hidden" name="back" value="${currentQuery(f)}">
+                        <button class="secondary" type="submit">Delete</button>
+                      </form>
+                    </td>
+                  </tr>`,
+                ),
+              )}</tbody>
+            </table></div>`
+      }
+    </section>
+  `;
+}
+
+/** Round-trips the current filters through a form post, so an edit returns here. */
+function currentQuery(f: TxFilters): string {
+  const q = new URLSearchParams();
+  for (const [k, v] of Object.entries(f)) if (v && v !== 'all' && v !== 'none') q.set(k, v);
+  const s = q.toString();
+  return s ? `/transactions?${s}` : '/transactions';
 }

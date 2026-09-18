@@ -24,6 +24,7 @@ import {
 } from '../src/queries.ts';
 import { upsertAccount, upsertTransactions, type AccountRow } from '../src/store.ts';
 import type { RegisteredType } from '../src/lib/registered.ts';
+import { inlineHandlers } from './helpers.ts';
 
 function acct(over: Partial<AccountRow> & { id: string }): AccountRow {
   return {
@@ -247,5 +248,57 @@ describe('grouping', () => {
       count: 2,
       merchants: 2,
     });
+  });
+});
+
+describe('the transactions page', () => {
+  it('escapes an institution-supplied merchant name', async () => {
+    const { transactionsPage } = await import('../src/web/pages.ts');
+    upsertTransactions(db, [
+      {
+        id: 'tx:xss',
+        account_id: 'plaid:card',
+        date: '2026-09-04',
+        name: '<script>alert(1)</script>',
+        merchant: '<img src=x onerror=alert(1)>',
+        amount: 1,
+        currency: 'USD',
+        amount_cad: 1.4,
+        category: null,
+        category_detailed: null,
+        pending: false,
+      },
+    ]);
+    const rows = getTransactions(db, { limit: 50 });
+    const out = transactionsPage({
+      nonce: 'n',
+      csrf: 'c',
+      filters: {
+        start: '2026-01-01',
+        end: '2026-12-31',
+        profile: '',
+        account_id: '',
+        category: '',
+        search: '',
+        direction: 'all',
+        min_amount: '',
+        group: 'merchant',
+      },
+      rows,
+      merchants: groupByMerchant(rows),
+      categoryGroups: groupByCategory(rows),
+      accounts: listAccounts(db, {}),
+      categories: knownCategories(db),
+      profiles: [],
+      rules: [],
+      truncated: false,
+    }).value;
+
+    expect(out).not.toContain('<script>alert(1)</script>');
+    expect(out).not.toContain('<img src=x');
+    expect(out).toContain('&lt;script&gt;');
+    // The same string reaches a value= attribute in the edit form.
+    expect(out).not.toMatch(/value="[^"]*<img/);
+    expect(inlineHandlers(out)).toEqual([]);
   });
 });
