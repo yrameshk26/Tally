@@ -21,6 +21,8 @@ import type { ManagedKey } from '../settings.ts';
 import type { Profile } from '../profiles.ts';
 import { logoSvg } from './logo.ts';
 import { areaChart, chartRuntime, groupedColumns, hBars, stackedBar } from './charts.ts';
+import { renderMarkdown } from './markdown.ts';
+import type { ChatRow, StoredMessage } from '../llm/store.ts';
 
 const sign = (n: number): SafeHtml =>
   html`<span class="${n < 0 ? 'neg' : n > 0 ? 'pos' : 'muted'}">${money(n)}</span>`;
@@ -369,6 +371,16 @@ const LABELS: Record<string, { label: string; hint: string }> = {
   PLAID_SECRET: { label: 'Plaid secret', hint: 'Secret. Use the Production secret when PLAID_ENV is production.' },
   PLAID_ENV: { label: 'Plaid environment', hint: 'production or sandbox.' },
   WISE_API_TOKEN: { label: 'Wise API token', hint: 'Secret. Create a read-only token in Wise settings.' },
+  LLM_PROVIDER: {
+    label: 'Assistant provider',
+    hint: 'anthropic, openai, openrouter, or custom for any OpenAI-compatible endpoint.',
+  },
+  LLM_API_KEY: {
+    label: 'Assistant API key',
+    hint: 'Secret. Turning this on sends balances and transactions to that provider on every message.',
+  },
+  LLM_MODEL: { label: 'Assistant model', hint: 'Blank uses the provider default.' },
+  LLM_BASE_URL: { label: 'Assistant base URL', hint: 'Only for a custom or self-hosted endpoint.' },
 };
 
 export function settingsPage(opts: {
@@ -1387,4 +1399,192 @@ export function merchantsPage(opts: {
       }
     </section>
   `;
+}
+
+// --- assistant --------------------------------------------------------------
+
+/**
+ * A chart the assistant asked for. Rendered through the same module the rest of
+ * the app uses, so a model-drawn chart obeys the same palette, mark specs and
+ * table-twin rule as every other chart here.
+ */
+function assistantChart(body: string): SafeHtml | null {
+  let spec: { type?: string; title?: string; rows?: Array<{ label?: unknown; value?: unknown }> };
+  try {
+    spec = JSON.parse(body) as typeof spec;
+  } catch {
+    return null;
+  }
+  const rows = (spec.rows ?? [])
+    .map((r) => ({ label: String(r.label ?? ''), value: Number(r.value) }))
+    .filter((r) => r.label !== '' && Number.isFinite(r.value));
+  if (rows.length === 0) return null;
+
+  const title = spec.title ?? 'Chart';
+  if (spec.type === 'line') {
+    return html`<figure class="chart-card">
+      <figcaption>${title}</figcaption>
+      ${areaChart({ title, points: rows })}
+    </figure>`;
+  }
+  if (spec.type === 'stack') {
+    return html`<figure class="chart-card">
+      <figcaption>${title}</figcaption>
+      ${stackedBar({ title, segments: rows })}
+    </figure>`;
+  }
+  return html`<figure class="chart-card">
+    <figcaption>${title}</figcaption>
+    ${hBars({ title, width: 760, rows, empty: 'Nothing to plot.' })}
+  </figure>`;
+}
+
+function assistantBody(markdown: string): SafeHtml {
+  return renderMarkdown(markdown, (block) =>
+    block.lang === 'tally-chart' ? assistantChart(block.body) : null,
+  );
+}
+
+export function chatPage(opts: {
+  nonce: string;
+  csrf: string;
+  ready: boolean;
+  provider: string;
+  model: string;
+  chats: ChatRow[];
+  chat: ChatRow | null;
+  messages: StoredMessage[];
+  pending?: string;
+  error?: string;
+  flash?: SafeHtml;
+}): SafeHtml {
+  if (!opts.ready) {
+    return html`
+      <h1>Assistant</h1>
+      ${notice(
+        'warn',
+        'No LLM provider is configured, so the assistant is off. Add a provider, model and API key ' +
+          'under Settings to turn it on.',
+      )}
+      <section>
+        <h2>Before you turn this on</h2>
+        <p>Every other part of tally keeps your data on this server: Claude reaches it through MCP,
+          with your consent, one request at a time. A built-in assistant is different — it sends
+          balances and transactions to whichever provider holds the key, on every message. That is a
+          real trade, and it is off until you make it.</p>
+        <p class="sub-line">If you already use Claude, the MCP connector gives you the same answers
+          without a second copy of your data leaving the box. This exists for people who would
+          rather not, or who want a different model.</p>
+      </section>`;
+  }
+
+  const threads = html`<aside class="chat-threads">
+    <a class="btn btn-new-chat" href="/chat?new=1">New chat</a>
+    ${
+      opts.chats.length === 0
+        ? html`<p class="muted">No chats yet.</p>`
+        : html`<ul class="thread-list">${join(
+            opts.chats.map(
+              (c) => html`<li${c.id === opts.chat?.id ? raw(' class="current"') : raw('')}>
+                <a href="/chat/${c.id}">${c.title}</a>
+                <span class="sub-line">${c.updated_at.slice(0, 10)}</span>
+              </li>`,
+            ),
+          )}</ul>`
+    }
+  </aside>`;
+
+  const bubble = (m: StoredMessage): SafeHtml => {
+    if (m.role === 'user') {
+      return html`<article class="msg user"><div class="msg-body">${m.content}</div></article>`;
+    }
+    const tools = [...new Set(m.runs.map((r) => r.name))];
+    const failed = m.runs.filter((r) => !r.ok);
+    return html`<article class="msg assistant">
+      <div class="msg-body">${assistantBody(m.content)}</div>
+      ${
+        tools.length
+          ? html`<details class="msg-tools">
+              <summary>${String(m.runs.length)} lookup${m.runs.length === 1 ? '' : 's'}${
+                failed.length ? html` · ${String(failed.length)} failed` : raw('')
+              }</summary>
+              <div class="table-wrap"><table>
+                <thead><tr><th>Tool</th><th>Arguments</th><th>Result</th></tr></thead>
+                <tbody>${join(
+                  m.runs.map(
+                    (r) => html`<tr>
+                      <td><code>${r.name}</code>${r.ok ? raw('') : html` <span class="pill bad">error</span>`}</td>
+                      <td><code>${JSON.stringify(r.args)}</code></td>
+                      <td class="muted">${r.result.slice(0, 400)}</td>
+                    </tr>`,
+                  ),
+                )}</tbody>
+              </table></div>
+            </details>`
+          : raw('')
+      }
+      <div class="msg-actions">
+        <details class="msg-source">
+          <summary>Markdown</summary>
+          <pre class="code-block"><code>${m.content}</code></pre>
+        </details>
+        ${m.model ? html`<span class="sub-line">${m.model}</span>` : raw('')}
+      </div>
+    </article>`;
+  };
+
+  return html`
+    <div class="row mb chat-head">
+      <h1>Assistant</h1>
+      <span class="muted">${opts.provider} · ${opts.model}</span>
+      ${
+        opts.chat
+          ? html`<form method="post" action="/chat/delete" class="inline-form"
+              data-confirm="Delete this conversation? The transcript is removed from this server.">
+              ${csrfField(opts.csrf)}
+              <input type="hidden" name="chat_id" value="${opts.chat.id}">
+              <button class="secondary" type="submit">Delete chat</button>
+            </form>`
+          : raw('')
+      }
+    </div>
+    ${opts.flash ?? raw('')}
+    ${opts.error ? notice('err', opts.error) : raw('')}
+
+    <div class="chat-layout">
+      ${threads}
+      <div class="chat-main">
+        ${
+          opts.messages.length === 0
+            ? html`<div class="chat-empty">
+                <p class="muted">Ask about your accounts. The assistant reads them through the same
+                  read-only tools the MCP server exposes — it can look anything up, and it cannot
+                  move money.</p>
+                <ul class="suggestions">
+                  <li>How am I doing this year?</li>
+                  <li>What did I spend on groceries last month?</li>
+                  <li>Which cards have a balance right now?</li>
+                  <li>How much did I get in dividends this year?</li>
+                </ul>
+              </div>`
+            : join(opts.messages.filter((m) => m.role !== 'tool').map(bubble))
+        }
+        ${
+          opts.pending
+            ? html`<article class="msg user"><div class="msg-body">${opts.pending}</div></article>
+              <article class="msg assistant"><div class="msg-body muted">Thinking…</div></article>`
+            : raw('')
+        }
+
+        <form method="post" action="/chat" class="chat-input">
+          ${csrfField(opts.csrf)}
+          ${opts.chat ? html`<input type="hidden" name="chat_id" value="${opts.chat.id}">` : raw('')}
+          <textarea name="message" rows="3" required
+            placeholder="Ask about your accounts…" aria-label="Message"></textarea>
+          <button type="submit">Send</button>
+        </form>
+        <p class="sub-line">Sent to ${opts.provider}. Balances and transactions leave this server
+          with every message.</p>
+      </div>
+    </div>`;
 }

@@ -192,9 +192,13 @@ nothing for banks you already have — every call returns
 `ADDITIONAL_CONSENT_REQUIRED` until each one is re-consented.
 
 There is no way to add it to an existing Item. Update mode with `products` makes
-Link fail outright, and `additional_consented_products` is refused by any
-institution that does not offer the product — which is most of them. **Disconnect
-the bank and add it again**; a fresh link carries the full product set.
+Link fail outright, and Plaid refuses `additional_consented_products` for
+statements entirely. **Disconnect the bank and add it again**; a fresh link
+carries the full product set.
+
+Leave it out unless you know your banks support it. It is off by default for a
+reason: coverage is thin, and a link-token configuration Plaid rejects blocks
+adding *any* bank, not just the one you wanted statements for.
 
 **Not every bank offers statements**, and coverage is thin outside the large US
 banks. Support is per institution, cached on each Item during sync and reported

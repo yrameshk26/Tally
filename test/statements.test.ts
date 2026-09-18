@@ -82,7 +82,7 @@ describe('configuration', () => {
   });
 });
 
-describe('consent is asked for, without taking Repair down with it', () => {
+describe('link tokens stay in a shape Plaid accepts', () => {
   const source = readFileSync(new URL('../src/sources/plaid.ts', import.meta.url), 'utf8');
 
   function body(fn: string): string {
@@ -108,24 +108,32 @@ describe('consent is asked for, without taking Repair down with it', () => {
     // does not offer the product, and most do not. Consent is collected at link
     // time only; an existing Item is disconnected and re-added instead.
     const fn = body('createUpdateLinkToken');
-    expect(fn).not.toContain('additional_consented_products');
+    expect(fn).not.toContain('additional_consented_products:');
     expect(fn).not.toContain('opts.consent');
   });
 
-  it('statements is consent-only, never an initialised product', () => {
-    // In `products` it would hide every institution that lacks statements; in
-    // `optional_products` it would be initialised and billed on every Item.
-    const required = body('plaidOptionalProducts');
-    expect(required).toContain('CONSENT_ONLY');
+  it('statements never becomes a required product', () => {
+    // In `products` it would hide every institution that does not offer it.
+    expect(config.plaid.products).not.toContain('statements');
     expect(statementsEnabled()).toBe(
       [...config.plaid.products, ...config.plaid.optionalProducts].includes('statements'),
     );
   });
 
-  it('a new link collects the consent up front', () => {
+  it('a new link asks through optional_products, never additional_consented', () => {
+    // Plaid refuses additional_consented_products for statements outright
+    // ("cannot contain: [statements]"), which broke adding any bank at all.
+    // products would hide every institution that does not offer it.
     const fn = body('createLinkToken');
-    expect(fn).toContain('additional_consented_products');
+    // The colon matters: the comment above the call explains why the key is
+    // absent, and an assertion on the bare word would match the explanation.
+    expect(fn).not.toContain('additional_consented_products:');
     expect(fn).toContain('statements: statementWindow()');
+    expect(fn).toContain('plaidOptionalProducts()');
+  });
+
+  it('no link path mentions additional_consented_products at all', () => {
+    expect(source).not.toContain('additional_consented_products:');
   });
 });
 

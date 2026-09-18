@@ -88,29 +88,10 @@ export function plaidProducts(): Products[] {
 }
 
 export function plaidOptionalProducts(): Products[] {
-  // Never overlap with `products` or `additional_consented_products` — Plaid
-  // rejects the request if any of the three lists share an entry.
+  // Never overlap with `products` — Plaid rejects the request if they do.
   const required = new Set(config.plaid.products);
   return config.plaid.optionalProducts
-    .filter((p) => !required.has(p) && !CONSENT_ONLY.has(p))
-    .map((p) => p as Products);
-}
-
-/**
- * Products we collect consent for but never initialise at link time.
- *
- * Statements is the case: naming it in `products` narrows Link to institutions
- * that support it, and naming it in `optional_products` initialises (and bills)
- * it on every Item. `additional_consented_products` collects the consent,
- * leaves institutions that lack it visible, and costs nothing until a
- * statements endpoint is actually called.
- */
-const CONSENT_ONLY = new Set(['statements']);
-
-export function plaidConsentProducts(): Products[] {
-  const required = new Set(config.plaid.products);
-  return [...config.plaid.products, ...config.plaid.optionalProducts]
-    .filter((p) => CONSENT_ONLY.has(p) && !required.has(p))
+    .filter((p) => !required.has(p))
     .map((p) => p as Products);
 }
 
@@ -547,11 +528,10 @@ export async function createLinkToken(
     client_name: 'tally',
     products: plaidProducts(),
     ...(plaidOptionalProducts().length ? { optional_products: plaidOptionalProducts() } : {}),
-    // Consent only: keeps every institution visible in Link and bills nothing
-    // until a statements endpoint is called.
-    ...(plaidConsentProducts().length
-      ? { additional_consented_products: plaidConsentProducts() }
-      : {}),
+    // Statements rides in optional_products, which is best-effort and never
+    // blocks a link. It cannot go in additional_consented_products — Plaid
+    // refuses that outright ("cannot contain: [statements]") — and putting it
+    // in `products` would hide every institution that does not offer it.
     ...(statementsEnabled() ? { statements: statementWindow() } : {}),
     country_codes: plaidCountryCodes(),
     language: 'en',

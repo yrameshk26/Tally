@@ -12,6 +12,7 @@ export const NAV: Nav[] = [
   { href: '/', label: 'Overview' },
   { href: '/transactions', label: 'Transactions' },
   { href: '/merchants', label: 'Merchants' },
+  { href: '/chat', label: 'Assistant' },
   { href: '/connections', label: 'Connections' },
   { href: '/profiles', label: 'Profiles' },
   { href: '/settings', label: 'Settings' },
@@ -329,7 +330,7 @@ ol.steps strong{color:var(--fg)}
    than scrolling, because a hidden filter is a filter nobody applies. */
 .filters{display:flex;flex-wrap:wrap;gap:.6rem .75rem;align-items:flex-end;
   padding:.85rem 1rem;margin:0 0 1.25rem;border:1px solid var(--line);
-  border-radius:var(--r);background:var(--panel)}
+  border-radius:var(--radius);background:var(--panel)}
 .filters label{display:flex;flex-direction:column;gap:.25rem;
   font-size:var(--step--1);color:var(--fg-muted)}
 .filters input,.filters select{min-width:8.5rem}
@@ -352,6 +353,56 @@ td .nowrap,td.nowrap{white-space:nowrap}
   border-top:1px solid var(--line);font-size:var(--step--1);color:var(--fg-faint)}
 .site-footer a{color:var(--fg-muted)}
 .site-footer a:hover{color:var(--accent)}
+/* --- assistant ----------------------------------------------------------- */
+.chat-layout{display:grid;grid-template-columns:15rem 1fr;gap:1.5rem;align-items:start}
+.chat-threads{position:sticky;top:1rem}
+.btn-new-chat{margin-bottom:1rem}
+.thread-list{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:.15rem}
+.thread-list li{padding:.45rem .6rem;border-radius:var(--radius-sm);font-size:var(--step--1)}
+.thread-list li:hover{background:var(--hover)}
+.thread-list li.current{background:color-mix(in oklch,var(--accent) 12%,transparent)}
+.thread-list a{display:block;color:var(--fg);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.chat-main{min-width:0}
+.chat-head{align-items:baseline;gap:.75rem;flex-wrap:wrap}
+.chat-head h1{margin:0}
+.chat-empty{padding:1.5rem;border:1px dashed var(--line);border-radius:var(--radius);margin-bottom:1.25rem}
+.suggestions{margin:.75rem 0 0;padding-left:1.1rem;color:var(--fg-muted);font-size:var(--step--1)}
+.msg{margin:0 0 1.25rem;padding:1rem 1.1rem;border-radius:var(--radius);border:1px solid var(--line)}
+/* The user's own words sit tinted and narrower; the answer gets full width. */
+.msg.user{background:color-mix(in oklch,var(--accent) 7%,transparent);border-color:transparent;
+  margin-left:auto;max-width:44rem;white-space:pre-wrap}
+.msg.assistant{background:var(--panel)}
+.msg-body>*:first-child{margin-top:0}
+.msg-body>*:last-child{margin-bottom:0}
+.msg-body table{margin:.5rem 0}
+.msg-body h3,.msg-body h4,.msg-body h5{margin:1.1rem 0 .4rem}
+.msg-body blockquote{margin:.6rem 0;padding-left:.9rem;border-left:2px solid var(--line);
+  color:var(--fg-muted)}
+.msg-tools,.msg-source{margin-top:.75rem;font-size:var(--step--1)}
+.msg-tools summary,.msg-source summary{cursor:pointer;color:var(--fg-muted)}
+.msg-actions{display:flex;gap:1rem;align-items:baseline;justify-content:space-between;
+  margin-top:.5rem;flex-wrap:wrap}
+.chart-card{margin:1rem 0;padding:.9rem 1rem;border:1px solid var(--line);border-radius:var(--radius)}
+.chart-card figcaption{font-weight:600;margin-bottom:.5rem}
+.chat-input{display:flex;gap:.6rem;align-items:flex-end;margin-top:1.5rem}
+.chat-input textarea{flex:1;font:inherit;padding:.7rem .85rem;border:1px solid var(--line);
+  border-radius:var(--radius);background:var(--bg-sunk);color:var(--fg);resize:vertical}
+.chat-input textarea:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+@media(max-width:860px){
+  .chat-layout{grid-template-columns:1fr}
+  .chat-threads{position:static}
+  .thread-list{flex-direction:row;overflow-x:auto;gap:.4rem}
+  .thread-list li{flex:0 0 auto;max-width:12rem}
+  .msg.user{max-width:100%}
+}
+/* Print is the PDF path: no chrome, no controls, just the conversation. */
+@media print{
+  header,nav,.site-footer,.chat-threads,.chat-input,.msg-actions,.msg-tools,form{display:none!important}
+  .chat-layout{grid-template-columns:1fr}
+  .msg{border:none;padding:0;background:none;break-inside:avoid}
+  .msg.user{max-width:100%;font-weight:600}
+  a[target=_blank]::after{content:" (" attr(href) ")";font-size:.85em;color:#555}
+}
 .chart-table{margin-top:.75rem}
 .chart-table summary{cursor:pointer;font-size:var(--step--1);color:var(--fg-muted);
   padding:.25rem 0;list-style-position:inside}

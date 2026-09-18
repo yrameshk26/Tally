@@ -29,6 +29,7 @@ import {
   settingsPage,
   transactionsPage,
   merchantsPage,
+  chatPage,
   type MerchantFilters,
   type TxFilters,
 } from './pages.ts';
@@ -110,6 +111,18 @@ import {
   plaidStatus,
 } from '../sources/plaid.ts';
 import { statementsEnabled } from '../sources/statements.ts';
+import { PROVIDER_INFO, llmConfig, llmReady } from '../llm/provider.ts';
+import { runChat } from '../llm/chat.ts';
+import {
+  addAssistantMessage,
+  addUserMessage,
+  chatMessages,
+  createChat,
+  deleteChat,
+  getChat,
+  listChats,
+  turnsFor,
+} from '../llm/store.ts';
 import { runSync } from '../sync.ts';
 import { loadRates } from '../fx.ts';
 import { createFailureLimiter } from '../ratelimit.ts';
@@ -956,6 +969,88 @@ export function createWebRouter(db: DB): express.Router {
     } catch (e) {
       res.redirect(303, backToMerchants(body, errMessage(e), 'err'));
     }
+  });
+
+  // --- assistant -----------------------------------------------------------
+
+  /**
+   * The reply is produced before the response is sent, so a message can take
+   * the better part of a minute. That is deliberate: streaming would need a
+   * second transport and a pile of client JS under a nonce CSP, and the thing
+   * being waited on is a handful of tool calls, not a typing animation.
+   */
+  const renderChat = (req: Ctx, res: Response, chatId: string | null, error?: string): void => {
+    const cfg = llmConfig(db);
+    const chat = chatId ? getChat(db, chatId) : null;
+    render(
+      req,
+      res,
+      'Assistant',
+      chatPage({
+        nonce: req.nonce ?? '',
+        csrf: req.session?.csrf ?? '',
+        ready: llmReady(db),
+        provider: PROVIDER_INFO[cfg.provider].label,
+        model: cfg.model,
+        chats: listChats(db),
+        chat,
+        messages: chat ? chatMessages(db, chat.id) : [],
+        ...(error ? { error } : {}),
+        flash: raw(flash(req, 'ok').value + flash(req, 'err').value),
+      }),
+      '/chat',
+    );
+  };
+
+  router.get('/chat', requireAuth, (req: Ctx, res: Response) => {
+    // Land on the most recent conversation rather than an empty page, unless
+    // the user explicitly asked for a blank one. Starting a chat is not a state
+    // change until a message is sent, so this is a link, not a POST.
+    if (req.query['new'] !== undefined) {
+      renderChat(req, res, null);
+      return;
+    }
+    const [latest] = listChats(db, 1);
+    renderChat(req, res, latest?.id ?? null);
+  });
+
+  router.get('/chat/:id', requireAuth, (req: Ctx, res: Response) => {
+    renderChat(req, res, String(req.params['id'] ?? ''));
+  });
+
+  router.post('/chat', requireAuth, requireCsrf, async (req: Ctx, res: Response) => {
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    const message = String(body['message'] ?? '').trim();
+    const existing = String(body['chat_id'] ?? '');
+    if (!message) {
+      res.redirect(303, existing ? `/chat/${existing}` : '/chat');
+      return;
+    }
+    if (!llmReady(db)) {
+      res.redirect(303, `/chat?err=${encodeURIComponent('No LLM provider is configured.')}`);
+      return;
+    }
+
+    const chat = (existing ? getChat(db, existing) : null) ?? createChat(db, message);
+    try {
+      const history = turnsFor(db, chat.id);
+      addUserMessage(db, chat.id, message);
+      const { result } = await runChat(db, history, message);
+      addAssistantMessage(db, chat.id, result.text, result.runs, result.model);
+      res.redirect(303, `/chat/${chat.id}`);
+    } catch (e) {
+      // The user's message is already stored, so the thread shows what was
+      // asked even when the answer failed — otherwise a provider outage looks
+      // like the message was never sent.
+      log.warn('assistant failed', { error: errMessage(e) });
+      res.redirect(303, `/chat/${chat.id}?err=${encodeURIComponent(errMessage(e))}`);
+    }
+  });
+
+  router.post('/chat/delete', requireAuth, requireCsrf, (req: Ctx, res: Response) => {
+    const id = String((req.body as Record<string, unknown>)?.['chat_id'] ?? '');
+    deleteChat(db, id);
+    res.redirect(303, `/chat?ok=${encodeURIComponent('Conversation deleted.')}`);
   });
 
   // --- security ------------------------------------------------------------

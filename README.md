@@ -108,7 +108,7 @@ the consented product set when an Item is linked, so a bank connected earlier
 returns `ADDITIONAL_CONSENT_REQUIRED` and can only be fixed by disconnecting and
 adding it again. Support is per institution and thin outside the large US banks;
 `plaid_status` reports `supports_statements` per connection, so check there
-first. The PDF is streamed through memory and handed to the caller:
+before enabling anything. The PDF is streamed through memory and handed to the caller:
 it is never written to disk, cached, or stored in the database. SnapTrade has no
 statements endpoint, so brokerage statements stay a manual download.
 

@@ -28,13 +28,15 @@ history is public too.
    must still offer the action, because not having checked is not a no. A bank
    that returns false is never called and never told to re-consent — that is a
    limit of the bank, not the setup.
-3. **A repair names no products and asks for no consent.** Update mode with
-   `products` made Plaid Link die with an opaque "internal error", taking
-   re-authentication down with it; `additional_consented_products` is then
-   refused outright by any institution that does not offer the product, which
-   is most of them. Consent is collected at link time only — an existing Item
-   that needs a newly enabled product is disconnected and added again.
-   `test/statements.test.ts` asserts the repair path stays clean.
+3. **Link tokens are the most fragile surface here; change them carefully.**
+   Three shapes have been tried and two broke live flows: `products` in update
+   mode kills Link with an opaque "internal error" and takes re-authentication
+   with it, and `additional_consented_products` is refused for statements
+   outright, which blocked adding *any* bank. Statements rides in
+   `optional_products` only, and an existing Item that needs a newly enabled
+   product is disconnected and added again. `test/statements.test.ts` pins the
+   shape of both link paths — a change here cannot be verified by tests alone,
+   so make it behind a setting that is off by default.
 4. **Statement PDFs are never persisted.** `src/sources/statements.ts` streams
    them through memory and hands them to the caller. No cache, no temp file, no
    database column, no log of their contents — one file carries the full account
