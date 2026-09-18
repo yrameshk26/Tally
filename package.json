@@ -24,7 +24,7 @@
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.21.0",
     "argon2": "^0.45.1",
-    "better-sqlite3": "^12.2.0",
+    "better-sqlite3": "^13.0.3",
     "express": "^5.1.0",
     "plaid": "^42.0.0",
     "snaptrade-typescript-sdk": "^9.0.129",
