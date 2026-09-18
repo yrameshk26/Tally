@@ -300,6 +300,10 @@ export function connectionsPage(opts: {
   wiseReady: boolean;
   plaidReady: boolean;
   redirectUri: string;
+  plaidEnv: string;
+  products: string[];
+  optionalProducts: string[];
+  countryCodes: string[];
   csrf: string;
   nonce: string;
   flash?: SafeHtml;
@@ -324,6 +328,33 @@ export function connectionsPage(opts: {
             <td class="num">${statusPill(opts.wiseReady)}</td></tr>
       </tbody></table>
       ${opts.plaidReady ? raw('') : html`<p class="hint">Add Plaid credentials under <a href="/settings">Settings</a> to link a bank.</p>`}
+    </section>
+
+    <section>
+      <h2>Plaid dashboard setup</h2>
+      <p class="hint" style="margin-bottom:.9rem">Everything below must match your Plaid dashboard
+        before Link will start. These are the exact values this server sends.</p>
+      <table><tbody>
+        <tr>
+          <td>Allowed redirect URI<div class="muted" style="font-size:.8rem">Team Settings → API (or Developers → API). Required for OAuth banks — Chase, Amex, Bank of America.</div></td>
+          <td><div class="code-block">${opts.redirectUri}</div></td>
+        </tr>
+        <tr>
+          <td>Environment<div class="muted" style="font-size:.8rem">The secret must be the one for this environment.</div></td>
+          <td><span class="pill">${opts.plaidEnv}</span></td>
+        </tr>
+        <tr>
+          <td>Products requested<div class="muted" style="font-size:.8rem">Optional products never block linking.</div></td>
+          <td><span class="pill">${opts.products.join(', ')}</span>
+            ${opts.optionalProducts.length ? html` <span class="pill warn">optional: ${opts.optionalProducts.join(', ')}</span>` : raw('')}</td>
+        </tr>
+        <tr>
+          <td>Country codes</td>
+          <td><span class="pill">${opts.countryCodes.join(', ')}</span></td>
+        </tr>
+      </tbody></table>
+      <p class="hint" style="margin-top:.9rem">Check the key pair itself under
+        <a href="/settings">Settings → Test all providers</a>.</p>
     </section>
 
     <section>
@@ -359,8 +390,6 @@ export function connectionsPage(opts: {
             ? html`<p class="hint">All 10 Plaid Items are in use. Remove one before adding another.</p>`
             : raw('')
       }
-      <p class="hint">Redirect URI registered with Plaid must be exactly
-        <code>${opts.redirectUri}</code>.</p>
     </section>
 
     ${

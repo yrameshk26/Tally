@@ -317,3 +317,26 @@ describe('two-factor enrolment', () => {
     );
   });
 });
+
+describe('Plaid setup panel', () => {
+  it('shows the exact values the server sends, so setup is not error-by-error', async () => {
+    const { cookie, csrf } = await login();
+    // Credentials must be present for the panel's provider rows to be meaningful.
+    await fetch(`${base}/settings`, {
+      method: 'POST',
+      headers: { cookie, 'content-type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({ _csrf: csrf, PLAID_CLIENT_ID: 'cid', PLAID_SECRET: 'sec' }),
+      redirect: 'manual',
+    });
+    const body = await (await fetch(`${base}/connections`, { headers: { cookie } })).text();
+
+    expect(body).toContain('Plaid dashboard setup');
+    // The redirect URI must be rendered exactly, derived from the request host.
+    expect(body).toContain('/connections/oauth');
+    expect(body).toContain('Allowed redirect URI');
+    // Environment and products are what a mismatched dashboard config turns on.
+    expect(body).toContain('Environment');
+    expect(body).toContain('transactions');
+    expect(body).toContain('optional: liabilities');
+  });
+});

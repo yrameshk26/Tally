@@ -48,14 +48,17 @@ import {
   type Session,
 } from '../auth/session.ts';
 import { describeSettings, setSetting, MANAGED_KEYS, SECRET_KEYS } from '../settings.ts';
-import { plaidReady, snaptradeReady, testCredentials, wiseReady } from '../credentials.ts';
+import { plaidCreds, plaidReady, snaptradeReady, testCredentials, wiseReady } from '../credentials.ts';
 import { getHoldings, getNetWorth, listAccounts } from '../queries.ts';
 import {
   createLinkToken,
   createUpdateLinkToken,
   exchangePublicToken,
   listItems,
+  plaidCountryCodes,
   plaidErrorDetail,
+  plaidOptionalProducts,
+  plaidProducts,
   plaidStatus,
 } from '../sources/plaid.ts';
 import { runSync } from '../sync.ts';
@@ -335,6 +338,10 @@ export function createWebRouter(db: DB): express.Router {
         plaidReady: plaidReady(db),
         wiseReady: wiseReady(db),
         redirectUri: redirectUriFor(req),
+        plaidEnv: plaidCreds(db).env,
+        products: plaidProducts().map(String),
+        optionalProducts: plaidOptionalProducts().map(String),
+        countryCodes: plaidCountryCodes().map(String),
         csrf: req.session!.csrf,
         nonce: req.nonce ?? '',
         flash: raw(flash(req, 'ok').value + flash(req, 'err').value),
