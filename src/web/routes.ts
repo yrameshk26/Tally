@@ -64,7 +64,13 @@ import {
 } from '../auth/session.ts';
 import { describeSettings, setSetting, MANAGED_KEYS, SECRET_KEYS } from '../settings.ts';
 import { plaidCreds, plaidReady, snaptradeReady, testCredentials, wiseReady } from '../credentials.ts';
-import { getHoldings, getNetWorth, listAccounts } from '../queries.ts';
+import {
+  getCashflow,
+  getHoldings,
+  getNetWorth,
+  getNetWorthHistory,
+  listAccounts,
+} from '../queries.ts';
 import {
   createLinkToken,
   createUpdateLinkToken,
@@ -400,6 +406,19 @@ export function createWebRouter(db: DB): express.Router {
 
   router.get('/', requireAuth, (req: Ctx, res: Response) => {
     const totals = getNetWorth(db);
+    // Six months of cashflow, and whatever daily snapshots exist. Both render
+    // an explicit empty state rather than an empty axis when there is no data.
+    const end = new Date();
+    const start = new Date(end);
+    start.setMonth(start.getMonth() - 5);
+    start.setDate(1);
+    const cashflow = getCashflow(db, {
+      start: start.toISOString().slice(0, 10),
+      end: end.toISOString().slice(0, 10),
+    }).by_month.map((m) => ({ month: m.month, income: m.income_cad, spend: m.spend_cad }));
+    const history = getNetWorthHistory(db, { limit: 90 })
+      .map((r) => ({ label: String(r['date']), value: Number(r['net_worth_cad']) }))
+      .filter((p) => Number.isFinite(p.value));
     const last = db
       .prepare('SELECT finished_at FROM sync_runs WHERE finished_at IS NOT NULL ORDER BY id DESC LIMIT 1')
       .get() as { finished_at: string } | undefined;
@@ -413,6 +432,8 @@ export function createWebRouter(db: DB): express.Router {
         nonce: req.nonce ?? '',
         accounts: listAccounts(db),
         holdings: getHoldings(db),
+        history,
+        cashflow,
         lastSync: last?.finished_at ?? null,
         fxAsOf: totals.fx_as_of,
         csrf: req.session!.csrf,

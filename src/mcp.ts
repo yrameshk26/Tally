@@ -13,9 +13,11 @@ import { config } from './config.ts';
 import { errMessage } from './lib/logger.ts';
 import { daysAgoISO, todayISO } from './lib/money.ts';
 import {
+  getActivities,
   getCashflow,
   getContributionRoom,
   getHoldings,
+  getHoldingsByAccount,
   getNetWorth,
   getNetWorthHistory,
   getTransactions,
@@ -24,6 +26,7 @@ import {
   setContributed,
   setRoomLimit,
 } from './queries.ts';
+import { DEFAULT_SECTIONS, SUMMARY_SECTIONS, buildSummary, type SummarySection } from './summary.ts';
 import {
   MAX_PROFILES,
   createProfile,
@@ -61,7 +64,9 @@ export function buildServer(db: DB = getDb()): McpServer {
         'profile — call list_profiles to see them. A profile is both a person/bucket and its own ' +
         'set of provider credentials, so each one has its own bank-connection allowance. Data is ' +
         'refreshed by a nightly sync — call sync_report to see how stale it is, or sync_now to ' +
-        'refresh on demand.',
+        'refresh on demand. For a broad question ("how am I doing?", "what does my year look ' +
+        'like?") call get_financial_summary once instead of chaining the narrow tools — it ' +
+        'returns the whole picture and takes a `sections` list to narrow it down.',
     },
   );
 
@@ -138,17 +143,27 @@ export function buildServer(db: DB = getDb()): McpServer {
       title: 'Holdings',
       description:
         'Positions rolled up by symbol across all brokerage accounts, in CAD, largest first, ' +
-        'with each position as a percentage of invested value (concentration).',
+        'with each position as a percentage of invested value (concentration). Pass ' +
+        'by_account: true to group by account instead. Invested value can sit below the account ' +
+        'balance when a brokerage reports a managed portfolio\u2019s value without its positions.',
       inputSchema: {
         profile: PROFILE.optional(),
         account_id: z.string().optional(),
         include_cash: z.boolean().optional(),
+        by_account: z
+          .boolean()
+          .optional()
+          .describe('group positions by the account holding them instead of by symbol'),
         limit: z.number().int().min(1).max(500).optional(),
       },
       annotations: READ_ONLY,
     },
     (args) => {
       try {
+        if (args.by_account) {
+          const accounts = getHoldingsByAccount(db, args);
+          return ok({ count: accounts.length, accounts });
+        }
         return ok(getHoldings(db, args));
       } catch (e) {
         return fail(e);
@@ -207,6 +222,82 @@ export function buildServer(db: DB = getDb()): McpServer {
     (args) => {
       try {
         return ok(getCashflow(db, args));
+      } catch (e) {
+        return fail(e);
+      }
+    },
+  );
+
+  server.registerTool(
+    'get_financial_summary',
+    {
+      title: 'Full financial summary',
+      description:
+        'The complete picture in one call: net worth and its breakdowns, every account and its ' +
+        'balance, credit cards with statement/minimum/due date, holdings, brokerage activity ' +
+        '(dividends, buys, sells, fees), income vs spend by month/category/merchant, individual ' +
+        'transactions, the net-worth history, contribution room, bank-connection health, FX and ' +
+        'sync freshness. Spans SnapTrade, Plaid and Wise. Pass `sections` to ask for only part ' +
+        `of it — ["all"] for everything — otherwise you get: ${DEFAULT_SECTIONS.join(', ')}. ` +
+        'The period sections (cashflow, transactions, activities, history) default to the last ' +
+        '6 months.',
+      inputSchema: {
+        sections: z
+          .array(z.enum(['all', ...SUMMARY_SECTIONS]))
+          .optional()
+          .describe('which sections to return; ["all"] for every section'),
+        profile: PROFILE.optional().describe('limit to one profile id'),
+        start: DATE.optional(),
+        end: DATE.optional(),
+        months: z
+          .number()
+          .int()
+          .min(1)
+          .max(120)
+          .optional()
+          .describe('lookback in whole months when start is not given (default 6)'),
+        limit: z.number().int().min(1).max(250).optional().describe('row cap per list section'),
+        include_inactive: z.boolean().optional(),
+      },
+      annotations: READ_ONLY,
+    },
+    (args) => {
+      try {
+        const sections: SummarySection[] | undefined = args.sections?.includes('all')
+          ? [...SUMMARY_SECTIONS]
+          : (args.sections as SummarySection[] | undefined);
+        return ok(buildSummary(db, { ...args, sections }));
+      } catch (e) {
+        return fail(e);
+      }
+    },
+  );
+
+  server.registerTool(
+    'get_activities',
+    {
+      title: 'Brokerage activity',
+      description:
+        'Investment-side movements from SnapTrade: dividends, interest, buys, sells, fees, ' +
+        'contributions and withdrawals, with a per-type rollup. get_transactions only ever ' +
+        'covers bank and card movements from Plaid, so use this one for anything that happened ' +
+        'inside a brokerage account.',
+      inputSchema: {
+        start: DATE.optional(),
+        end: DATE.optional(),
+        account_id: z.string().optional(),
+        profile: PROFILE.optional(),
+        type: z.string().optional().describe('activity type, e.g. DIVIDEND, BUY, CONTRIBUTION'),
+        symbol: z.string().optional(),
+        limit: z.number().int().min(1).max(1000).optional(),
+      },
+      annotations: READ_ONLY,
+    },
+    (args) => {
+      try {
+        const start = args.start ?? daysAgoISO(365);
+        const end = args.end ?? todayISO();
+        return ok(getActivities(db, { ...args, start, end }));
       } catch (e) {
         return fail(e);
       }

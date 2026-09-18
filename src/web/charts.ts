@@ -227,12 +227,14 @@ export function hBars(opts: {
   if (rows.length === 0) return html`<p class="empty">No holdings yet.</p>`;
   const fmt = opts.format ?? money;
   const max = opts.max ?? Math.max(...rows.map((r) => r.value));
-  const W = 640;
-  const labelW = 88;
-  const valueW = 96;
+  // Deliberately narrow: this chart lives in a half-width card, and a wide
+  // viewBox would scale the 11px labels down to something unreadable.
+  const W = 360;
+  const labelW = 62;
+  const valueW = 88;
   const barMax = W - labelW - valueW;
-  const rowH = 30;
-  const barH = 18;
+  const rowH = 26;
+  const barH = 15;
   const H = rows.length * rowH;
 
   const marks = rows
@@ -240,9 +242,9 @@ export function hBars(opts: {
       const w = (r.value / max) * barMax;
       const yy = i * rowH + (rowH - barH) / 2;
       return (
-        `<text class="label" x="${labelW - 10}" y="${yy + barH / 2 + 4}" text-anchor="end">${esc(r.label)}</text>` +
+        `<text class="label" x="${labelW - 8}" y="${yy + barH / 2 + 4}" text-anchor="end">${esc(r.label)}</text>` +
         `<path class="bar s1" d="${hbarPath(labelW, yy, w, barH)}" data-tip="${esc(r.label)}|${esc(fmt(r.value))}${r.note ? ` · ${esc(r.note)}` : ''}" tabindex="0"/>` +
-        `<text class="value" x="${(labelW + w + 8).toFixed(1)}" y="${yy + barH / 2 + 4}">${esc(fmt(r.value))}</text>`
+        `<text class="value" x="${(labelW + w + 6).toFixed(1)}" y="${yy + barH / 2 + 4}">${esc(fmt(r.value))}</text>`
       );
     })
     .join('');

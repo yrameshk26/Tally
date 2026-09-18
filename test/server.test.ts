@@ -102,8 +102,10 @@ describe('tools', () => {
       'create_profile',
       'delete_profile',
       'fx_rates',
+      'get_activities',
       'get_cashflow',
       'get_contribution_room',
+      'get_financial_summary',
       'get_holdings',
       'get_net_worth',
       'get_net_worth_history',
@@ -128,6 +130,22 @@ describe('tools', () => {
     expect(result.isError).toBeFalsy();
     const payload = JSON.parse(result.content[0]!.text) as Record<string, number>;
     expect(payload['net_worth_cad']).toBe(0);
+  });
+
+  it('answers get_financial_summary over HTTP with every section present', async () => {
+    const json = await body(
+      await rpc('tools/call', {
+        name: 'get_financial_summary',
+        arguments: { sections: ['all'] },
+      }),
+    );
+    const result = json['result'] as { content: Array<{ text: string }>; isError?: boolean };
+    expect(result.isError).toBeFalsy();
+    const payload = JSON.parse(result.content[0]!.text) as Record<string, unknown>;
+    expect(payload['omitted_sections']).toEqual([]);
+    for (const section of ['net_worth', 'accounts', 'holdings', 'activities', 'cashflow', 'transactions', 'connections', 'sync']) {
+      expect(payload[section], section).toBeDefined();
+    }
   });
 
   it('rejects a bad argument instead of guessing', async () => {

@@ -31,6 +31,17 @@ export type AccountView = {
   card?: Record<string, unknown>;
 };
 
+/**
+ * Account categories that are money owed rather than money held. Shared so the
+ * web UI's "Cards and loans" table and the MCP summary can never disagree about
+ * what counts as a card.
+ */
+export const LIABILITY_CATEGORIES = ['LOC', 'LOAN'];
+
+export function isLiabilityAccount(a: { category: string | null }): boolean {
+  return LIABILITY_CATEGORIES.includes((a.category ?? '').toUpperCase());
+}
+
 export function listAccounts(
   db: DB,
   opts: { profile?: string; source?: string; include_inactive?: boolean } = {},
@@ -331,6 +342,209 @@ export function getTransactions(
     category_detailed: (r['category_detailed'] as string) ?? null,
     pending: Boolean(r['pending']),
   }));
+}
+
+export type ActivityView = {
+  id: string;
+  date: string;
+  account: string | null;
+  account_id: string;
+  profile: string;
+  type: string | null;
+  description: string | null;
+  symbol: string | null;
+  /** Signed as the brokerage reports it: a dividend or contribution is positive. */
+  amount_cad: number;
+  amount: number;
+  currency: string;
+};
+
+export type ActivitiesResult = {
+  start: string | null;
+  end: string | null;
+  count: number;
+  by_type: Array<{ type: string; amount_cad: number; count: number }>;
+  activities: ActivityView[];
+};
+
+/**
+ * Brokerage activity from SnapTrade — dividends, interest, buys, sells, fees and
+ * contributions. This is the investment-side counterpart to get_transactions,
+ * which only ever sees bank and card movements from Plaid.
+ */
+export function getActivities(
+  db: DB,
+  opts: {
+    start?: string;
+    end?: string;
+    account_id?: string;
+    profile?: string;
+    type?: string;
+    symbol?: string;
+    limit?: number;
+  } = {},
+): ActivitiesResult {
+  const where: string[] = [];
+  const args: unknown[] = [];
+  if (opts.start) {
+    where.push('act.date >= ?');
+    args.push(opts.start);
+  }
+  if (opts.end) {
+    where.push('act.date <= ?');
+    args.push(opts.end);
+  }
+  if (opts.account_id) {
+    where.push('act.account_id = ?');
+    args.push(opts.account_id);
+  }
+  if (opts.profile) {
+    where.push('a.profile_id = ?');
+    args.push(opts.profile);
+  }
+  if (opts.type) {
+    where.push('UPPER(COALESCE(act.type,\'\')) = UPPER(?)');
+    args.push(opts.type);
+  }
+  if (opts.symbol) {
+    where.push('UPPER(COALESCE(act.symbol,\'\')) = UPPER(?)');
+    args.push(opts.symbol);
+  }
+
+  const rows = db
+    .prepare(
+      `SELECT act.*, a.name AS account_name, a.profile_id AS profile
+       FROM activities act
+       LEFT JOIN accounts a ON a.id = act.account_id
+       ${where.length ? `WHERE ${where.join(' AND ')}` : ''}
+       ORDER BY act.date DESC, act.id
+       LIMIT ?`,
+    )
+    .all(...args, opts.limit ?? 200) as Array<Record<string, unknown>>;
+
+  const activities: ActivityView[] = rows.map((r) => ({
+    id: String(r['id']),
+    date: String(r['date']),
+    account: (r['account_name'] as string) ?? null,
+    account_id: String(r['account_id']),
+    profile: String(r['profile'] ?? 'me'),
+    type: (r['type'] as string) ?? null,
+    description: (r['description'] as string) ?? null,
+    symbol: (r['symbol'] as string) ?? null,
+    amount_cad: round2(Number(r['amount_cad'])),
+    amount: round2(Number(r['amount'])),
+    currency: String(r['currency']),
+  }));
+
+  const byType = new Map<string, { amount: number; count: number }>();
+  for (const a of activities) {
+    const key = (a.type ?? 'UNKNOWN').toUpperCase();
+    const v = byType.get(key) ?? { amount: 0, count: 0 };
+    v.amount = round2(v.amount + a.amount_cad);
+    v.count += 1;
+    byType.set(key, v);
+  }
+
+  return {
+    start: opts.start ?? null,
+    end: opts.end ?? null,
+    count: activities.length,
+    by_type: [...byType.entries()]
+      .sort((a, b) => b[1].count - a[1].count)
+      .map(([type, v]) => ({ type, amount_cad: v.amount, count: v.count })),
+    activities,
+  };
+}
+
+export type AccountHoldings = {
+  account_id: string;
+  account: string | null;
+  profile: string;
+  registered_type: string;
+  /** Sum of the positions below. Can sit under balance_cad when the brokerage
+   *  reports a managed portfolio's value without breaking out its positions. */
+  invested_cad: number;
+  balance_cad: number;
+  positions: Array<{
+    symbol: string;
+    description: string | null;
+    asset_type: string | null;
+    quantity: number;
+    market_value_cad: number;
+    weight_pct: number;
+    cost_basis_cad: number | null;
+    unrealized_pnl_cad: number | null;
+    currency: string;
+  }>;
+};
+
+/** Positions grouped by the account that holds them, rather than by symbol. */
+export function getHoldingsByAccount(
+  db: DB,
+  opts: { profile?: string; account_id?: string; include_cash?: boolean } = {},
+): AccountHoldings[] {
+  const where = ['a.active = 1'];
+  const args: unknown[] = [];
+  if (opts.profile) {
+    where.push('a.profile_id = ?');
+    args.push(opts.profile);
+  }
+  if (opts.account_id) {
+    where.push('h.account_id = ?');
+    args.push(opts.account_id);
+  }
+  if (!opts.include_cash) where.push("COALESCE(h.asset_type,'') != 'cash'");
+
+  const rows = db
+    .prepare(
+      `SELECT h.*, a.name AS account_name, a.profile_id AS profile,
+              a.registered_type, a.balance_cad AS account_balance_cad
+       FROM holdings h
+       JOIN accounts a ON a.id = h.account_id
+       WHERE ${where.join(' AND ')}
+       ORDER BY h.market_value_cad DESC`,
+    )
+    .all(...args) as Array<Record<string, unknown>>;
+
+  const byAccount = new Map<string, AccountHoldings>();
+  for (const r of rows) {
+    const id = String(r['account_id']);
+    let acct = byAccount.get(id);
+    if (!acct) {
+      acct = {
+        account_id: id,
+        account: (r['account_name'] as string) ?? null,
+        profile: String(r['profile'] ?? 'me'),
+        registered_type: String(r['registered_type'] ?? 'NON_REG'),
+        invested_cad: 0,
+        balance_cad: Number(r['account_balance_cad'] ?? 0),
+        positions: [],
+      };
+      byAccount.set(id, acct);
+    }
+    const mv = round2(Number(r['market_value_cad']));
+    const cost = r['cost_basis_cad'] === null ? null : Number(r['cost_basis_cad']);
+    acct.invested_cad = round2(acct.invested_cad + mv);
+    acct.positions.push({
+      symbol: String(r['symbol'] ?? r['description'] ?? 'UNKNOWN'),
+      description: (r['description'] as string) ?? null,
+      asset_type: (r['asset_type'] as string) ?? null,
+      quantity: round2(Number(r['quantity'])),
+      market_value_cad: mv,
+      weight_pct: 0,
+      cost_basis_cad: cost === null ? null : round2(cost),
+      unrealized_pnl_cad: cost === null ? null : round2(mv - cost),
+      currency: String(r['currency']),
+    });
+  }
+
+  const accounts = [...byAccount.values()].sort((a, b) => b.invested_cad - a.invested_cad);
+  for (const a of accounts) {
+    for (const p of a.positions) {
+      p.weight_pct = a.invested_cad === 0 ? 0 : round2((p.market_value_cad / a.invested_cad) * 100);
+    }
+  }
+  return accounts;
 }
 
 /** Categories that move money between the household's own accounts. */

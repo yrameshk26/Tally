@@ -53,6 +53,15 @@ const CSS = `
      dark one. Reusing --bg-sunk here punched a black hole through dark rows. */
   --hover:color-mix(in oklch, var(--fg) 5%, transparent);
 
+  /* Categorical series slots, in fixed order — assigned by entity, never by
+     rank, and never cycled past the last slot. Validated with the palette
+     script against this surface in both modes: lightness band, chroma floor,
+     CVD separation, normal-vision floor and contrast. Light s4/s5 sit under
+     3:1, which is legal only with the relief every chart here ships: visible
+     direct labels plus a table view. */
+  --s1:#0f7f62; --s2:#eb6834; --s3:#2a78d6;
+  --s4:#eda100; --s5:#e87ba4; --s6:#4a3aa7;
+
   --step--1:clamp(.78rem,.76rem + .1vw,.83rem);
   --step-0:clamp(.92rem,.9rem + .12vw,.97rem);
   --step-1:clamp(1.05rem,1rem + .25vw,1.16rem);
@@ -73,6 +82,10 @@ const CSS = `
   --pos:oklch(78% .14 var(--accent-hue));
   --neg:oklch(72% .15 25);
   --warn:oklch(80% .13 80);
+  /* Re-stepped for the dark surface, not dimmed: the light jade fails the dark
+     lightness band outright. Same six hues, same order. */
+  --s1:#25a37e; --s2:#d95926; --s3:#3987e5;
+  --s4:#c98500; --s5:#d55181; --s6:#9085e9;
   --shadow:0 1px 2px oklch(0% 0 0/.35);
   --shadow-lift:0 2px 6px oklch(0% 0 0/.4), 0 16px 32px oklch(0% 0 0/.35);
 }}
@@ -257,6 +270,61 @@ input.otp{
 ol.steps{margin:0 0 .6rem;padding-left:1.15rem;color:var(--fg-muted);font-size:var(--step--1)}
 ol.steps li{margin-bottom:.25rem}
 ol.steps strong{color:var(--fg)}
+
+/* --- charts ------------------------------------------------------------- */
+.sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;
+  clip:rect(0 0 0 0);white-space:nowrap;border:0}
+.chart{margin:0}
+.chart-svg{width:100%;height:auto;display:block;overflow:visible}
+.stack-svg{height:28px}
+.chart .grid{stroke:var(--line);stroke-width:1;shape-rendering:crispEdges}
+.chart .tick{fill:var(--fg-faint);font-size:10.5px;font-variant-numeric:tabular-nums}
+.chart .label{fill:var(--fg-muted);font-size:11px}
+.chart .value{fill:var(--fg);font-size:11px;font-weight:600;font-variant-numeric:tabular-nums}
+.chart .line{fill:none;stroke-width:2;stroke-linejoin:round;stroke-linecap:round}
+.chart .area{fill-opacity:.1;stroke:none}
+/* The 2px ring is surface-coloured so a marker stays legible over the line. */
+.chart .marker,.chart .cursor{stroke:var(--panel);stroke-width:2}
+.chart .crosshair{stroke:var(--line-strong);stroke-width:1;pointer-events:none}
+.chart .hit{fill:transparent;cursor:crosshair;outline:none}
+.chart .hit:focus-visible{fill:color-mix(in oklch,var(--accent) 8%,transparent)}
+.chart .bar,.chart .seg{transition:filter .12s ease}
+.chart .bar.is-hover,.chart .seg.is-hover{filter:brightness(1.12)}
+.chart .seg{outline:none}
+.chart .seg-label{fill:#fff;font-size:11px;font-weight:650;pointer-events:none}
+.chart .s1{color:var(--s1)}.chart .s2{color:var(--s2)}.chart .s3{color:var(--s3)}
+.chart .s4{color:var(--s4)}.chart .s5{color:var(--s5)}.chart .s6{color:var(--s6)}
+.chart path.s1,.chart rect.s1,.chart circle.s1{fill:var(--s1)}
+.chart path.s2,.chart rect.s2,.chart circle.s2{fill:var(--s2)}
+.chart path.s3,.chart rect.s3,.chart circle.s3{fill:var(--s3)}
+.chart path.s4,.chart rect.s4,.chart circle.s4{fill:var(--s4)}
+.chart path.s5,.chart rect.s5,.chart circle.s5{fill:var(--s5)}
+.chart path.s6,.chart rect.s6,.chart circle.s6{fill:var(--s6)}
+.chart path.line.s1{fill:none;stroke:var(--s1)}
+.chart path.area.s1{fill:var(--s1)}
+.chart-caption{display:flex;justify-content:space-between;gap:1rem;margin-top:.5rem;
+  font-size:var(--step--1);font-variant-numeric:tabular-nums}
+.legend{display:flex;flex-wrap:wrap;gap:.35rem .9rem;list-style:none;margin:.75rem 0 0;padding:0;
+  font-size:var(--step--1);color:var(--fg-muted)}
+.legend li{display:flex;align-items:center;gap:.35rem}
+.legend .swatch{width:10px;height:10px;border-radius:3px;flex:0 0 auto}
+.legend .swatch.s1{background:var(--s1)}.legend .swatch.s2{background:var(--s2)}
+.legend .swatch.s3{background:var(--s3)}.legend .swatch.s4{background:var(--s4)}
+.legend .swatch.s5{background:var(--s5)}.legend .swatch.s6{background:var(--s6)}
+.chart-table{margin-top:.75rem}
+.chart-table summary{cursor:pointer;font-size:var(--step--1);color:var(--fg-muted);
+  padding:.25rem 0;list-style-position:inside}
+.chart-table summary:hover{color:var(--fg)}
+.chart-table[open] summary{margin-bottom:.35rem}
+.chart-empty{padding:.4rem 0}
+.tip{position:absolute;z-index:60;pointer-events:none;background:var(--panel);
+  border:1px solid var(--line-strong);border-radius:var(--radius-sm);padding:.45rem .6rem;
+  box-shadow:var(--shadow-lift);display:flex;flex-direction:column;gap:.1rem;max-width:16rem}
+.tip strong{font-size:var(--step-0);font-variant-numeric:tabular-nums}
+.tip span{font-size:var(--step--1);color:var(--fg-muted)}
+.charts-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(20rem,1fr));
+  gap:1.1rem;margin-bottom:1.1rem;align-items:start}
+.charts-grid section{margin-bottom:0}
 
 @media(max-width:640px){
   main{padding:1.3rem .9rem 3.5rem}

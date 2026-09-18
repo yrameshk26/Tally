@@ -5,11 +5,12 @@
  */
 import { esc, html, join, money, raw, type SafeHtml } from '../lib/html.ts';
 import { csrfField, notice } from './layout.ts';
-import type { AccountView, HoldingsResult } from '../queries.ts';
+import { isLiabilityAccount, type AccountView, type HoldingsResult } from '../queries.ts';
 import type { NetWorthTotals } from '../snapshots.ts';
 import type { ManagedKey } from '../settings.ts';
 import type { Profile } from '../profiles.ts';
 import { logoSvg } from './logo.ts';
+import { areaChart, chartRuntime, groupedColumns, hBars, stackedBar } from './charts.ts';
 
 const sign = (n: number): SafeHtml =>
   html`<span class="${n < 0 ? 'neg' : n > 0 ? 'pos' : 'muted'}">${money(n)}</span>`;
@@ -86,13 +87,15 @@ export function overviewPage(opts: {
   nonce: string;
   accounts: AccountView[];
   holdings: HoldingsResult;
+  history: Array<{ label: string; value: number }>;
+  cashflow: Array<{ month: string; income: number; spend: number }>;
   lastSync: string | null;
   fxAsOf: string | null;
   csrf: string;
   flash?: SafeHtml;
 }): SafeHtml {
   const { totals, accounts, holdings } = opts;
-  const cards = accounts.filter((a) => a.category === 'LOC' || a.category === 'LOAN');
+  const cards = accounts.filter(isLiabilityAccount);
   const assets = accounts.filter((a) => a.balance_cad >= 0);
 
   const profileName = (id: string): string => opts.profiles.find((p) => p.id === id)?.name ?? id;
@@ -165,6 +168,54 @@ export function overviewPage(opts: {
       <span class="muted">Pulls fresh balances, holdings and transactions. Read-only.</span>
     </div>
 
+    <section>
+      <h2>Net worth over time</h2>
+      ${areaChart({
+        title: 'Net worth over time',
+        points: opts.history,
+      })}
+    </section>
+
+    <div class="charts-grid">
+      <section>
+        <h2>Allocation by registered type</h2>
+        ${
+          Object.values(totals.by_registered_type).some((v) => v < 0)
+            ? html`<p class="sub-line">Assets only — a liability cannot be a slice of a
+                whole. See “Cards and loans” below.</p>`
+            : raw('')
+        }
+        ${stackedBar({
+          title: 'Allocation by registered type',
+          segments: Object.entries(totals.by_registered_type).map(([label, value]) => ({
+            label,
+            value,
+          })),
+        })}
+      </section>
+      <section>
+        <h2>Largest holdings</h2>
+        ${hBars({
+          title: 'Largest holdings',
+          rows: holdings.positions.slice(0, 7).map((p) => ({
+            label: p.symbol,
+            value: p.market_value_cad,
+            note: `${p.weight_pct.toFixed(1)}% of invested`,
+          })),
+        })}
+      </section>
+    </div>
+
+    <section>
+      <h2>Income vs spend</h2>
+      ${groupedColumns({
+        title: 'Income vs spend by month',
+        groups: opts.cashflow.map((m) => ({ label: m.month.slice(2), a: m.income, b: m.spend })),
+        seriesA: 'Income',
+        seriesB: 'Spend',
+      })}
+    </section>
+
     <div class="split">
       ${bucket('By registered type', totals.by_registered_type)}
       ${bucket('By profile', totals.by_profile, profileName)}
@@ -217,6 +268,8 @@ export function overviewPage(opts: {
             </table></div>`
       }
     </section>
+
+    ${raw(chartRuntime(opts.nonce))}
 
     ${
       opts.profiles.length > 1
