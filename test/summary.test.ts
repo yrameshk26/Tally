@@ -11,6 +11,7 @@ import {
   getActivities,
   getHoldingsByAccount,
   isLiabilityAccount,
+  listAccounts,
   setAccountProfile,
 } from '../src/queries.ts';
 import {
@@ -61,6 +62,7 @@ beforeEach(() => {
       account_category: 'LOC',
       balance: -1500,
       balance_cad: -1500,
+      credit_limit: 10000,
       registered_type: 'NA' as RegisteredType,
     }),
   );
@@ -205,7 +207,11 @@ describe('buildSummary', () => {
     expect(accounts.count).toBe(3);
     expect(accounts.by_source).toEqual({ snaptrade: 2, plaid: 1 });
 
-    const cards = s['cards'] as { count: number; total_owing_cad: number; cards: Array<Record<string, unknown>> };
+    const cards = s['cards'] as Record<string, unknown> & {
+      count: number;
+      total_owing_cad: number;
+      cards: Array<Record<string, unknown>>;
+    };
     expect(cards.count).toBe(1);
     expect(cards.total_owing_cad).toBe(-1500);
     expect(cards.cards[0]?.['mask']).toBe('1004');
@@ -214,6 +220,12 @@ describe('buildSummary', () => {
     expect(isLiabilityAccount({ category: 'loan' })).toBe(true);
     expect(isLiabilityAccount({ category: 'DEPOSITORY' })).toBe(false);
     expect(isLiabilityAccount({ category: null })).toBe(false);
+
+    // A card without its limit is an unknown, never a 0% utilisation.
+    expect(cards.cards[0]?.['credit_limit']).toBe(10000);
+    expect(cards.cards[0]?.['utilization_pct']).toBe(15);
+    expect(cards['total_limit']).toBe(10000);
+    expect(cards['limits_missing']).toBe(0);
   });
 
   it('scopes every section to one profile', () => {
@@ -236,6 +248,50 @@ describe('buildSummary', () => {
     expect(s.period).toEqual({ start: '2026-07-01', end: '2026-09-18' });
     expect(monthsAgoISO(1, new Date('2026-01-15T00:00:00Z'))).toBe('2026-01-01');
     expect(monthsAgoISO(2, new Date('2026-01-15T00:00:00Z'))).toBe('2025-12-01');
+  });
+});
+
+describe('credit limits', () => {
+  it('leaves utilisation null when the institution reports no limit', () => {
+    upsertAccount(
+      db,
+      acct({
+        id: 'plaid:store-card',
+        source: 'plaid',
+        institution: 'Canadian Tire',
+        account_category: 'LOC',
+        balance: -200,
+        balance_cad: -200,
+        registered_type: 'NA' as RegisteredType,
+      }),
+    );
+    const s = buildSummary(db, { sections: ['cards'] });
+    const cards = s['cards'] as Record<string, unknown> & { cards: Array<Record<string, unknown>> };
+    const card = cards.cards.find((c) => c['id'] === 'plaid:store-card');
+    expect(card?.['credit_limit']).toBeNull();
+    expect(card?.['utilization_pct']).toBeNull();
+    expect(cards['limits_missing']).toBe(1);
+    // The known limit still totals — one unknown does not poison the sum.
+    expect(cards['total_limit']).toBe(10000);
+  });
+
+  it('survives the migration from a database without the column', () => {
+    const old = openDb(':memory:');
+    old.exec(`CREATE TABLE accounts (
+      id TEXT PRIMARY KEY, source TEXT NOT NULL, institution TEXT, name TEXT, mask TEXT,
+      account_category TEXT, account_subtype TEXT, registered_type TEXT NOT NULL DEFAULT 'NA',
+      currency TEXT NOT NULL DEFAULT 'CAD', balance REAL NOT NULL DEFAULT 0,
+      balance_cad REAL NOT NULL DEFAULT 0, owner TEXT NOT NULL DEFAULT 'me',
+      active INTEGER NOT NULL DEFAULT 1, status TEXT, item_id TEXT,
+      first_seen TEXT NOT NULL, updated_at TEXT NOT NULL)`);
+    old.prepare(
+      `INSERT INTO accounts (id, source, account_category, balance, balance_cad, first_seen, updated_at)
+       VALUES ('plaid:legacy', 'plaid', 'LOC', -50, -50, '2026-01-01', '2026-01-01')`,
+    ).run();
+    initDb(old);
+    const [card] = listAccounts(old, {});
+    expect(card?.credit_limit).toBeNull();
+    expect(card?.utilization_pct).toBeNull();
   });
 });
 

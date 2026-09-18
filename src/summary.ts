@@ -158,6 +158,8 @@ export function buildSummary(db: DB, opts: SummaryOptions = {}): Summary {
     out['cards'] = {
       count: cards.length,
       total_owing_cad: round2(cards.reduce((s, c) => s + c.balance_cad, 0)),
+      total_limit: round2(cards.reduce((s, c) => s + (c.credit_limit ?? 0), 0)),
+      limits_missing: cards.filter((c) => c.credit_limit == null).length,
       cards: cards.map((c) => ({
         id: c.id,
         name: c.name,
@@ -166,6 +168,8 @@ export function buildSummary(db: DB, opts: SummaryOptions = {}): Summary {
         profile: c.profile,
         balance_cad: c.balance_cad,
         available: c.available,
+        credit_limit: c.credit_limit,
+        utilization_pct: c.utilization_pct,
         ...(c.card ?? {}),
       })),
     };

@@ -226,7 +226,7 @@ export function overviewPage(opts: {
         ? html`<section>
             <h2>Cards and loans</h2>
             <div class="table-wrap"><table>
-              <thead><tr><th>Account</th><th>Institution</th><th>Profile</th><th class="num">Balance</th><th class="num">Statement</th><th class="num">Minimum</th><th>Due</th></tr></thead>
+              <thead><tr><th>Account</th><th>Institution</th><th>Profile</th><th class="num">Balance</th><th class="num">Limit</th><th class="num">Used</th><th class="num">Statement</th><th class="num">Minimum</th><th>Due</th></tr></thead>
               <tbody>${join(
                 cards.map(
                   (c) => html`<tr>
@@ -234,6 +234,8 @@ export function overviewPage(opts: {
                     <td class="muted">${c.institution ?? '—'}</td>
                     <td>${profileCell(c)}</td>
                     <td class="num">${sign(c.balance_cad)}</td>
+                    <td class="num">${c.credit_limit != null ? money(c.credit_limit) : html`<span class="muted">—</span>`}</td>
+                    <td class="num">${c.utilization_pct != null ? html`${c.utilization_pct.toFixed(0)}%` : html`<span class="muted">—</span>`}</td>
                     <td class="num">${c.card?.['statement_balance'] != null ? money(Number(c.card['statement_balance'])) : html`<span class="muted">—</span>`}</td>
                     <td class="num">${c.card?.['minimum_payment'] != null ? money(Number(c.card['minimum_payment'])) : html`<span class="muted">—</span>`}</td>
                     <td>${c.card?.['due_date'] ? String(c.card['due_date']).slice(0, 10) : html`<span class="muted">—</span>`}</td>

@@ -22,6 +22,8 @@ export type AccountRow = {
   balance: number;
   balance_cad: number;
   available: number | null;
+  /** Credit or loan limit, when the institution reports one. */
+  credit_limit?: number | null;
   active: boolean;
   status: string | null;
   item_id: string | null;
@@ -70,11 +72,11 @@ export function upsertAccount(
   db.prepare(
     `INSERT INTO accounts (
        id, source, institution, name, mask, account_category, account_subtype,
-       registered_type, currency, balance, balance_cad, available, owner, profile_id,
+       registered_type, currency, balance, balance_cad, available, credit_limit, owner, profile_id,
        source_profile_id, active, status, item_id, first_seen, updated_at
      ) VALUES (
        @id, @source, @institution, @name, @mask, @account_category, @account_subtype,
-       @registered_type, @currency, @balance, @balance_cad, @available, @owner, @profile_id,
+       @registered_type, @currency, @balance, @balance_cad, @available, @credit_limit, @owner, @profile_id,
        @source_profile_id, @active, @status, @item_id, @ts, @ts
      )
      ON CONFLICT(id) DO UPDATE SET
@@ -89,6 +91,7 @@ export function upsertAccount(
        balance          = excluded.balance,
        balance_cad      = excluded.balance_cad,
        available        = excluded.available,
+       credit_limit     = excluded.credit_limit,
        active            = excluded.active,
        status            = excluded.status,
        item_id           = excluded.item_id,
@@ -107,6 +110,7 @@ export function upsertAccount(
     balance: round2(a.balance),
     balance_cad: round2(a.balance_cad),
     available: a.available === null ? null : round2(a.available),
+    credit_limit: a.credit_limit == null ? null : round2(a.credit_limit),
     // owner and profile_id are written on INSERT only. A nightly sync that
     // reset a hand-set attribution would silently corrupt every per-profile
     // number, and it would look like a market move rather than a bug.

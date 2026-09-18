@@ -25,6 +25,9 @@ export type AccountView = {
   balance: number;
   balance_cad: number;
   available: number | null;
+  credit_limit: number | null;
+  /** Share of the limit in use, 0..100+. Null when the limit is unknown. */
+  utilization_pct: number | null;
   profile: string;
   status: string | null;
   updated_at: string;
@@ -80,10 +83,17 @@ export function listAccounts(
       balance: Number(r['balance']),
       balance_cad: Number(r['balance_cad']),
       available: r['available'] === null ? null : Number(r['available']),
+      credit_limit: r['credit_limit'] == null ? null : Number(r['credit_limit']),
+      utilization_pct: null,
       profile: String(r['profile_id']),
       status: (r['status'] as string) ?? null,
       updated_at: String(r['updated_at']),
     };
+    // Utilisation only means something against a real limit, and a card at its
+    // limit reads 100 — never a division by zero dressed up as a percentage.
+    if (view.credit_limit && view.credit_limit > 0) {
+      view.utilization_pct = round2((Math.abs(view.balance) / view.credit_limit) * 100);
+    }
     if (r['statement_balance'] !== null && r['statement_balance'] !== undefined) {
       view.card = {
         statement_balance: r['statement_balance'],

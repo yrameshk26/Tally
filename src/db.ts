@@ -38,6 +38,7 @@ CREATE TABLE IF NOT EXISTS accounts (
   balance           REAL NOT NULL DEFAULT 0,
   balance_cad       REAL NOT NULL DEFAULT 0,
   available         REAL,
+  credit_limit      REAL,
   owner             TEXT NOT NULL DEFAULT 'me',
   active            INTEGER NOT NULL DEFAULT 1,
   status            TEXT,
@@ -270,6 +271,7 @@ export function migrate(db: DB): void {
     }
   };
   addColumn('accounts', 'available', 'REAL');
+  addColumn('accounts', 'credit_limit', 'REAL');
   addColumn('plaid_items', 'consent_expiration', 'TEXT');
   addColumn('room', 'note', 'TEXT');
   addColumn('sessions', 'pending', "INTEGER NOT NULL DEFAULT 0");

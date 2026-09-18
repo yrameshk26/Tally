@@ -272,6 +272,7 @@ export async function syncPlaid(
           balance,
           balance_cad: fx.toBase(balance, currency),
           available: acct.balances?.available ?? null,
+          credit_limit: acct.balances?.limit ?? null,
           active: true,
           status: 'ok',
             item_id: item.item_id,
