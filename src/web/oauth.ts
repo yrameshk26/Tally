@@ -204,11 +204,40 @@ export function createOAuthRouter(db: DB): express.Router {
     return s && !s.pending ? s : null;
   };
 
-  const renderPage = (res: Response, title: string, body: ReturnType<typeof html>): void => {
+  /**
+   * `formAction` is the client's already-validated redirect URI.
+   *
+   * Chrome applies form-action to the redirect that FOLLOWS a submission, not
+   * just to the POST target — so a bare `form-action 'self'` silently blocks
+   * the hop back to the client and the Allow button appears to do nothing.
+   * The origin is safe to name here precisely because parseAuthz has already
+   * checked it against the client's registered list.
+   */
+  const renderPage = (
+    res: Response,
+    title: string,
+    body: ReturnType<typeof html>,
+    formAction?: string,
+  ): void => {
     const nonce = randomBytes(16).toString('base64');
+    let extra = '';
+    if (formAction) {
+      try {
+        extra = ` ${new URL(formAction).origin}`;
+      } catch {
+        extra = '';
+      }
+    }
     res.setHeader(
       'Content-Security-Policy',
-      `default-src 'none'; style-src 'nonce-${nonce}'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'`,
+      [
+        "default-src 'none'",
+        `style-src 'nonce-${nonce}'`,
+        "img-src 'self' data:",
+        `form-action 'self'${extra}`,
+        "frame-ancestors 'none'",
+        "base-uri 'none'",
+      ].join('; '),
     );
     res.set('Cache-Control', 'no-store').type('html').send(page({ title, nonce, chrome: false, body }));
   };
@@ -259,6 +288,7 @@ export function createOAuthRouter(db: DB): express.Router {
           </form>
         </section>
       </div>`,
+      p.redirect_uri,
     );
   });
 

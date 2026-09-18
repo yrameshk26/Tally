@@ -263,6 +263,37 @@ describe('the full flow', () => {
   });
 });
 
+describe('consent page CSP', () => {
+  it("names the client's redirect origin in form-action", async () => {
+    const clientId = await register();
+    const { challenge } = pkce();
+    const cookie = await login();
+    const q = new URLSearchParams({
+      client_id: clientId, redirect_uri: REDIRECT, response_type: 'code',
+      code_challenge: challenge, code_challenge_method: 'S256',
+    });
+    const res = await fetch(`${base}/oauth/authorize?${q}`, { headers: { cookie } });
+    const csp = res.headers.get('content-security-policy') ?? '';
+    // Chrome applies form-action to the redirect that follows the POST, so a
+    // bare 'self' blocks the hop back to the client and Allow does nothing.
+    expect(csp).toContain(`form-action 'self' ${new URL(REDIRECT).origin}`);
+    // and the favicon must not be blocked by default-src 'none'
+    expect(csp).toContain("img-src 'self' data:");
+  });
+
+  it('does not widen form-action for an origin that was never registered', async () => {
+    const clientId = await register();
+    const { challenge } = pkce();
+    const cookie = await login();
+    const q = new URLSearchParams({
+      client_id: clientId, redirect_uri: 'https://attacker.example/cb', response_type: 'code',
+      code_challenge: challenge, code_challenge_method: 'S256',
+    });
+    const res = await fetch(`${base}/oauth/authorize?${q}`, { headers: { cookie } });
+    expect(res.headers.get('content-security-policy') ?? '').not.toContain('attacker.example');
+  });
+});
+
 describe('token endpoint hardening', () => {
   it('rejects a wrong PKCE verifier', async () => {
     const clientId = await register();
