@@ -82,38 +82,46 @@ describe('configuration', () => {
   });
 });
 
-describe('update mode must ask for the statements product', () => {
+describe('consent is asked for, without taking Repair down with it', () => {
   const source = readFileSync(new URL('../src/sources/plaid.ts', import.meta.url), 'utf8');
 
   function body(fn: string): string {
-    const start = source.indexOf(`export async function ${fn}(`);
+    const start = source.indexOf(`export function ${fn}(`) >= 0
+      ? source.indexOf(`export function ${fn}(`)
+      : source.indexOf(`export async function ${fn}(`);
     expect(start, `${fn} not found`).toBeGreaterThan(-1);
     const next = source.indexOf('\nexport ', start + 10);
     return source.slice(start, next === -1 ? undefined : next);
   }
 
-  it('createUpdateLinkToken names statements, or Repair silently does nothing for it', () => {
-    // Plaid fixes an Item's consented products at link time. A repair that omits
-    // `products` re-authenticates the login and nothing else, so every
-    // statements call keeps returning ADDITIONAL_CONSENT_REQUIRED — which is
-    // exactly the bug this asserts against.
+  it('a plain repair names no products at all', () => {
+    // Naming products in update mode made Plaid Link fail with an opaque
+    // "internal error", which broke re-authentication for every bank —
+    // including the ones whose logins were genuinely expired.
     const fn = body('createUpdateLinkToken');
-    expect(fn).toContain('statementsEnabled()');
-    expect(fn).toContain("products: ['statements'");
-    expect(fn).toContain('statements: statementWindow()');
+    expect(fn).not.toContain("products: ['statements'");
+    expect(fn).not.toContain('statements: statementWindow()');
   });
 
-  it('createLinkToken asks for the window too, which Plaid requires', () => {
+  it('consent is opt-in per call, so it cannot block a repair', () => {
+    const fn = body('createUpdateLinkToken');
+    expect(fn).toContain('opts.consent');
+    expect(fn).toContain('additional_consented_products');
+  });
+
+  it('statements is consent-only, never an initialised product', () => {
+    // In `products` it would hide every institution that lacks statements; in
+    // `optional_products` it would be initialised and billed on every Item.
+    const required = body('plaidOptionalProducts');
+    expect(required).toContain('CONSENT_ONLY');
+    expect(statementsEnabled()).toBe(
+      [...config.plaid.products, ...config.plaid.optionalProducts].includes('statements'),
+    );
+  });
+
+  it('a new link collects the consent up front', () => {
     const fn = body('createLinkToken');
-    expect(fn).toContain('statementsEnabled()');
+    expect(fn).toContain('additional_consented_products');
     expect(fn).toContain('statements: statementWindow()');
-  });
-
-  it('both paths gate on the setting, so statements stays off by default', () => {
-    for (const fn of ['createLinkToken', 'createUpdateLinkToken']) {
-      const text = body(fn);
-      const idx = text.indexOf('statements: statementWindow()');
-      expect(text.slice(0, idx), fn).toContain('statementsEnabled()');
-    }
   });
 });

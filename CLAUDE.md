@@ -18,42 +18,48 @@ history is public too.
    place an order, transfer money, or change a setting at an institution. Never
    call SnapTrade order endpoints. Plaid products are limited to
    `transactions`, `liabilities` and `statements` — never `auth`, `transfer` or
-   `payment`. Statements is read-only and off by default. It is a **link-time**
-   product: both `createLinkToken` and `createUpdateLinkToken` must name it, or
-   enabling it does nothing for existing Items and every call returns
-   `ADDITIONAL_CONSENT_REQUIRED`. Repair is the consent path, not just the
-   re-auth path. `test/statements.test.ts` asserts both call sites.
-2. **Statement PDFs are never persisted.** `src/sources/statements.ts` streams
+   `payment`. Statements is read-only, off by default, and sent as
+   `additional_consented_products` — never in `products` (which hides
+   institutions lacking it) or `optional_products` (which initialises and bills
+   it on every Item). Consent is fixed at link time, so existing Items return
+   `ADDITIONAL_CONSENT_REQUIRED` until each re-consents.
+2. **A plain repair names no products.** Update mode with `products` made Plaid
+   Link die with an opaque "internal error", which broke re-authentication for
+   every bank at once. Consent is a separate, opt-in call
+   (`createUpdateLinkToken(..., { consent: true })`) so a configuration Plaid
+   rejects can never stop a broken login being fixed. `test/statements.test.ts`
+   asserts the separation.
+3. **Statement PDFs are never persisted.** `src/sources/statements.ts` streams
    them through memory and hands them to the caller. No cache, no temp file, no
    database column, no log of their contents — one file carries the full account
    number, the mailing address and every line item. `test/statements.test.ts`
    asserts this against the source; do not weaken it.
-3. **Secrets live in `.env` only.** Never log an access token, consumer key or
+4. **Secrets live in `.env` only.** Never log an access token, consumer key or
    secret. `src/lib/logger.ts` redacts them; do not bypass it. Never commit
    `data/`, `.env` or `room.json`.
-4. **Filing a merchant uses `match_type: 'merchant'`, never `contains`.**
+5. **Filing a merchant uses `match_type: 'merchant'`, never `contains`.**
    A contains rule for `Amazon` also captures `Amazon Web Services`, so
    assigning a category from the Merchants tab must match the directory's own
    key exactly. `contains` stays the right choice for deliberately merging
    misspellings. `setMerchantCategory` also updates the rule that produced a
    merchant's name rather than adding a second — a renamed merchant cannot be
    matched by a new rule on its new name, since rules see the raw bank text.
-5. **Signs.** Assets positive, liabilities negative in `accounts.balance`.
+6. **Signs.** Assets positive, liabilities negative in `accounts.balance`.
    Transactions are stored Plaid-style (positive = money out) and negated on
    read. If you touch a source adapter, add a sign test.
-6. **All FX goes through `src/fx.ts`.** No ad-hoc multiplication by a rate
+7. **All FX goes through `src/fx.ts`.** No ad-hoc multiplication by a rate
    anywhere else. Missing rate → report it, never silently pass the native
    number off as CAD.
-7. **One household, one process.** No multi-tenant code, no user table, no
+8. **One household, one process.** No multi-tenant code, no user table, no
    auth framework. One admin signs in; profiles are buckets within that
    household, not separate users. Auth for `/mcp` is OAuth 2.1 (see
    `src/oauth.ts`); the `/mcp/<MCP_SECRET>` path route is legacy and is turned
    off with `MCP_ALLOW_PATH_SECRET=false`.
-8. **Never scrape.** Wealthsimple's private GraphQL API is off limits;
+9. **Never scrape.** Wealthsimple's private GraphQL API is off limits;
    SnapTrade only.
-9. **After every task:** `npm run typecheck && npm test`. Both must be clean
+10. **After every task:** `npm run typecheck && npm test`. Both must be clean
    before committing. Conventional commits, one per completed task.
-10. **Docs ship with the change, in the same commit.** Any new or changed
+11. **Docs ship with the change, in the same commit.** Any new or changed
    feature updates `README.md` and this file before the commit — never "later",
    never a follow-up commit. Concretely:
    - a new or renamed MCP tool → the tool table in README.md
@@ -65,7 +71,7 @@ history is public too.
    - a changed test count → the Development section
    The test is whether someone reading only these two files would be surprised
    by the code. If yes, the docs are not done.
-11. **The Link helper never deploys.** `src/link-server.ts` runs on the
+12. **The Link helper never deploys.** `src/link-server.ts` runs on the
    developer's machine only. Port 8788 must not be exposed and the file is
    deleted from the Docker image.
 

@@ -622,9 +622,13 @@ export function connectionsPage(opts: {
         for this profile)</span></h2>
       ${
         opts.statementsEnabled
-          ? html`<p class="sub-line">Statements are enabled. Plaid fixes an Item's products when it
-              is linked, so a bank connected before that shows no statements until you
-              <strong>Repair</strong> it — that re-consents it, whether or not its login is broken.</p>`
+          ? html`<p class="sub-line">Statements are enabled. Plaid fixes an Item's consented
+              products when it is linked, so a bank connected before that returns
+              <code>ADDITIONAL_CONSENT_REQUIRED</code> until you use
+              <strong>Enable statements</strong> on it and complete the bank flow. That is separate
+              from <strong>Repair</strong>, which only re-authenticates a broken login. If the
+              consent flow errors, disconnecting and adding the bank again always works —
+              a fresh link carries the full product set.</p>`
           : raw('')
       }
       ${
@@ -657,8 +661,15 @@ export function connectionsPage(opts: {
                     }</td>
                     <td class="num"><div class="row tight">
                       <button class="secondary" type="button"
-                        title="Re-authenticate this bank, and grant consent for any product enabled since it was linked"
+                        title="Re-authenticate this bank's login"
                         data-relink="${String(i['item_id'])}">Repair</button>
+                      ${
+                        opts.statementsEnabled
+                          ? html`<button class="secondary" type="button"
+                              title="Ask this bank for consent to fetch statements"
+                              data-consent="${String(i['item_id'])}">Enable statements</button>`
+                          : raw('')
+                      }
                       <form method="post" action="/connections/remove" class="inline-form"
                             data-confirm="Disconnect ${String(i['institution'] ?? 'this bank')}? Its access token is revoked at Plaid and its accounts leave your net worth. Transaction history is kept.">
                         ${csrfField(opts.csrf)}
@@ -739,14 +750,16 @@ export function connectionsPage(opts: {
         catch (e) { say('Could not start Plaid Link: ' + e.message); }
         ev.target.disabled = false;
       });
-      for (const btn of document.querySelectorAll('[data-relink]')) {
+      for (const btn of document.querySelectorAll('[data-relink],[data-consent]')) {
+        const consent = btn.hasAttribute('data-consent');
+        const id = consent ? btn.dataset.consent : btn.dataset.relink;
         btn.addEventListener('click', async () => {
-          say('Preparing repair…');
-          try { const r = await api('/api/plaid/relink', { item_id: btn.dataset.relink });
+          say(consent ? 'Preparing consent…' : 'Preparing repair…');
+          try { const r = await api('/api/plaid/relink', { item_id: id, consent });
                 sessionStorage.setItem('tally_lt', r.link_token);
                 sessionStorage.setItem('tally_profile', PROFILE);
                 say(''); open(r.link_token); }
-          catch (e) { say('Could not start repair: ' + e.message); }
+          catch (e) { say('Could not start: ' + e.message); }
         });
       }
       if (location.pathname === '/connections/oauth') {

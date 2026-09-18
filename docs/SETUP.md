@@ -182,14 +182,22 @@ one disappears from the picker. Keep required minimal and put everything
 nice-to-have in `PLAID_OPTIONAL_PRODUCTS`, which is fetched best-effort and never
 blocks a link.
 
+`statements` is handled differently again: naming it in either list would hide
+unsupported institutions or bill it on every Item, so it is sent as
+`additional_consented_products` — consent collected, nothing initialised until a
+statements endpoint is actually called.
+
 **Products are fixed when an Item is linked.** Enabling `statements` later does
 nothing for banks you already have — every call returns
 `ADDITIONAL_CONSENT_REQUIRED` until each one is re-consented.
 
-To grant it, use **Connections → Repair** on each bank. Repair runs Link in
-update mode and asks for the newly enabled product as well as re-authenticating,
-so it works on a healthy connection, not only a broken one. You will go through
-the bank's login once per Item.
+To grant it, use **Connections → Enable statements** on each bank and complete
+the bank flow. That is a separate button from **Repair**, which only
+re-authenticates a broken login — they are kept apart so a consent configuration
+Plaid rejects can never stop you fixing a login.
+
+If the consent flow errors, **disconnect the bank and add it again**. A fresh
+link always carries the full product set, and is the reliable path.
 
 ### Linking banks
 

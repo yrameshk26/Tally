@@ -86,10 +86,29 @@ export function plaidProducts(): Products[] {
 }
 
 export function plaidOptionalProducts(): Products[] {
-  // Never overlap with `products` — Plaid rejects the request if they do.
+  // Never overlap with `products` or `additional_consented_products` — Plaid
+  // rejects the request if any of the three lists share an entry.
   const required = new Set(config.plaid.products);
   return config.plaid.optionalProducts
-    .filter((p) => !required.has(p))
+    .filter((p) => !required.has(p) && !CONSENT_ONLY.has(p))
+    .map((p) => p as Products);
+}
+
+/**
+ * Products we collect consent for but never initialise at link time.
+ *
+ * Statements is the case: naming it in `products` narrows Link to institutions
+ * that support it, and naming it in `optional_products` initialises (and bills)
+ * it on every Item. `additional_consented_products` collects the consent,
+ * leaves institutions that lack it visible, and costs nothing until a
+ * statements endpoint is actually called.
+ */
+const CONSENT_ONLY = new Set(['statements']);
+
+export function plaidConsentProducts(): Products[] {
+  const required = new Set(config.plaid.products);
+  return [...config.plaid.products, ...config.plaid.optionalProducts]
+    .filter((p) => CONSENT_ONLY.has(p) && !required.has(p))
     .map((p) => p as Products);
 }
 
@@ -452,9 +471,11 @@ export async function createLinkToken(
     client_name: 'tally',
     products: plaidProducts(),
     ...(plaidOptionalProducts().length ? { optional_products: plaidOptionalProducts() } : {}),
-    // Statements is configured at link time or not at all: Plaid rejects the
-    // request without a window, and an Item linked without it can never serve
-    // one without re-consent.
+    // Consent only: keeps every institution visible in Link and bills nothing
+    // until a statements endpoint is called.
+    ...(plaidConsentProducts().length
+      ? { additional_consented_products: plaidConsentProducts() }
+      : {}),
     ...(statementsEnabled() ? { statements: statementWindow() } : {}),
     country_codes: plaidCountryCodes(),
     language: 'en',
@@ -464,21 +485,22 @@ export async function createLinkToken(
 }
 
 /**
- * Update-mode token: re-authenticates an existing Item without re-linking, and
- * collects consent for any product enabled since it was first linked.
+ * Update-mode token: re-authenticates an existing Item without re-linking.
  *
- * That second job is not optional. Plaid fixes an Item's consented product set
- * at link time, so turning on Statements does nothing for the twelve banks you
- * already have — every call returns ADDITIONAL_CONSENT_REQUIRED until the user
- * re-consents through Link. Update mode is the supported way to add one:
- * Plaid's own guidance is that `products` is omitted in update mode *unless*
- * you are adding a product such as Statements, Assets or Income.
+ * With `consent`, it also asks for consent to the products enabled since the
+ * Item was linked — Plaid fixes the consented set at link time, so turning on
+ * Statements does nothing for banks already connected until each re-consents.
+ *
+ * The two are deliberately separate calls. Folding consent into every repair
+ * meant one rejected configuration took re-authentication down with it, and a
+ * bank with a broken login must be fixable whatever else is misconfigured.
  */
 export async function createUpdateLinkToken(
   db: DB,
   itemId: string,
   redirectUri?: string,
   profileId = DEFAULT_PROFILE_ID,
+  opts: { consent?: boolean } = {},
 ): Promise<string> {
   const item = db.prepare('SELECT * FROM plaid_items WHERE item_id = ?').get(itemId) as
     | PlaidItemRow
@@ -490,10 +512,12 @@ export async function createUpdateLinkToken(
     country_codes: plaidCountryCodes(),
     language: 'en',
     access_token: accessTokenFor(item),
-    // Naming statements here is what turns a repair into a consent grant. An
-    // Item that already has it simply re-consents, which is harmless.
-    ...(statementsEnabled()
-      ? { products: ['statements' as Products], statements: statementWindow() }
+    // Only when the caller asked for it. A plain repair must stay plain: naming
+    // products in update mode is what made Link fail with an opaque "internal
+    // error", and a bank whose login is broken has to be fixable regardless of
+    // whether the consent flow works.
+    ...(opts.consent && plaidConsentProducts().length
+      ? { additional_consented_products: plaidConsentProducts() }
       : {}),
     ...((redirectUri ?? config.plaid.redirectUri) ? { redirect_uri: redirectUri ?? config.plaid.redirectUri } : {}),
   });
