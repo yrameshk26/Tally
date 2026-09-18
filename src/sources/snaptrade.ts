@@ -153,10 +153,24 @@ export type StPositionV2 = {
   currency?: StCurrency | string | null;
 };
 
-export type StPositionsResponse = {
-  positions?: Array<StPosition & StPositionV2> | null;
-  data_freshness?: { as_of?: string | null } | null;
-};
+export type StPositionRow = StPosition & StPositionV2;
+
+/**
+ * The unified positions endpoint returns `{ results: [...] }` — note `results`,
+ * not `positions`. Tooling that re-serialises SnapTrade responses sometimes
+ * renames it, which is an easy way to lose an afternoon, so every plausible
+ * envelope is accepted and a bare array is handled too.
+ */
+export function extractPositions(body: unknown): StPositionRow[] {
+  if (Array.isArray(body)) return body as StPositionRow[];
+  if (body && typeof body === 'object') {
+    for (const key of ['results', 'positions', 'data']) {
+      const v = (body as Record<string, unknown>)[key];
+      if (Array.isArray(v)) return v as StPositionRow[];
+    }
+  }
+  return [];
+}
 
 export type StBalance = { currency?: StCurrency | string; cash?: number | string | null };
 
@@ -237,6 +251,7 @@ export type SnapTradeReport = {
   cards_deactivated?: number;
   holdings?: number;
   holdings_errors?: number;
+  positions_source?: string;
   deactivated?: number;
   by_registered_type?: Record<string, number>;
   total_cad?: number;
@@ -323,10 +338,20 @@ export async function syncSnapTrade(db: DB, rates: RateMap): Promise<SnapTradeRe
     if (!active) continue;
 
     try {
-      const positions = await snaptradeGet<StPositionsResponse>(
-        db,
-        `/accounts/${acct.id}/positions/all`,
+      // Unified endpoint first (equities, crypto and options in one call), then
+      // the older per-asset endpoint if it yields nothing — brokerages and plan
+      // tiers differ in which one is populated.
+      let positions = extractPositions(
+        await snaptradeGet<unknown>(db, `/accounts/${acct.id}/positions/all`),
       );
+      let source = 'unified';
+      if (positions.length === 0) {
+        positions = extractPositions(
+          await snaptradeGet<unknown>(db, `/accounts/${acct.id}/positions`),
+        );
+        source = positions.length ? 'legacy' : 'none';
+      }
+      report.positions_source = source;
       // Balances are a separate call and are allowed to fail: the account total
       // already came from /accounts, so a missing cash row costs detail, not
       // correctness.
@@ -336,7 +361,7 @@ export async function syncSnapTrade(db: DB, rates: RateMap): Promise<SnapTradeRe
       } catch (e) {
         log.debug(`snaptrade: balances for ${acct.id} unavailable (${errMessage(e)})`);
       }
-      const rows = mapHoldings(id, { positions: positions.positions, balances }, currency, fx);
+      const rows = mapHoldings(id, { positions, balances }, currency, fx);
       replaceHoldings(db, id, rows);
       report.holdings = (report.holdings ?? 0) + rows.length;
     } catch (e) {

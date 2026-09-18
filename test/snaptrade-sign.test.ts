@@ -191,3 +191,35 @@ describe('holdings mapping — legacy shape', () => {
     expect(rows.find((r) => r.asset_type === 'cash')!.symbol).toBe('CASH.CAD');
   });
 });
+
+describe('positions envelope', () => {
+  const row = { instrument: { kind: 'etf', raw_symbol: 'XEQT' }, units: '10', price: '45.51' };
+
+  it('reads `results`, which is what the unified endpoint actually returns', async () => {
+    const { extractPositions } = await import('../src/sources/snaptrade.ts');
+    expect(extractPositions({ results: [row] })).toHaveLength(1);
+  });
+
+  it('also accepts `positions`, which is how some tooling renames it', async () => {
+    const { extractPositions } = await import('../src/sources/snaptrade.ts');
+    expect(extractPositions({ positions: [row] })).toHaveLength(1);
+  });
+
+  it('accepts a bare array, which the older endpoint returns', async () => {
+    const { extractPositions } = await import('../src/sources/snaptrade.ts');
+    expect(extractPositions([row])).toHaveLength(1);
+  });
+
+  it('returns empty — never throws — for an unexpected body', async () => {
+    const { extractPositions } = await import('../src/sources/snaptrade.ts');
+    for (const bad of [null, undefined, {}, '', 0, { results: 'nope' }]) {
+      expect(extractPositions(bad)).toEqual([]);
+    }
+  });
+
+  it('prefers results over positions when both are present', async () => {
+    const { extractPositions } = await import('../src/sources/snaptrade.ts');
+    const out = extractPositions({ results: [row], positions: [row, row] });
+    expect(out).toHaveLength(1);
+  });
+});
