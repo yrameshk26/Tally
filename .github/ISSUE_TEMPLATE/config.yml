@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Security vulnerability
+    url: https://github.com/yrameshk26/Tally/security/advisories/new
+    about: Report privately through a GitHub Security Advisory — never a public issue.
+  - name: Question or idea
+    url: https://github.com/yrameshk26/Tally/discussions
+    about: For anything that isn't a bug report.

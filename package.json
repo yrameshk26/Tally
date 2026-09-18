@@ -1,0 +1,41 @@
+{
+  "name": "tally",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Personal read-only net-worth MCP server (finmcp)",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc --noEmit",
+    "dev": "node --experimental-strip-types --env-file-if-exists=.env src/index.ts",
+    "start": "node dist/index.js",
+    "db:init": "node --experimental-strip-types --env-file-if-exists=.env scripts/db-init.ts",
+    "sync": "node --experimental-strip-types --env-file-if-exists=.env scripts/sync.ts",
+    "link": "node --experimental-strip-types --env-file-if-exists=.env src/link-server.ts",
+    "backup": "node --experimental-strip-types --env-file-if-exists=.env scripts/backup.ts",
+    "test": "vitest run",
+    "seed:room": "node --experimental-strip-types --env-file-if-exists=.env scripts/db-init.ts",
+    "check": "npm run typecheck && npm test",
+    "hash-password": "node --experimental-strip-types --env-file-if-exists=.env scripts/hash-password.ts"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.21.0",
+    "argon2": "^0.45.1",
+    "better-sqlite3": "^12.2.0",
+    "express": "^5.1.0",
+    "plaid": "^42.0.0",
+    "snaptrade-typescript-sdk": "^9.0.129",
+    "zod": "^3.25.76",
+    "zod-to-json-schema": "^3.24.6"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.13",
+    "@types/express": "^5.0.3",
+    "@types/node": "^22.15.3",
+    "typescript": "^5.9.2",
+    "vitest": "^3.2.4"
+  }
+}

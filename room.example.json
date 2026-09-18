@@ -1,0 +1,5 @@
+[
+  { "person": "me", "account_type": "RRSP", "year": 2026, "limit": 30000, "note": "example — copy to room.json and use your CRA notice of assessment" },
+  { "person": "me", "account_type": "TFSA", "year": 2026, "limit": 7000, "note": "example — CRA My Account shows your real figure" },
+  { "person": "partner", "account_type": "TFSA", "year": 2026, "limit": 7000, "note": "one row per person per account type per year" }
+]

@@ -1,0 +1,42 @@
+name: Bug report
+description: Something returns the wrong number, or does not work
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **Never paste an access token, API key, account number or a real balance
+        here.** Redact them. If the bug only shows with real data, say so and we
+        will work out a minimal reproduction together.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you did, what you got, what you expected instead.
+    validations:
+      required: true
+  - type: dropdown
+    id: source
+    attributes:
+      label: Which source
+      options: [SnapTrade, Plaid, Wise, Bank of Canada FX, the web UI, the MCP server, not sure]
+    validations:
+      required: true
+  - type: textarea
+    id: sync
+    attributes:
+      label: sync_report output
+      description: Redact institution names if you would rather. Per-source status is usually enough.
+      render: json
+  - type: input
+    id: version
+    attributes:
+      label: Version or commit
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before submitting
+      options:
+        - label: I removed every credential, account number and real balance
+          required: true
+        - label: "`npm run check` passes on my checkout"

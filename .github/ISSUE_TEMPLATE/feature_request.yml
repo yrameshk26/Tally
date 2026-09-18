@@ -1,0 +1,21 @@
+name: Feature request
+description: Suggest something this should do
+labels: [enhancement]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Please read the "likely to be declined" list in
+        [CONTRIBUTING.md](../blob/main/CONTRIBUTING.md) first — write access to
+        an institution and multi-tenancy are permanently out of scope.
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem does this solve
+      description: The situation you are in, not the feature you imagined.
+    validations:
+      required: true
+  - type: textarea
+    id: idea
+    attributes:
+      label: What you have in mind
