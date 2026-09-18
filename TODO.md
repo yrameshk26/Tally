@@ -51,14 +51,32 @@ dashboard action only the owner can do.
 - [ ] Confirm the first cron line in `/data/sync.log`
 - [ ] Add the custom connector in Claude.ai
 
+## Phase 8 — web UI ✅
+- [x] Argon2id (OWASP params) + `npm run hash-password`; password never stored
+- [x] TOTP implemented against RFC 6238 vectors, no dependency
+- [x] Server-side sessions, real sign-out, "sign out everywhere"
+- [x] CSRF on every state-changing route; CSP `default-src 'none'` with nonces
+- [x] Failure-only sign-in limiter, checked before password verification
+- [x] Settings page — provider credentials encrypted in DB, override env
+- [x] Connections page — Plaid Link, item health, one-click repair, OAuth return
+- [x] Overview — net worth, accounts, cards with due dates, holdings
+- [x] Institution-supplied strings escaped (stored-XSS test)
+- [ ] Register `https://<domain>/connections/oauth` in the Plaid dashboard
+- [ ] Enrol two-factor on the deployed instance
+- [ ] Rotate the temporary admin password
+
 ## Phase 7 — hardening ✅
 - [x] Rate limit on `/mcp` (60/min per IP), 404 on wrong secret, constant-time compare
+- [x] `TRUST_PROXY` — without it `req.ip` is the proxy and the limiter is one global bucket
 - [x] AES-256-GCM encryption of `plaid_items.access_token`, idempotent migration
 - [x] `npm test` — FX, classifier, sign normalisation, aggregation fixtures, HTTP
 - [x] `sync_report` tool with `age_hours` and `stale`
 - [x] Nightly backup to `/data/backups/`, 14 days retained
 
 ## Discovered work
+- [ ] MCP endpoint auth: the secret-in-URL is written to Traefik's access log on
+      every request (Dokploy enables request logging globally). Rotating helps;
+      OAuth or a header-based token is the real fix.
 - [ ] Wise `/v2/profiles` response shape is assumed from the docs — confirm the
       `type` field really is `personal`/`business` on a live token.
 - [ ] SnapTrade `/accounts/{id}/activities` pagination is assumed to be
