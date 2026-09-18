@@ -57,8 +57,34 @@ export function computeTotals(db: DB, profileId?: string): NetWorthTotals {
   return totals;
 }
 
-export function writeSnapshot(db: DB, origin = 'sync'): NetWorthTotals {
+/**
+ * Record today's totals.
+ *
+ * A sync that fetched nothing — first boot, no credentials yet, every source
+ * failing — must not leave a $0 row behind. History is drawn as a line, so one
+ * zero at the start renders as a fall to nothing and a same-day recovery, which
+ * is a more confident lie than an empty chart. Returns null when it declines.
+ */
+/**
+ * Drop snapshot rows that record a zero net worth with nothing behind them.
+ * Written by earlier versions, which snapshotted unconditionally; kept as a
+ * migration because the chart is wrong until they are gone.
+ */
+export function pruneEmptySnapshots(db: DB): number {
+  return db
+    .prepare(
+      `DELETE FROM snapshots
+       WHERE net_worth_cad = 0 AND total_assets_cad = 0 AND total_liabilities_cad = 0`,
+    )
+    .run().changes;
+}
+
+export function writeSnapshot(db: DB, origin = 'sync'): NetWorthTotals | null {
   const t = computeTotals(db);
+  const active = (
+    db.prepare('SELECT COUNT(*) AS n FROM accounts WHERE active = 1').get() as { n: number }
+  ).n;
+  if (active === 0) return null;
   db.prepare(
     `INSERT INTO snapshots (ts, total_assets_cad, total_liabilities_cad, net_worth_cad, by_owner, by_registered_type, origin)
      VALUES (?, ?, ?, ?, ?, ?, ?)

@@ -10,6 +10,7 @@ import { DEFAULT_SECTIONS, SUMMARY_SECTIONS, buildSummary, monthsAgoISO } from '
 import {
   getActivities,
   getHoldingsByAccount,
+  getNetWorthHistory,
   isLiabilityAccount,
   listAccounts,
   setAccountProfile,
@@ -378,5 +379,31 @@ describe('getHoldingsByAccount', () => {
     const [rrsp] = getHoldingsByAccount(db, { account_id: 'st:rrsp' });
     expect(rrsp?.balance_cad).toBe(100000);
     expect(rrsp?.invested_cad).toBe(80000);
+  });
+});
+
+describe('snapshots', () => {
+  it('declines to record a $0 day when nothing is linked', async () => {
+    const { writeSnapshot } = await import('../src/snapshots.ts');
+    const empty = initDb(openDb(':memory:'));
+    expect(writeSnapshot(empty)).toBeNull();
+    expect(getNetWorthHistory(empty, {})).toHaveLength(0);
+  });
+
+  it('records a day once there are accounts', async () => {
+    const { writeSnapshot } = await import('../src/snapshots.ts');
+    expect(writeSnapshot(db)?.net_worth_cad).toBe(118500);
+    expect(getNetWorthHistory(db, {})).toHaveLength(1);
+  });
+
+  it('prunes the empty rows an earlier version wrote', async () => {
+    const { pruneEmptySnapshots } = await import('../src/snapshots.ts');
+    db.prepare(
+      `INSERT INTO snapshots (ts, total_assets_cad, total_liabilities_cad, net_worth_cad, by_owner, by_registered_type, origin)
+       VALUES ('2026-09-17T00:00:00.000Z', 0, 0, 0, '{}', '{}', 'sync')`,
+    ).run();
+    expect(getNetWorthHistory(db, {})).toHaveLength(1);
+    expect(pruneEmptySnapshots(db)).toBe(1);
+    expect(getNetWorthHistory(db, {})).toHaveLength(0);
   });
 });

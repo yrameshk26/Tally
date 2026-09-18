@@ -8,6 +8,7 @@
  * leaving the account) and negated when read out.
  */
 import Database from 'better-sqlite3';
+import { pruneEmptySnapshots } from './snapshots.ts';
 import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { config } from './config.ts';
@@ -334,6 +335,7 @@ export function migrate(db: DB): void {
 
   migrateProfiles(db);
   encryptExistingTokens(db);
+  pruneEmptySnapshots(db);
 }
 
 /**

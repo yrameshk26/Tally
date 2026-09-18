@@ -10,7 +10,7 @@ import { nowISO } from './lib/money.ts';
 import { syncPlaid } from './sources/plaid.ts';
 import { syncSnapTrade } from './sources/snaptrade.ts';
 import { syncWise } from './sources/wise.ts';
-import { writeSnapshot } from './snapshots.ts';
+import { computeTotals, writeSnapshot } from './snapshots.ts';
 import { listProfiles } from './profiles.ts';
 
 export type SyncReport = {
@@ -93,7 +93,10 @@ export async function runSync(db: DB = getDb()): Promise<SyncReport> {
     return out;
   };
 
-  const totals = writeSnapshot(db);
+  // Declines to record a $0 day when nothing is linked yet; the report still
+  // carries the computed totals so the caller sees zeros without history doing.
+  const snapshot = writeSnapshot(db);
+  const totals = snapshot ?? computeTotals(db);
 
   const ok = !results.some((r) => typeof r === 'object' && r !== null && 'error' in r);
 
