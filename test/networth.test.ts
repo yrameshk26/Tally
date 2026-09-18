@@ -13,13 +13,14 @@ import {
   getNetWorthHistory,
   getTransactions,
   listAccounts,
-  setAccountOwner,
+  setAccountProfile,
   setContributed,
   setRoomLimit,
 } from '../src/queries.ts';
 import { replaceHoldings, upsertAccount, upsertActivities, upsertTransactions } from '../src/store.ts';
 import type { AccountRow } from '../src/store.ts';
 import type { RegisteredType } from '../src/lib/registered.ts';
+import { createProfile } from '../src/profiles.ts';
 
 function acct(over: Partial<AccountRow> & { id: string }): AccountRow {
   return {
@@ -60,8 +61,9 @@ beforeEach(() => {
   // Spouse's Wealthsimple
   add(db, 'snaptrade:sp-tfsa', 'TFSA', 4700);
   add(db, 'snaptrade:sp-rrsp', 'RRSP', 2800);
-  setAccountOwner(db, 'snaptrade:sp-tfsa', 'spouse');
-  setAccountOwner(db, 'snaptrade:sp-rrsp', 'spouse');
+  createProfile(db, 'Spouse');
+  setAccountProfile(db, 'snaptrade:sp-tfsa', 'spouse');
+  setAccountProfile(db, 'snaptrade:sp-rrsp', 'spouse');
 });
 
 describe('net worth aggregation', () => {
@@ -83,7 +85,7 @@ describe('net worth aggregation', () => {
 
   it('splits by owner', () => {
     const t = computeTotals(db);
-    expect(t.by_owner).toEqual({ me: 176800, spouse: 7500 });
+    expect(t.by_profile).toEqual({ me: 176800, spouse: 7500 });
   });
 
   it('filters to one person', () => {
@@ -426,16 +428,18 @@ describe('contribution room', () => {
   });
 });
 
-describe('owner tagging', () => {
+describe('profile attribution', () => {
   it('survives a re-sync of the same account', () => {
-    setAccountOwner(db, 'snaptrade:ws-tfsa', 'spouse');
+    setAccountProfile(db, 'snaptrade:ws-tfsa', 'spouse');
     add(db, 'snaptrade:ws-tfsa', 'TFSA', 8500);
     const a = listAccounts(db).find((x) => x.id === 'snaptrade:ws-tfsa')!;
-    expect(a.owner).toBe('spouse');
+    // A nightly sync resetting this would silently corrupt every per-profile
+    // number, and would look like a market move rather than a bug.
+    expect(a.profile).toBe('spouse');
     expect(a.balance_cad).toBe(8500);
   });
 
   it('reports failure for an unknown account id', () => {
-    expect(setAccountOwner(db, 'snaptrade:nope', 'spouse')).toBe(false);
+    expect(setAccountProfile(db, 'snaptrade:nope', 'spouse')).toBe(false);
   });
 });

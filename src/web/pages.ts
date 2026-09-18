@@ -8,6 +8,7 @@ import { csrfField, notice } from './layout.ts';
 import type { AccountView, HoldingsResult } from '../queries.ts';
 import type { NetWorthTotals } from '../snapshots.ts';
 import type { ManagedKey } from '../settings.ts';
+import type { Profile } from '../profiles.ts';
 
 const sign = (n: number): SafeHtml =>
   html`<span class="${n < 0 ? 'neg' : n > 0 ? 'pos' : 'muted'}">${money(n)}</span>`;
@@ -50,6 +51,7 @@ export function loginPage(opts: {
 
 export function overviewPage(opts: {
   totals: NetWorthTotals;
+  profiles: Profile[];
   accounts: AccountView[];
   holdings: HoldingsResult;
   lastSync: string | null;
@@ -103,7 +105,7 @@ export function overviewPage(opts: {
     </div>
 
     ${bucket('By registered type', totals.by_registered_type)}
-    ${bucket('By owner', totals.by_owner)}
+    ${bucket('By profile', totals.by_profile)}
 
     ${
       cards.length
@@ -143,7 +145,22 @@ export function overviewPage(opts: {
                     <td>${a.name ?? a.id}${a.mask ? html` <span class="muted">••${a.mask}</span>` : raw('')}</td>
                     <td class="muted">${a.institution ?? '—'}</td>
                     <td><span class="pill">${a.registered_type}</span></td>
-                    <td class="muted">${a.owner}</td>
+                    <td>${
+                      opts.profiles.length > 1
+                        ? html`<form method="post" action="/accounts/move" class="row" style="gap:.3rem">
+                            ${csrfField(opts.csrf)}
+                            <input type="hidden" name="account_id" value="${a.id}">
+                            <select name="profile" onchange="this.form.submit()">
+                              ${join(
+                                opts.profiles.map(
+                                  (pr) =>
+                                    html`<option value="${pr.id}"${pr.id === a.profile ? raw(' selected') : raw('')}>${pr.name}</option>`,
+                                ),
+                              )}
+                            </select>
+                          </form>`
+                        : html`<span class="muted">${a.profile}</span>`
+                    }</td>
                     <td class="num">${sign(a.balance_cad)}${a.currency !== 'CAD' ? html`<div class="muted" style="font-size:.78rem">${a.balance.toLocaleString()} ${a.currency}</div>` : raw('')}</td>
                   </tr>`,
                 ),
@@ -204,6 +221,8 @@ const LABELS: Record<string, { label: string; hint: string }> = {
 
 export function settingsPage(opts: {
   settings: SettingView[];
+  profiles: Profile[];
+  activeProfile: Profile;
   csrf: string;
   flash?: SafeHtml;
   encryptionReady: boolean;
@@ -245,9 +264,10 @@ export function settingsPage(opts: {
 
   return html`
     <h1>Settings</h1>
-    <p class="sub">Provider credentials. Saved values are stored in the database and override
-      anything set in the environment, so changing one here takes effect on the next sync
-      without a redeploy.</p>
+    <p class="sub">Provider credentials for <strong>${opts.activeProfile.name}</strong>. Each
+      profile has its own keys — that is what gives it a separate bank-connection allowance.
+      Saved values override the environment and take effect on the next sync without a redeploy.</p>
+    ${profileTabs(opts.profiles, opts.activeProfile.id, '/settings')}
     ${opts.flash ?? raw('')}
     ${
       opts.encryptionReady
@@ -259,6 +279,7 @@ export function settingsPage(opts: {
       ${group('SnapTrade — brokerages', ['SNAPTRADE_CLIENT_ID', 'SNAPTRADE_CONSUMER_KEY', 'SNAPTRADE_TRANSPORT'])}
       ${group('Plaid — banks and cards', ['PLAID_CLIENT_ID', 'PLAID_SECRET', 'PLAID_ENV'])}
       ${group('Wise — multi-currency', ['WISE_API_TOKEN'])}
+      <input type="hidden" name="profile" value="${opts.activeProfile.id}">
       <div class="row"><button type="submit">Save credentials</button>
         <span class="muted">Secrets are encrypted at rest and never displayed again.</span></div>
     </form>
@@ -289,12 +310,94 @@ export function settingsPage(opts: {
           : raw('')
       }
       <form method="post" action="/settings/test" style="margin-top:.9rem">
-        ${csrfField(opts.csrf)}<button class="secondary" type="submit">Test all providers</button>
+        ${csrfField(opts.csrf)}
+        <input type="hidden" name="profile" value="${opts.activeProfile.id}">
+        <button class="secondary" type="submit">Test all providers</button>
       </form>
     </section>`;
 }
 
+/** Profile switcher shared by the pages that are scoped to one. */
+export function profileTabs(profiles: Profile[], activeId: string, basePath: string): SafeHtml {
+  if (profiles.length <= 1) return raw('');
+  return html`<div class="row" style="margin-bottom:1.1rem">${join(
+    profiles.map(
+      (p) =>
+        html`<a class="btn ${p.id === activeId ? '' : 'secondary'}"
+              href="${basePath}?profile=${encodeURIComponent(p.id)}">${p.name}</a>`,
+    ),
+  )}</div>`;
+}
+
+export function profilesPage(opts: {
+  profiles: Array<Profile & { usage: { accounts: number; plaid_items: number; settings: number } }>;
+  max: number;
+  csrf: string;
+  flash?: SafeHtml;
+}): SafeHtml {
+  return html`
+    <h1>Profiles</h1>
+    <p class="sub">A profile is a person or bucket <em>and</em> its own set of provider
+      credentials. Plaid caps Items at 10 per team, so a second profile with its own Plaid keys
+      is a second allowance — ${String(opts.max)} profiles means up to ${String(opts.max * 10)} linked banks.</p>
+    ${opts.flash ?? raw('')}
+
+    <section>
+      <h2>Your profiles <span class="muted">(${String(opts.profiles.length)} of ${String(opts.max)})</span></h2>
+      <table>
+        <thead><tr><th>Name</th><th>Id</th><th class="num">Accounts</th><th class="num">Banks</th><th class="num">Credentials</th><th></th></tr></thead>
+        <tbody>${join(
+          opts.profiles.map(
+            (p) => html`<tr>
+              <td>
+                <form method="post" action="/profiles/rename" class="row" style="gap:.35rem">
+                  ${csrfField(opts.csrf)}
+                  <input type="hidden" name="profile" value="${p.id}">
+                  <input name="name" value="${p.name}" style="max-width:11rem">
+                  <button class="secondary" type="submit">Rename</button>
+                </form>
+              </td>
+              <td class="mono muted">${p.id}</td>
+              <td class="num">${String(p.usage.accounts)}</td>
+              <td class="num">${String(p.usage.plaid_items)}</td>
+              <td class="num">${p.usage.settings > 0 ? html`<span class="pill ok">set</span>` : html`<span class="pill">none</span>`}</td>
+              <td class="num">
+                <a class="btn secondary" href="/settings?profile=${encodeURIComponent(p.id)}">Credentials</a>
+                ${
+                  p.id === 'me'
+                    ? raw('')
+                    : html` <form method="post" action="/profiles/delete" style="display:inline">
+                        ${csrfField(opts.csrf)}
+                        <input type="hidden" name="profile" value="${p.id}">
+                        <button class="danger" type="submit">Delete</button>
+                      </form>`
+                }
+              </td>
+            </tr>`,
+          ),
+        )}</tbody>
+      </table>
+    </section>
+
+    ${
+      opts.profiles.length < opts.max
+        ? html`<section>
+            <h2>Add a profile</h2>
+            <form method="post" action="/profiles" class="row">
+              ${csrfField(opts.csrf)}
+              <input name="name" placeholder="e.g. Spouse, or Business" required style="max-width:18rem">
+              <button type="submit">Create</button>
+            </form>
+            <p class="hint" style="margin-top:.6rem">Then add its Plaid and SnapTrade keys under
+              Credentials, and link banks from Connections with that profile selected.</p>
+          </section>`
+        : html`<p class="hint">All ${String(opts.max)} profiles are in use.</p>`
+    }`;
+}
+
 export function connectionsPage(opts: {
+  profiles: Profile[];
+  activeProfile: Profile;
   items: Array<Record<string, unknown>>;
   snaptradeReady: boolean;
   wiseReady: boolean;
@@ -313,8 +416,10 @@ export function connectionsPage(opts: {
 
   return html`
     <h1>Connections</h1>
-    <p class="sub">Link banks and cards through Plaid. Brokerages are connected in the SnapTrade
-      dashboard itself and appear here automatically once credentials are set.</p>
+    <p class="sub">Linking as <strong>${opts.activeProfile.name}</strong>. Banks link against this
+      profile's Plaid keys and count against its own 10-Item allowance. Brokerages are connected in
+      the SnapTrade dashboard itself and appear once credentials are set.</p>
+    ${profileTabs(opts.profiles, opts.activeProfile.id, '/connections')}
     ${opts.flash ?? raw('')}
 
     <section>

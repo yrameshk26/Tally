@@ -20,14 +20,23 @@ import {
   getNetWorthHistory,
   getTransactions,
   listAccounts,
-  setAccountOwner,
+  setAccountProfile,
   setContributed,
   setRoomLimit,
 } from './queries.ts';
+import {
+  MAX_PROFILES,
+  createProfile,
+  deleteProfile,
+  listProfiles,
+  profileUsage,
+  renameProfile,
+} from './profiles.ts';
 import { createUpdateLinkToken, plaidStatus } from './sources/plaid.ts';
 import { lastSyncReport, runSync } from './sync.ts';
 
-const OWNER = z.enum(['me', 'spouse', 'joint']);
+/** Profiles are user-defined, so this is a free-form id rather than an enum. */
+const PROFILE = z.string().min(1).max(32);
 const DATE = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'expected YYYY-MM-DD');
 
 function ok(data: unknown): CallToolResult {
@@ -47,9 +56,11 @@ export function buildServer(db: DB = getDb()): McpServer {
       instructions:
         'Read-only personal net worth for one household. Balances are reported in ' +
         `${config.baseCurrency}; assets are positive and liabilities negative. In get_transactions ` +
-        'and get_cashflow a negative amount means money left the account. Owner tags are "me", ' +
-        '"spouse" and "joint". Data is refreshed by a nightly sync — call sync_report to see how ' +
-        'stale it is, or sync_now to refresh on demand.',
+        'and get_cashflow a negative amount means money left the account. Accounts belong to a ' +
+        'profile — call list_profiles to see them. A profile is both a person/bucket and its own ' +
+        'set of provider credentials, so each one has its own bank-connection allowance. Data is ' +
+        'refreshed by a nightly sync — call sync_report to see how stale it is, or sync_now to ' +
+        'refresh on demand.',
     },
   );
 
@@ -60,12 +71,12 @@ export function buildServer(db: DB = getDb()): McpServer {
       description:
         'Total household net worth in CAD with breakdowns by owner, registered account type ' +
         '(RRSP/TFSA/LIRA/DPSP/NON_REG), source and institution.',
-      inputSchema: { owner: OWNER.optional().describe('limit to one person') },
+      inputSchema: { profile: PROFILE.optional().describe('limit to one profile id') },
       annotations: READ_ONLY,
     },
-    ({ owner }) => {
+    ({ profile }) => {
       try {
-        return ok(getNetWorth(db, owner));
+        return ok(getNetWorth(db, profile));
       } catch (e) {
         return fail(e);
       }
@@ -104,7 +115,7 @@ export function buildServer(db: DB = getDb()): McpServer {
         'and owner. Credit cards include statement balance, minimum payment and due date when ' +
         'Plaid liabilities are available.',
       inputSchema: {
-        owner: OWNER.optional(),
+        profile: PROFILE.optional(),
         source: z.enum(['snaptrade', 'plaid', 'wise', 'manual']).optional(),
         include_inactive: z.boolean().optional().describe('include closed/excluded accounts'),
       },
@@ -128,7 +139,7 @@ export function buildServer(db: DB = getDb()): McpServer {
         'Positions rolled up by symbol across all brokerage accounts, in CAD, largest first, ' +
         'with each position as a percentage of invested value (concentration).',
       inputSchema: {
-        owner: OWNER.optional(),
+        profile: PROFILE.optional(),
         account_id: z.string().optional(),
         include_cash: z.boolean().optional(),
         limit: z.number().int().min(1).max(500).optional(),
@@ -155,7 +166,7 @@ export function buildServer(db: DB = getDb()): McpServer {
         start: DATE.optional(),
         end: DATE.optional(),
         account_id: z.string().optional(),
-        owner: OWNER.optional(),
+        profile: PROFILE.optional(),
         search: z.string().optional().describe('substring of merchant or description'),
         category: z.string().optional().describe('Plaid personal finance category, e.g. TRAVEL'),
         min_amount_cad: z.number().min(0).optional(),
@@ -186,7 +197,7 @@ export function buildServer(db: DB = getDb()): McpServer {
       inputSchema: {
         start: DATE,
         end: DATE,
-        owner: OWNER.optional(),
+        profile: PROFILE.optional(),
         include_transfers: z.boolean().optional(),
         include_loan_payments: z.boolean().optional(),
       },
@@ -209,7 +220,7 @@ export function buildServer(db: DB = getDb()): McpServer {
         'Remaining RRSP/TFSA/FHSA room per person. Detected contributions come from brokerage ' +
         'activity; bank transfers into a brokerage are reported separately because they cannot ' +
         'be attributed to a specific registered account. A manual figure always wins.',
-      inputSchema: { year: z.number().int().min(2000).max(2100).optional(), person: OWNER.optional() },
+      inputSchema: { year: z.number().int().min(2000).max(2100).optional(), person: PROFILE.optional() },
       annotations: READ_ONLY,
     },
     (args) => {
@@ -235,7 +246,7 @@ export function buildServer(db: DB = getDb()): McpServer {
         'Record the contribution amount for a person/account type/year by hand. Use when the ' +
         'detected figure is wrong or incomplete. Writes only to this server’s database.',
       inputSchema: {
-        person: OWNER,
+        person: PROFILE,
         account_type: z.enum(['RRSP', 'TFSA', 'FHSA']),
         year: z.number().int().min(2000).max(2100),
         contributed_cad: z.number().min(0),
@@ -261,7 +272,7 @@ export function buildServer(db: DB = getDb()): McpServer {
         'Set the contribution limit (room available at the start of the year) for a person, ' +
         'account type and year, as shown on a CRA notice of assessment or My Account.',
       inputSchema: {
-        person: OWNER,
+        person: PROFILE,
         account_type: z.enum(['RRSP', 'TFSA', 'FHSA']),
         year: z.number().int().min(2000).max(2100),
         limit_cad: z.number().min(0),
@@ -280,19 +291,98 @@ export function buildServer(db: DB = getDb()): McpServer {
   );
 
   server.registerTool(
-    'set_account_owner',
+    'list_profiles',
     {
-      title: 'Tag account owner',
+      title: 'List profiles',
       description:
-        'Tag an account as belonging to "me", "spouse" or "joint". Sync never overwrites this.',
-      inputSchema: { account_id: z.string(), owner: OWNER },
+        'Every profile, with how many accounts and bank connections belong to it. A profile is ' +
+        'both a person or bucket and its own set of provider credentials — each has a separate ' +
+        'Plaid Item allowance, which is how the household exceeds a single team\u2019s 10-Item cap.',
+      annotations: READ_ONLY,
+    },
+    () => {
+      try {
+        const profiles = listProfiles(db).map((p) => ({ ...p, usage: profileUsage(db, p.id) }));
+        return ok({ count: profiles.length, max: MAX_PROFILES, profiles });
+      } catch (e) {
+        return fail(e);
+      }
+    },
+  );
+
+  server.registerTool(
+    'create_profile',
+    {
+      title: 'Create a profile',
+      description:
+        `Add a profile (at most ${MAX_PROFILES}). Its provider credentials are set separately in ` +
+        'the web UI, since they are secrets.',
+      inputSchema: { name: z.string().min(1).max(60) },
       annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
     },
-    ({ account_id, owner }) => {
+    ({ name }) => {
       try {
-        const changed = setAccountOwner(db, account_id, owner);
-        return changed
-          ? ok({ updated: true, account_id, owner })
+        return ok({ created: true, profile: createProfile(db, name) });
+      } catch (e) {
+        return fail(e);
+      }
+    },
+  );
+
+  server.registerTool(
+    'rename_profile',
+    {
+      title: 'Rename a profile',
+      description: 'Change a profile\u2019s display name. Its id and credentials are unaffected.',
+      inputSchema: { profile: PROFILE, name: z.string().min(1).max(60) },
+      annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
+    },
+    ({ profile, name }) => {
+      try {
+        return renameProfile(db, profile, name)
+          ? ok({ renamed: true, profile, name })
+          : fail(new Error(`no profile with id ${profile}`));
+      } catch (e) {
+        return fail(e);
+      }
+    },
+  );
+
+  server.registerTool(
+    'delete_profile',
+    {
+      title: 'Delete a profile',
+      description:
+        'Remove an empty profile. Refused while accounts or bank connections still belong to it — ' +
+        'move those first. Deleting a connection means re-linking that bank by hand.',
+      inputSchema: { profile: PROFILE },
+      annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: false },
+    },
+    ({ profile }) => {
+      try {
+        const res = deleteProfile(db, profile);
+        return res.deleted ? ok({ deleted: true, profile }) : fail(new Error(res.reason ?? 'refused'));
+      } catch (e) {
+        return fail(e);
+      }
+    },
+  );
+
+  server.registerTool(
+    'move_account',
+    {
+      title: 'Move an account to a profile',
+      description:
+        'Re-attribute an account to another profile, so it counts towards that profile\u2019s net ' +
+        'worth. The underlying connection does not move — it stays with the credentials that ' +
+        'linked it. Sync never overwrites this.',
+      inputSchema: { account_id: z.string(), profile: PROFILE },
+      annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
+    },
+    ({ account_id, profile }) => {
+      try {
+        return setAccountProfile(db, account_id, profile)
+          ? ok({ moved: true, account_id, profile })
           : fail(new Error(`no account with id ${account_id}`));
       } catch (e) {
         return fail(e);

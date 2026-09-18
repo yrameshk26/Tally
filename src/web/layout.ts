@@ -10,6 +10,7 @@ export type Nav = { href: string; label: string };
 export const NAV: Nav[] = [
   { href: '/', label: 'Overview' },
   { href: '/connections', label: 'Connections' },
+  { href: '/profiles', label: 'Profiles' },
   { href: '/settings', label: 'Settings' },
   { href: '/security', label: 'Security' },
 ];

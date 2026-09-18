@@ -9,21 +9,21 @@ export type NetWorthTotals = {
   total_assets_cad: number;
   total_liabilities_cad: number;
   net_worth_cad: number;
-  by_owner: Record<string, number>;
+  by_profile: Record<string, number>;
   by_registered_type: Record<string, number>;
   by_source: Record<string, number>;
   by_institution: Record<string, number>;
 };
 
-export function computeTotals(db: DB, owner?: string): NetWorthTotals {
-  const where = owner ? 'WHERE active = 1 AND owner = ?' : 'WHERE active = 1';
-  const args = owner ? [owner] : [];
+export function computeTotals(db: DB, profileId?: string): NetWorthTotals {
+  const where = profileId ? 'WHERE active = 1 AND profile_id = ?' : 'WHERE active = 1';
+  const args = profileId ? [profileId] : [];
   const rows = db
     .prepare(
-      `SELECT owner, registered_type, source, institution, balance_cad FROM accounts ${where}`,
+      `SELECT profile_id, registered_type, source, institution, balance_cad FROM accounts ${where}`,
     )
     .all(...args) as Array<{
-    owner: string;
+    profile_id: string;
     registered_type: string;
     source: string;
     institution: string | null;
@@ -34,7 +34,7 @@ export function computeTotals(db: DB, owner?: string): NetWorthTotals {
     total_assets_cad: 0,
     total_liabilities_cad: 0,
     net_worth_cad: 0,
-    by_owner: {},
+    by_profile: {},
     by_registered_type: {},
     by_source: {},
     by_institution: {},
@@ -49,7 +49,7 @@ export function computeTotals(db: DB, owner?: string): NetWorthTotals {
     if (v >= 0) totals.total_assets_cad = round2(totals.total_assets_cad + v);
     else totals.total_liabilities_cad = round2(totals.total_liabilities_cad + v);
     totals.net_worth_cad = round2(totals.net_worth_cad + v);
-    add(totals.by_owner, r.owner, v);
+    add(totals.by_profile, r.profile_id, v);
     add(totals.by_registered_type, r.registered_type, v);
     add(totals.by_source, r.source, v);
     add(totals.by_institution, r.institution ?? 'unknown', v);
@@ -74,7 +74,7 @@ export function writeSnapshot(db: DB, origin = 'sync'): NetWorthTotals {
     t.total_assets_cad,
     t.total_liabilities_cad,
     t.net_worth_cad,
-    JSON.stringify(t.by_owner),
+    JSON.stringify(t.by_profile),
     JSON.stringify(t.by_registered_type),
     origin,
   );

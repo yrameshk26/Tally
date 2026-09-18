@@ -25,8 +25,8 @@ export type WiseBalance = {
   cashAmount?: { value?: number | null } | null;
 };
 
-async function wiseGet<T>(db: DB, path: string): Promise<T> {
-  const { token, baseUrl } = wiseCreds(db);
+async function wiseGet<T>(db: DB, profileId: string, path: string): Promise<T> {
+  const { token, baseUrl } = wiseCreds(db, profileId);
   const res = await fetch(`${baseUrl}${path}`, {
     headers: {
       authorization: `Bearer ${token}`,
@@ -42,11 +42,15 @@ async function wiseGet<T>(db: DB, path: string): Promise<T> {
 
 export type WiseReport = Record<string, unknown> & { skipped?: true; reason?: string };
 
-export async function syncWise(db: DB, rates: RateMap): Promise<WiseReport> {
-  if (!wiseReady(db)) return { skipped: true, reason: 'WISE_API_TOKEN not set' };
+export async function syncWise(
+  db: DB,
+  rates: RateMap,
+  profileId: string,
+): Promise<WiseReport> {
+  if (!wiseReady(db, profileId)) return { skipped: true, reason: 'WISE_API_TOKEN not set' };
 
   const fx = makeConverter(rates);
-  const profiles = await wiseGet<WiseProfile[]>(db, '/v2/profiles');
+  const profiles = await wiseGet<WiseProfile[]>(db, profileId, '/v2/profiles');
   const seen: string[] = [];
   let total = 0;
   let count = 0;
@@ -56,7 +60,7 @@ export async function syncWise(db: DB, rates: RateMap): Promise<WiseReport> {
     for (const type of ['STANDARD', 'SAVINGS']) {
       let balances: WiseBalance[];
       try {
-        balances = await wiseGet<WiseBalance[]>(db, `/v4/profiles/${profile.id}/balances?types=${type}`);
+        balances = await wiseGet<WiseBalance[]>(db, profileId, `/v4/profiles/${profile.id}/balances?types=${type}`);
       } catch (e) {
         // SAVINGS 404s for accounts with no jars — not an error worth failing on.
         log.debug(`wise: ${type} balances for profile ${profile.id} (${errMessage(e)})`);
@@ -68,7 +72,9 @@ export async function syncWise(db: DB, rates: RateMap): Promise<WiseReport> {
         const id = `wise:${profile.id}:${b.id}`;
         const suffix = type === 'SAVINGS' ? ` jar${b.name ? ` "${b.name}"` : ''}` : '';
         const cad = fx.toBase(value, currency);
-        upsertAccount(db, {
+        upsertAccount(
+          db,
+          {
           id,
           source: 'wise',
           institution: 'Wise',
@@ -83,8 +89,10 @@ export async function syncWise(db: DB, rates: RateMap): Promise<WiseReport> {
           available: b.cashAmount?.value ?? null,
           active: true,
           status: 'ok',
-          item_id: `wise:${profile.id}`,
-        });
+            item_id: `wise:${profile.id}`,
+          },
+          profileId,
+        );
         seen.push(id);
         total = round2(total + cad);
         count += 1;
@@ -92,7 +100,7 @@ export async function syncWise(db: DB, rates: RateMap): Promise<WiseReport> {
     }
   }
 
-  const deactivated = deactivateMissing(db, 'wise', seen);
+  const deactivated = deactivateMissing(db, 'wise', seen, profileId);
   const misses = fx.misses();
   return {
     profiles: profiles.length,

@@ -21,9 +21,21 @@ import {
   connectionsPage,
   loginPage,
   overviewPage,
+  profilesPage,
   securityPage,
   settingsPage,
 } from './pages.ts';
+import {
+  MAX_PROFILES,
+  createProfile,
+  deleteProfile,
+  getProfile,
+  listProfiles,
+  moveAccount,
+  profileUsage,
+  renameProfile,
+  type Profile,
+} from '../profiles.ts';
 import { safeEqual, verifyPassword } from '../auth/password.ts';
 import { generateSecret, otpauthUri, verifyTotp } from '../auth/totp.ts';
 import {
@@ -103,6 +115,19 @@ export function createWebRouter(db: DB): express.Router {
     res.setHeader('Cache-Control', 'no-store');
     next();
   });
+
+  /**
+   * Which profile a page is scoped to. Falls back to the first profile rather
+   * than erroring, so a stale bookmark to a deleted profile still renders.
+   */
+  const activeProfile = (req: Ctx): Profile => {
+    const wanted = typeof req.query['profile'] === 'string' ? String(req.query['profile']) : '';
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    const fromBody = typeof body['profile'] === 'string' ? String(body['profile']) : '';
+    return (
+      getProfile(db, fromBody || wanted) ?? getProfile(db, 'me') ?? listProfiles(db)[0]!
+    );
+  };
 
   const render = (req: Ctx, res: Response, title: string, body: ReturnType<typeof html>, current?: string, chrome = true): void => {
     res.type('html').send(page({ title, nonce: req.nonce ?? '', current, chrome, body }));
@@ -240,6 +265,7 @@ export function createWebRouter(db: DB): express.Router {
       'Overview',
       overviewPage({
         totals,
+        profiles: listProfiles(db),
         accounts: listAccounts(db),
         holdings: getHoldings(db),
         lastSync: last?.finished_at ?? null,
@@ -280,7 +306,9 @@ export function createWebRouter(db: DB): express.Router {
       res,
       'Settings',
       settingsPage({
-        settings: describeSettings(db),
+        settings: describeSettings(db, activeProfile(req).id),
+        profiles: listProfiles(db),
+        activeProfile: activeProfile(req),
         csrf: req.session!.csrf,
         encryptionReady: Boolean(config.tokenEncKey),
         checks,
@@ -294,7 +322,7 @@ export function createWebRouter(db: DB): express.Router {
 
   router.post('/settings/test', requireAuth, requireCsrf, async (req: Ctx, res: Response) => {
     try {
-      settings(req, res, await testCredentials(db));
+      settings(req, res, await testCredentials(db, activeProfile(req).id));
     } catch (e) {
       res.redirect(303, `/settings?err=${encodeURIComponent(errMessage(e))}`);
     }
@@ -302,6 +330,7 @@ export function createWebRouter(db: DB): express.Router {
 
   router.post('/settings', requireAuth, requireCsrf, (req: Ctx, res: Response) => {
     const body = (req.body ?? {}) as Record<string, unknown>;
+    const profileId = activeProfile(req).id;
     const saved: string[] = [];
     try {
       for (const key of MANAGED_KEYS) {
@@ -310,35 +339,42 @@ export function createWebRouter(db: DB): express.Router {
         // would silently wipe credentials the form never displays.
         if (!value && SECRET_KEYS.has(key)) continue;
         if (!value) continue;
-        setSetting(db, key, value);
+        setSetting(db, key, value, profileId);
         saved.push(key);
       }
     } catch (e) {
-      res.redirect(303, `/settings?err=${encodeURIComponent(errMessage(e))}`);
+      res.redirect(
+        303,
+        `/settings?profile=${encodeURIComponent(profileId)}&err=${encodeURIComponent(errMessage(e))}`,
+      );
       return;
     }
+    const back = `/settings?profile=${encodeURIComponent(profileId)}`;
     res.redirect(
       303,
       saved.length
-        ? `/settings?ok=${encodeURIComponent(`Saved ${saved.length} setting(s).`)}`
-        : `/settings?ok=${encodeURIComponent('Nothing changed.')}`,
+        ? `${back}&ok=${encodeURIComponent(`Saved ${saved.length} setting(s).`)}`
+        : `${back}&ok=${encodeURIComponent('Nothing changed.')}`,
     );
   });
 
   // --- connections ---------------------------------------------------------
 
   const connections = (req: Ctx, res: Response): void => {
+    const profile = activeProfile(req);
     render(
       req,
       res,
       'Connections',
       connectionsPage({
-        items: plaidStatus(db),
-        snaptradeReady: snaptradeReady(db),
-        plaidReady: plaidReady(db),
-        wiseReady: wiseReady(db),
+        profiles: listProfiles(db),
+        activeProfile: profile,
+        items: plaidStatus(db, profile.id),
+        snaptradeReady: snaptradeReady(db, profile.id),
+        plaidReady: plaidReady(db, profile.id),
+        wiseReady: wiseReady(db, profile.id),
         redirectUri: redirectUriFor(req),
-        plaidEnv: plaidCreds(db).env,
+        plaidEnv: plaidCreds(db, profile.id).env,
         products: plaidProducts().map(String),
         optionalProducts: plaidOptionalProducts().map(String),
         countryCodes: plaidCountryCodes().map(String),
@@ -356,8 +392,11 @@ export function createWebRouter(db: DB): express.Router {
 
   router.post('/api/plaid/link-token', requireAuth, requireCsrf, async (req: Ctx, res: Response) => {
     try {
-      if (listItems(db).length >= 10) throw new Error('All 10 Plaid Items are already in use');
-      res.json({ link_token: await createLinkToken(db, redirectUriFor(req)) });
+      const profile = activeProfile(req);
+      if (listItems(db, profile.id).length >= 10) {
+        throw new Error(`All 10 Plaid Items are already in use for profile "${profile.name}"`);
+      }
+      res.json({ link_token: await createLinkToken(db, redirectUriFor(req), profile.id) });
     } catch (e) {
       log.warn('plaid link-token failed', { error: plaidErrorDetail(e) });
       res.status(400).json({ error: plaidErrorDetail(e) });
@@ -367,7 +406,9 @@ export function createWebRouter(db: DB): express.Router {
   router.post('/api/plaid/relink', requireAuth, requireCsrf, async (req: Ctx, res: Response) => {
     try {
       const itemId = String((req.body as { item_id?: string })?.item_id ?? '');
-      res.json({ link_token: await createUpdateLinkToken(db, itemId, redirectUriFor(req)) });
+      res.json({
+        link_token: await createUpdateLinkToken(db, itemId, redirectUriFor(req), activeProfile(req).id),
+      });
     } catch (e) {
       res.status(400).json({ error: plaidErrorDetail(e) });
     }
@@ -377,11 +418,73 @@ export function createWebRouter(db: DB): express.Router {
     try {
       const publicToken = String((req.body as { public_token?: string })?.public_token ?? '');
       if (!publicToken) throw new Error('public_token is required');
-      const saved = await exchangePublicToken(db, publicToken);
+      const saved = await exchangePublicToken(db, publicToken, activeProfile(req).id);
       log.info(`linked ${saved.institution_name ?? saved.item_id}`);
       res.json({ ok: true, ...saved });
     } catch (e) {
       res.status(400).json({ error: plaidErrorDetail(e) });
+    }
+  });
+
+  // --- profiles ------------------------------------------------------------
+
+  router.get('/profiles', requireAuth, (req: Ctx, res: Response) => {
+    render(
+      req,
+      res,
+      'Profiles',
+      profilesPage({
+        profiles: listProfiles(db).map((p) => ({ ...p, usage: profileUsage(db, p.id) })),
+        max: MAX_PROFILES,
+        csrf: req.session!.csrf,
+        flash: raw(flash(req, 'ok').value + flash(req, 'err').value),
+      }),
+      '/profiles',
+    );
+  });
+
+  router.post('/profiles', requireAuth, requireCsrf, (req: Ctx, res: Response) => {
+    try {
+      const p = createProfile(db, String((req.body as Record<string, unknown>)['name'] ?? ''));
+      res.redirect(303, `/settings?profile=${encodeURIComponent(p.id)}&ok=${encodeURIComponent(`Profile “${p.name}” created — add its credentials.`)}`);
+    } catch (e) {
+      res.redirect(303, `/profiles?err=${encodeURIComponent(errMessage(e))}`);
+    }
+  });
+
+  router.post('/profiles/rename', requireAuth, requireCsrf, (req: Ctx, res: Response) => {
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    try {
+      renameProfile(db, String(body['profile'] ?? ''), String(body['name'] ?? ''));
+      res.redirect(303, `/profiles?ok=${encodeURIComponent('Renamed.')}`);
+    } catch (e) {
+      res.redirect(303, `/profiles?err=${encodeURIComponent(errMessage(e))}`);
+    }
+  });
+
+  router.post('/profiles/delete', requireAuth, requireCsrf, (req: Ctx, res: Response) => {
+    const id = String((req.body as Record<string, unknown>)['profile'] ?? '');
+    const result = deleteProfile(db, id);
+    res.redirect(
+      303,
+      result.deleted
+        ? `/profiles?ok=${encodeURIComponent('Profile deleted.')}`
+        : `/profiles?err=${encodeURIComponent(result.reason ?? 'could not delete')}`,
+    );
+  });
+
+  router.post('/accounts/move', requireAuth, requireCsrf, (req: Ctx, res: Response) => {
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    try {
+      const moved = moveAccount(db, String(body['account_id'] ?? ''), String(body['profile'] ?? ''));
+      res.redirect(
+        303,
+        moved
+          ? `/?ok=${encodeURIComponent('Account moved.')}`
+          : `/?err=${encodeURIComponent('No such account.')}`,
+      );
+    } catch (e) {
+      res.redirect(303, `/?err=${encodeURIComponent(errMessage(e))}`);
     }
   });
 

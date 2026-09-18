@@ -40,7 +40,8 @@ you hold the tokens, you agree to your own providers' terms. See
 | `get_cashflow` | Income vs spend by month, category, merchant, owner |
 | `get_contribution_room` | Remaining RRSP/TFSA/FHSA room per person |
 | `set_contributed`, `set_room_limit` | Correct the room figures by hand |
-| `set_account_owner` | Tag an account `me` / `spouse` / `joint` |
+| `list_profiles`, `create_profile`, `rename_profile`, `delete_profile` | Manage profiles |
+| `move_account` | Re-attribute an account to another profile |
 | `plaid_status`, `plaid_relink_url` | Item health and one-click repair |
 | `sync_now`, `sync_report` | Refresh on demand; tell the user how stale data is |
 | `fx_rates` | The rates every balance was converted at |
@@ -107,6 +108,23 @@ from the bank side, so it is reported as
 `unattributed_brokerage_transfers_cad` and never silently subtracted. Set the
 real number with `set_contributed` and it wins over detection.
 
+## Profiles
+
+Plaid caps Items at **10 per team**, so a single set of credentials means at most
+10 linked banks. A profile is both a person or bucket *and* its own set of
+provider keys, so five profiles means up to 50.
+
+Two fields keep this honest:
+
+- a connection's **source profile** is fixed — an account cannot be re-homed to
+  a different Plaid team without re-linking it, and a sync only ever deactivates
+  accounts belonging to the credentials it just used;
+- an account's **profile** is attribution, and is movable, so a card linked
+  under one profile's Plaid team can still count towards another's net worth.
+
+Sync runs every source once per profile. A profile with no credentials reports
+`{skipped}` and costs nothing.
+
 ## Web UI (optional)
 
 Off by default — with `UI_ENABLED=false` the server is a bare MCP endpoint with
@@ -124,7 +142,8 @@ ADMIN_PASSWORD_HASH=$argon2id$v=19$m=19456,p=1,t=2$...
 TOKEN_ENC_KEY=...              # required: encrypts stored secrets and the TOTP seed
 ```
 
-Four pages: **Overview** (net worth, accounts, cards with statement and due
+Five pages: **Profiles** (up to 5, each with its own provider credentials),
+**Overview** (net worth, accounts, cards with statement and due
 dates, holdings), **Connections** (Plaid Link to add banks and cards, item
 health, one-click repair), **Settings** (provider credentials, stored encrypted
 in the database and overriding the environment without a redeploy) and

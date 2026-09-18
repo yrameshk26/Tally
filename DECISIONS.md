@@ -170,3 +170,34 @@ concluded — wrongly — that the deploy was stale.
 Deployment status is not evidence that new code is running. Read the artefact:
 `docker.readContainerFile` on `/app/dist/...`, base64-decoded, grepped for a
 symbol that only exists in the new version. Then sync.
+
+
+## 2026-09-18 — Profiles are a credential tenancy and an attribution bucket, kept as two fields
+
+Plaid's 10-Item cap is per team, so more connections means more credential sets.
+The obvious model — "a profile owns its accounts" — breaks as soon as you try to
+move an account: its Plaid Item belongs to the team that linked it, and no
+amount of database editing changes that.
+
+So an account carries two profile references:
+
+- `source_profile_id` — whose credentials fetched it. Immutable, and the scope
+  for deactivation. Without it, one profile's sync would deactivate every other
+  profile's accounts, which reads as the household losing most of its money
+  overnight. There is a test for exactly that.
+- `profile_id` — attribution, written on INSERT only and movable by hand. A card
+  linked under one profile's Plaid team can count towards another's net worth.
+
+`owner` (me/spouse/joint) was folded into this rather than kept alongside:
+two overlapping groupings would both need maintaining and would disagree. The
+migration turns existing owner tags into profiles, so a household that had
+already tagged a spouse keeps the split.
+
+One deliberate asymmetry: the environment is a single global fallback and
+belongs to the **default profile only**. A second profile inheriting the first's
+`PLAID_CLIENT_ID` from env would silently link its banks to the wrong team,
+which is the kind of bug you would only notice at the 11th Item.
+
+Deleting a profile is refused while accounts or connections still point at it,
+rather than cascading. There is no undo for a deleted Plaid access token — it
+means re-linking the bank by hand.

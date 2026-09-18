@@ -10,7 +10,7 @@
 import type { DB } from './db.ts';
 import { round2, todayISO } from './lib/money.ts';
 import { computeTotals, type NetWorthTotals } from './snapshots.ts';
-import type { OwnerTag } from './config.ts';
+import { moveAccount } from './profiles.ts';
 
 export type AccountView = {
   id: string;
@@ -25,7 +25,7 @@ export type AccountView = {
   balance: number;
   balance_cad: number;
   available: number | null;
-  owner: string;
+  profile: string;
   status: string | null;
   updated_at: string;
   card?: Record<string, unknown>;
@@ -33,14 +33,14 @@ export type AccountView = {
 
 export function listAccounts(
   db: DB,
-  opts: { owner?: string; source?: string; include_inactive?: boolean } = {},
+  opts: { profile?: string; source?: string; include_inactive?: boolean } = {},
 ): AccountView[] {
   const where: string[] = [];
   const args: unknown[] = [];
   if (!opts.include_inactive) where.push('a.active = 1');
-  if (opts.owner) {
-    where.push('a.owner = ?');
-    args.push(opts.owner);
+  if (opts.profile) {
+    where.push('a.profile_id = ?');
+    args.push(opts.profile);
   }
   if (opts.source) {
     where.push('a.source = ?');
@@ -69,7 +69,7 @@ export function listAccounts(
       balance: Number(r['balance']),
       balance_cad: Number(r['balance_cad']),
       available: r['available'] === null ? null : Number(r['available']),
-      owner: String(r['owner']),
+      profile: String(r['profile_id']),
       status: (r['status'] as string) ?? null,
       updated_at: String(r['updated_at']),
     };
@@ -88,8 +88,11 @@ export function listAccounts(
   });
 }
 
-export function getNetWorth(db: DB, owner?: string): NetWorthTotals & { as_of: string; fx_as_of: string | null } {
-  const totals = computeTotals(db, owner);
+export function getNetWorth(
+  db: DB,
+  profileId?: string,
+): NetWorthTotals & { as_of: string; fx_as_of: string | null } {
+  const totals = computeTotals(db, profileId);
   const fx = db.prepare('SELECT as_of FROM fx_rates ORDER BY as_of DESC LIMIT 1').get() as
     | { as_of: string }
     | undefined;
@@ -128,7 +131,7 @@ export function getNetWorthHistory(
       total_assets_cad: r['total_assets_cad'],
       total_liabilities_cad: r['total_liabilities_cad'],
       origin: r['origin'],
-      by_owner: safeJson(r['by_owner']),
+      by_profile: safeJson(r['by_owner']),
       by_registered_type: safeJson(r['by_registered_type']),
     }))
     .reverse();
@@ -162,13 +165,13 @@ export type HoldingsResult = {
 /** Positions rolled up across accounts, largest first, with concentration %. */
 export function getHoldings(
   db: DB,
-  opts: { owner?: string; account_id?: string; include_cash?: boolean; limit?: number } = {},
+  opts: { profile?: string; account_id?: string; include_cash?: boolean; limit?: number } = {},
 ): HoldingsResult {
   const where = ['a.active = 1'];
   const args: unknown[] = [];
-  if (opts.owner) {
-    where.push('a.owner = ?');
-    args.push(opts.owner);
+  if (opts.profile) {
+    where.push('a.profile_id = ?');
+    args.push(opts.profile);
   }
   if (opts.account_id) {
     where.push('h.account_id = ?');
@@ -247,7 +250,7 @@ export type TransactionView = {
   id: string;
   date: string;
   account: string | null;
-  owner: string;
+  profile: string;
   name: string | null;
   merchant: string | null;
   /** Negative = money out. Flipped from the Plaid-style value in storage. */
@@ -265,7 +268,7 @@ export function getTransactions(
     start?: string;
     end?: string;
     account_id?: string;
-    owner?: string;
+    profile?: string;
     search?: string;
     category?: string;
     min_amount_cad?: number;
@@ -286,9 +289,9 @@ export function getTransactions(
     where.push('t.account_id = ?');
     args.push(opts.account_id);
   }
-  if (opts.owner) {
-    where.push('a.owner = ?');
-    args.push(opts.owner);
+  if (opts.profile) {
+    where.push('a.profile_id = ?');
+    args.push(opts.profile);
   }
   if (opts.category) {
     where.push('t.category = ?');
@@ -305,7 +308,7 @@ export function getTransactions(
 
   const rows = db
     .prepare(
-      `SELECT t.*, a.name AS account_name, a.owner AS owner
+      `SELECT t.*, a.name AS account_name, a.profile_id AS profile
        FROM transactions t
        LEFT JOIN accounts a ON a.id = t.account_id
        ${where.length ? `WHERE ${where.join(' AND ')}` : ''}
@@ -318,7 +321,7 @@ export function getTransactions(
     id: String(r['id']),
     date: String(r['date']),
     account: (r['account_name'] as string) ?? null,
-    owner: String(r['owner'] ?? 'me'),
+    profile: String(r['profile'] ?? 'me'),
     name: (r['name'] as string) ?? null,
     merchant: (r['merchant'] as string) ?? null,
     amount_cad: round2(-Number(r['amount_cad'])),
@@ -344,7 +347,7 @@ export type CashflowResult = {
   by_month: Array<{ month: string; income_cad: number; spend_cad: number; net_cad: number }>;
   by_category: Array<{ category: string; spend_cad: number }>;
   top_merchants: Array<{ merchant: string; spend_cad: number; count: number }>;
-  by_owner: Array<{ owner: string; income_cad: number; spend_cad: number }>;
+  by_profile: Array<{ profile: string; income_cad: number; spend_cad: number }>;
   excluded_categories: string[];
 };
 
@@ -353,7 +356,7 @@ export function getCashflow(
   opts: {
     start: string;
     end: string;
-    owner?: string;
+    profile?: string;
     include_transfers?: boolean;
     include_loan_payments?: boolean;
   },
@@ -364,9 +367,9 @@ export function getCashflow(
 
   const where = ['t.date >= ?', 't.date <= ?', 't.pending = 0'];
   const args: unknown[] = [opts.start, opts.end];
-  if (opts.owner) {
-    where.push('a.owner = ?');
-    args.push(opts.owner);
+  if (opts.profile) {
+    where.push('a.profile_id = ?');
+    args.push(opts.profile);
   }
   if (excluded.length) {
     where.push(`COALESCE(t.category,'') NOT IN (${excluded.map(() => '?').join(',')})`);
@@ -375,7 +378,7 @@ export function getCashflow(
 
   const rows = db
     .prepare(
-      `SELECT t.date, t.amount_cad, t.category, t.merchant, t.name, a.owner AS owner
+      `SELECT t.date, t.amount_cad, t.category, t.merchant, t.name, a.profile_id AS profile
        FROM transactions t
        LEFT JOIN accounts a ON a.id = t.account_id
        WHERE ${where.join(' AND ')}`,
@@ -386,13 +389,13 @@ export function getCashflow(
     category: string | null;
     merchant: string | null;
     name: string | null;
-    owner: string | null;
+    profile: string | null;
   }>;
 
   const months = new Map<string, { income: number; spend: number }>();
   const categories = new Map<string, number>();
   const merchants = new Map<string, { spend: number; count: number }>();
-  const owners = new Map<string, { income: number; spend: number }>();
+  const profilesSeen = new Map<string, { income: number; spend: number }>();
   let income = 0;
   let spend = 0;
 
@@ -419,11 +422,11 @@ export function getCashflow(
       merchants.set(key, mer);
     }
 
-    const ow = r.owner ?? 'me';
-    const o = owners.get(ow) ?? { income: 0, spend: 0 };
+    const pid = r.profile ?? 'me';
+    const o = profilesSeen.get(pid) ?? { income: 0, spend: 0 };
     o.income = round2(o.income + inn);
     o.spend = round2(o.spend + out);
-    owners.set(ow, o);
+    profilesSeen.set(pid, o);
   }
 
   return {
@@ -447,8 +450,8 @@ export function getCashflow(
       .sort((a, b) => b[1].spend - a[1].spend)
       .slice(0, 20)
       .map(([merchant, v]) => ({ merchant, spend_cad: v.spend, count: v.count })),
-    by_owner: [...owners.entries()].map(([owner, v]) => ({
-      owner,
+    by_profile: [...profilesSeen.entries()].map(([profile, v]) => ({
+      profile,
       income_cad: v.income,
       spend_cad: v.spend,
     })),
@@ -516,7 +519,7 @@ export function getContributionRoom(
     `SELECT COALESCE(SUM(act.amount_cad), 0) AS total
      FROM activities act
      JOIN accounts a ON a.id = act.account_id
-     WHERE a.owner = ? AND a.registered_type = ?
+     WHERE a.profile_id = ? AND a.registered_type = ?
        AND substr(act.date,1,4) = ?
        AND UPPER(COALESCE(act.type,'')) IN (${CONTRIBUTION_TYPES.map(() => '?').join(',')})`,
   );
@@ -525,7 +528,7 @@ export function getContributionRoom(
     `SELECT COALESCE(SUM(t.amount_cad), 0) AS total
      FROM transactions t
      JOIN accounts a ON a.id = t.account_id
-     WHERE a.owner = ? AND a.source = 'plaid' AND substr(t.date,1,4) = ?
+     WHERE a.profile_id = ? AND a.source = 'plaid' AND substr(t.date,1,4) = ?
        AND t.amount_cad > 0
        AND (UPPER(COALESCE(t.merchant,'')) LIKE ? OR UPPER(COALESCE(t.name,'')) LIKE ?)`,
   );
@@ -570,11 +573,9 @@ export function getContributionRoom(
 
 // --- user-owned setters -----------------------------------------------------
 
-export function setAccountOwner(db: DB, accountId: string, owner: OwnerTag): boolean {
-  const res = db
-    .prepare('UPDATE accounts SET owner = ?, updated_at = ? WHERE id = ?')
-    .run(owner, new Date().toISOString(), accountId);
-  return res.changes > 0;
+/** Re-attribute an account to another profile. Its connection does not move. */
+export function setAccountProfile(db: DB, accountId: string, profileId: string): boolean {
+  return moveAccount(db, accountId, profileId);
 }
 
 export function setContributed(

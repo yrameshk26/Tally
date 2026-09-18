@@ -17,6 +17,14 @@ import { log } from './lib/logger.ts';
 export type DB = Database.Database;
 
 export const SCHEMA = `
+CREATE TABLE IF NOT EXISTS profiles (
+  id         TEXT PRIMARY KEY,
+  name       TEXT NOT NULL,
+  position   INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS accounts (
   id                TEXT PRIMARY KEY,
   source            TEXT NOT NULL,
@@ -156,10 +164,12 @@ CREATE TABLE IF NOT EXISTS sync_runs (
 );
 
 CREATE TABLE IF NOT EXISTS settings (
-  key         TEXT PRIMARY KEY,
+  profile_id  TEXT NOT NULL DEFAULT 'me',
+  key         TEXT NOT NULL,
   value       TEXT NOT NULL,
   is_secret   INTEGER NOT NULL DEFAULT 0,
-  updated_at  TEXT NOT NULL
+  updated_at  TEXT NOT NULL,
+  PRIMARY KEY (profile_id, key)
 );
 
 CREATE TABLE IF NOT EXISTS auth (
@@ -227,7 +237,90 @@ export function migrate(db: DB): void {
   addColumn('plaid_items', 'consent_expiration', 'TEXT');
   addColumn('room', 'note', 'TEXT');
 
+  migrateProfiles(db);
   encryptExistingTokens(db);
+}
+
+/**
+ * Introduce profiles without losing anything.
+ *
+ * Runs against databases that already hold real accounts, encrypted
+ * credentials and Plaid access tokens, so every step is idempotent and
+ * additive: columns are added with a default, existing owner tags become
+ * profiles, and nothing is deleted. A lost Plaid access token means re-linking
+ * a bank by hand, so this errs heavily towards keeping data.
+ */
+export function migrateProfiles(db: DB): void {
+  const hasColumn = (table: string, column: string): boolean =>
+    (db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>).some(
+      (c) => c.name === column,
+    );
+
+  const ts = new Date().toISOString();
+  const ensureProfile = (id: string, name: string, position: number): void => {
+    db.prepare(
+      `INSERT INTO profiles (id, name, position, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?) ON CONFLICT(id) DO NOTHING`,
+    ).run(id, name, position, ts, ts);
+  };
+
+  // The default profile always exists; everything pre-profiles belongs to it.
+  ensureProfile('me', 'Me', 0);
+
+  // Accounts: carry the old owner tag across as a profile so a household that
+  // already tagged a spouse's accounts keeps that split.
+  if (!hasColumn('accounts', 'profile_id')) {
+    db.exec("ALTER TABLE accounts ADD COLUMN profile_id TEXT NOT NULL DEFAULT 'me'");
+  }
+  // Which profile's credentials fetched this account. Immutable: an account
+  // cannot be re-homed to a different Plaid team without re-linking it. Kept
+  // separate from profile_id (attribution) so that a sync only ever deactivates
+  // accounts belonging to the credentials it just used.
+  if (!hasColumn('accounts', 'source_profile_id')) {
+    db.exec("ALTER TABLE accounts ADD COLUMN source_profile_id TEXT NOT NULL DEFAULT 'me'");
+  }
+  if (hasColumn('accounts', 'owner')) {
+    const owners = db
+      .prepare("SELECT DISTINCT owner FROM accounts WHERE owner IS NOT NULL AND owner != ''")
+      .all() as Array<{ owner: string }>;
+    let position = 1;
+    for (const { owner } of owners) {
+      if (owner === 'me') continue;
+      const name = owner.charAt(0).toUpperCase() + owner.slice(1);
+      ensureProfile(owner, name, position);
+      position += 1;
+    }
+    // Only backfill rows still sitting on the default — never overwrite a
+    // profile someone has since set by hand.
+    db.prepare(
+      "UPDATE accounts SET profile_id = owner WHERE profile_id = 'me' AND owner IS NOT NULL AND owner != ''",
+    ).run();
+  }
+
+  if (!hasColumn('plaid_items', 'profile_id')) {
+    db.exec("ALTER TABLE plaid_items ADD COLUMN profile_id TEXT NOT NULL DEFAULT 'me'");
+  }
+
+  // settings predates profiles and was keyed on `key` alone. SQLite cannot
+  // change a primary key in place, so rebuild the table and copy every row
+  // onto the default profile.
+  if (!hasColumn('settings', 'profile_id')) {
+    db.exec(`
+      CREATE TABLE settings_with_profile (
+        profile_id  TEXT NOT NULL DEFAULT 'me',
+        key         TEXT NOT NULL,
+        value       TEXT NOT NULL,
+        is_secret   INTEGER NOT NULL DEFAULT 0,
+        updated_at  TEXT NOT NULL,
+        PRIMARY KEY (profile_id, key)
+      );
+      INSERT INTO settings_with_profile (profile_id, key, value, is_secret, updated_at)
+        SELECT 'me', key, value, is_secret, updated_at FROM settings;
+      DROP TABLE settings;
+      ALTER TABLE settings_with_profile RENAME TO settings;
+    `);
+    log.info('settings migrated onto the default profile');
+  }
 }
 
 /**

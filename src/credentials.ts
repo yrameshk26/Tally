@@ -9,44 +9,45 @@
 import type { DB } from './db.ts';
 import { config } from './config.ts';
 import { getSetting, sourceReady } from './settings.ts';
+import { DEFAULT_PROFILE_ID } from './profiles.ts';
 import { errMessage } from './lib/logger.ts';
 
-export function snaptradeCreds(db: DB) {
+export function snaptradeCreds(db: DB, profileId = DEFAULT_PROFILE_ID) {
   return {
-    clientId: getSetting(db, 'SNAPTRADE_CLIENT_ID'),
-    consumerKey: getSetting(db, 'SNAPTRADE_CONSUMER_KEY'),
-    transport: (getSetting(db, 'SNAPTRADE_TRANSPORT') || 'rest') as 'rest' | 'sdk',
+    clientId: getSetting(db, 'SNAPTRADE_CLIENT_ID', profileId),
+    consumerKey: getSetting(db, 'SNAPTRADE_CONSUMER_KEY', profileId),
+    transport: (getSetting(db, 'SNAPTRADE_TRANSPORT', profileId) || 'rest') as 'rest' | 'sdk',
     userId: config.snaptrade.userId,
     userSecret: config.snaptrade.userSecret,
     baseUrl: config.snaptrade.baseUrl,
   };
 }
 
-export function plaidCreds(db: DB) {
+export function plaidCreds(db: DB, profileId = DEFAULT_PROFILE_ID) {
   return {
-    clientId: getSetting(db, 'PLAID_CLIENT_ID'),
-    secret: getSetting(db, 'PLAID_SECRET'),
-    env: getSetting(db, 'PLAID_ENV') || 'production',
+    clientId: getSetting(db, 'PLAID_CLIENT_ID', profileId),
+    secret: getSetting(db, 'PLAID_SECRET', profileId),
+    env: getSetting(db, 'PLAID_ENV', profileId) || 'production',
   };
 }
 
-export function wiseCreds(db: DB) {
+export function wiseCreds(db: DB, profileId = DEFAULT_PROFILE_ID) {
   return {
-    token: getSetting(db, 'WISE_API_TOKEN'),
+    token: getSetting(db, 'WISE_API_TOKEN', profileId),
     baseUrl: config.wise.baseUrl,
   };
 }
 
-export function snaptradeReady(db: DB): boolean {
-  return sourceReady(db, 'snaptrade');
+export function snaptradeReady(db: DB, profileId = DEFAULT_PROFILE_ID): boolean {
+  return sourceReady(db, 'snaptrade', profileId);
 }
 
-export function plaidReady(db: DB): boolean {
-  return sourceReady(db, 'plaid');
+export function plaidReady(db: DB, profileId = DEFAULT_PROFILE_ID): boolean {
+  return sourceReady(db, 'plaid', profileId);
 }
 
-export function wiseReady(db: DB): boolean {
-  return sourceReady(db, 'wise');
+export function wiseReady(db: DB, profileId = DEFAULT_PROFILE_ID): boolean {
+  return sourceReady(db, 'wise', profileId);
 }
 
 
@@ -62,16 +63,19 @@ export type CredentialCheck = {
  * proves them. Without this, a wrong key is only discovered halfway through a
  * Plaid Link flow, which is a poor place to learn it.
  */
-export async function testCredentials(db: DB): Promise<CredentialCheck[]> {
+export async function testCredentials(
+  db: DB,
+  profileId = DEFAULT_PROFILE_ID,
+): Promise<CredentialCheck[]> {
   const { snaptradeGet } = await import('./sources/snaptrade.ts');
   const { plaidClient, plaidCountryCodes, plaidErrorDetail } = await import('./sources/plaid.ts');
   const out: CredentialCheck[] = [];
 
-  if (!snaptradeReady(db)) {
+  if (!snaptradeReady(db, profileId)) {
     out.push({ provider: 'snaptrade', configured: false, ok: false, detail: 'not configured' });
   } else {
     try {
-      const auths = await snaptradeGet<unknown[]>(db, '/authorizations');
+      const auths = await snaptradeGet<unknown[]>(db, profileId, '/authorizations');
       out.push({
         provider: 'snaptrade',
         configured: true,
@@ -83,13 +87,13 @@ export async function testCredentials(db: DB): Promise<CredentialCheck[]> {
     }
   }
 
-  if (!plaidReady(db)) {
+  if (!plaidReady(db, profileId)) {
     out.push({ provider: 'plaid', configured: false, ok: false, detail: 'not configured' });
   } else {
-    const env = plaidCreds(db).env;
+    const env = plaidCreds(db, profileId).env;
     try {
       // institutionsGet is the cheapest call that exercises the key pair.
-      await plaidClient(db).institutionsGet({
+      await plaidClient(db, profileId).institutionsGet({
         count: 1,
         offset: 0,
         country_codes: plaidCountryCodes(),
@@ -105,10 +109,10 @@ export async function testCredentials(db: DB): Promise<CredentialCheck[]> {
     }
   }
 
-  if (!wiseReady(db)) {
+  if (!wiseReady(db, profileId)) {
     out.push({ provider: 'wise', configured: false, ok: false, detail: 'not configured' });
   } else {
-    const { token, baseUrl } = wiseCreds(db);
+    const { token, baseUrl } = wiseCreds(db, profileId);
     try {
       const res = await fetch(`${baseUrl}/v2/profiles`, {
         headers: { authorization: `Bearer ${token}`, accept: 'application/json' },

@@ -19,6 +19,7 @@
  */
 import type { DB } from './db.ts';
 import { config } from './config.ts';
+import { DEFAULT_PROFILE_ID } from './profiles.ts';
 import { decryptToken, encryptToken } from './lib/crypto.ts';
 import { nowISO } from './lib/money.ts';
 import { errMessage, log } from './lib/logger.ts';
@@ -63,10 +64,10 @@ function isManaged(key: string): key is ManagedKey {
  * takes effect without a redeploy. Returns '' when neither has it, matching
  * how config.ts treats an unset variable.
  */
-export function getSetting(db: DB, key: string): string {
-  const row = db.prepare('SELECT value, is_secret FROM settings WHERE key = ?').get(key) as
-    | { value: string; is_secret: number }
-    | undefined;
+export function getSetting(db: DB, key: string, profileId = DEFAULT_PROFILE_ID): string {
+  const row = db
+    .prepare('SELECT value, is_secret FROM settings WHERE profile_id = ? AND key = ?')
+    .get(profileId, key) as { value: string; is_secret: number } | undefined;
   if (row) {
     if (!row.is_secret) return row.value;
     try {
@@ -80,24 +81,42 @@ export function getSetting(db: DB, key: string): string {
       throw new Error(`stored setting ${key} could not be decrypted`);
     }
   }
-  return process.env[key] ?? '';
+  // The environment is a single global fallback. It belongs to the default
+  // profile only — a second profile inheriting the first's Plaid keys from env
+  // would quietly link its banks to the wrong team.
+  return profileId === DEFAULT_PROFILE_ID ? (process.env[key] ?? '') : '';
 }
 
-export function setSetting(db: DB, key: string, value: string): void {
+export function setSetting(
+  db: DB,
+  key: string,
+  value: string,
+  profileId = DEFAULT_PROFILE_ID,
+): void {
   if (!isManaged(key)) throw new Error(`refusing to store unmanaged setting ${key}`);
   const secret = SECRET_KEYS.has(key);
   if (secret && !config.tokenEncKey) {
     throw new Error('TOKEN_ENC_KEY must be set before storing a secret in the database');
   }
   db.prepare(
-    `INSERT INTO settings (key, value, is_secret, updated_at) VALUES (?, ?, ?, ?)
-     ON CONFLICT(key) DO UPDATE SET value = excluded.value, is_secret = excluded.is_secret,
-                                    updated_at = excluded.updated_at`,
-  ).run(key, secret ? encryptToken(value, config.tokenEncKey) : value, secret ? 1 : 0, nowISO());
+    `INSERT INTO settings (profile_id, key, value, is_secret, updated_at) VALUES (?, ?, ?, ?, ?)
+     ON CONFLICT(profile_id, key) DO UPDATE SET value = excluded.value,
+                                                is_secret = excluded.is_secret,
+                                                updated_at = excluded.updated_at`,
+  ).run(
+    profileId,
+    key,
+    secret ? encryptToken(value, config.tokenEncKey) : value,
+    secret ? 1 : 0,
+    nowISO(),
+  );
 }
 
-export function deleteSetting(db: DB, key: string): boolean {
-  return db.prepare('DELETE FROM settings WHERE key = ?').run(key).changes > 0;
+export function deleteSetting(db: DB, key: string, profileId = DEFAULT_PROFILE_ID): boolean {
+  return (
+    db.prepare('DELETE FROM settings WHERE profile_id = ? AND key = ?').run(profileId, key).changes >
+    0
+  );
 }
 
 /**
@@ -105,7 +124,10 @@ export function deleteSetting(db: DB, key: string): boolean {
  * A secret is never returned in the clear — not to a template, not to an API
  * response, not to a log line.
  */
-export function describeSettings(db: DB): Array<{
+export function describeSettings(
+  db: DB,
+  profileId = DEFAULT_PROFILE_ID,
+): Array<{
   key: ManagedKey;
   source: 'database' | 'environment' | 'default' | 'unset';
   secret: boolean;
@@ -113,16 +135,15 @@ export function describeSettings(db: DB): Array<{
   effective: string | null;
   configured: boolean;
 }> {
-  const rows = db.prepare('SELECT key, is_secret FROM settings').all() as Array<{
-    key: string;
-    is_secret: number;
-  }>;
+  const rows = db
+    .prepare('SELECT key, is_secret FROM settings WHERE profile_id = ?')
+    .all(profileId) as Array<{ key: string; is_secret: number }>;
   const inDb = new Set(rows.map((r) => r.key));
 
   return MANAGED_KEYS.map((key) => {
     const secret = SECRET_KEYS.has(key);
     const fromDb = inDb.has(key);
-    const fromEnv = Boolean(process.env[key]);
+    const fromEnv = profileId === DEFAULT_PROFILE_ID && Boolean(process.env[key]);
     const fallback = DEFAULTS[key] ?? null;
     const source = fromDb
       ? 'database'
@@ -134,7 +155,7 @@ export function describeSettings(db: DB): Array<{
     let value: string | null = null;
     if (!secret && (fromDb || fromEnv)) {
       try {
-        value = getSetting(db, key);
+        value = getSetting(db, key, profileId);
       } catch {
         value = null;
       }
@@ -152,7 +173,11 @@ export function describeSettings(db: DB): Array<{
 }
 
 /** True once a source has everything it needs, from either store. */
-export function sourceReady(db: DB, source: 'snaptrade' | 'plaid' | 'wise'): boolean {
+export function sourceReady(
+  db: DB,
+  source: 'snaptrade' | 'plaid' | 'wise',
+  profileId = DEFAULT_PROFILE_ID,
+): boolean {
   const need: Record<string, string[]> = {
     snaptrade: ['SNAPTRADE_CLIENT_ID', 'SNAPTRADE_CONSUMER_KEY'],
     plaid: ['PLAID_CLIENT_ID', 'PLAID_SECRET'],
@@ -160,7 +185,7 @@ export function sourceReady(db: DB, source: 'snaptrade' | 'plaid' | 'wise'): boo
   };
   return (need[source] ?? []).every((k) => {
     try {
-      return getSetting(db, k) !== '';
+      return getSetting(db, k, profileId) !== '';
     } catch {
       return false;
     }

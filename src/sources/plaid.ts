@@ -18,6 +18,7 @@ import {
 } from 'plaid';
 import type { DB } from '../db.ts';
 import { config } from '../config.ts';
+import { DEFAULT_PROFILE_ID } from '../profiles.ts';
 import { plaidCreds, plaidReady } from '../credentials.ts';
 import { decryptToken, encryptToken } from '../lib/crypto.ts';
 import { errMessage, log } from '../lib/logger.ts';
@@ -44,22 +45,27 @@ export type PlaidItemRow = {
   cursor: string | null;
   consent_expiration: string | null;
   last_synced_at: string | null;
+  profile_id: string;
 };
 
-let client: PlaidApi | null = null;
-let clientKey = '';
+// One client per profile: two profiles are two different Plaid teams, and
+// sharing a client between them would link a bank to the wrong allowance.
+const clients = new Map<string, { key: string; api: PlaidApi }>();
 
 /**
  * Cached per credential set: rotating the secret in the UI must take effect
  * immediately, so the cache key is the credentials themselves rather than a
  * bare "already built" flag.
  */
-export function plaidClient(db: DB): PlaidApi {
-  const creds = plaidCreds(db);
+export function plaidClient(db: DB, profileId = DEFAULT_PROFILE_ID): PlaidApi {
+  const creds = plaidCreds(db, profileId);
+  // Cached on the credentials themselves so rotating a secret in the UI takes
+  // effect immediately rather than on the next restart.
   const key = `${creds.env}:${creds.clientId}:${creds.secret.length}:${creds.secret.slice(-4)}`;
-  if (client && clientKey === key) return client;
+  const cached = clients.get(profileId);
+  if (cached && cached.key === key) return cached.api;
   const basePath = PlaidEnvironments[creds.env] ?? PlaidEnvironments['production'];
-  client = new PlaidApi(
+  const api = new PlaidApi(
     new Configuration({
       basePath,
       baseOptions: {
@@ -70,8 +76,8 @@ export function plaidClient(db: DB): PlaidApi {
       },
     }),
   );
-  clientKey = key;
-  return client;
+  clients.set(profileId, { key, api });
+  return api;
 }
 
 export function plaidProducts(): Products[] {
@@ -93,8 +99,14 @@ export function plaidCountryCodes(): CountryCode[] {
   });
 }
 
-export function listItems(db: DB): PlaidItemRow[] {
-  return db.prepare('SELECT * FROM plaid_items ORDER BY institution_name').all() as PlaidItemRow[];
+export function listItems(db: DB, profileId?: string): PlaidItemRow[] {
+  return (
+    profileId === undefined
+      ? db.prepare('SELECT * FROM plaid_items ORDER BY institution_name').all()
+      : db
+          .prepare('SELECT * FROM plaid_items WHERE profile_id = ? ORDER BY institution_name')
+          .all(profileId)
+  ) as PlaidItemRow[];
 }
 
 export function accessTokenFor(item: PlaidItemRow): string {
@@ -109,11 +121,12 @@ export function saveItem(
     institution_id?: string | null;
     institution_name?: string | null;
   },
+  profileId = DEFAULT_PROFILE_ID,
 ): void {
   const ts = nowISO();
   db.prepare(
-    `INSERT INTO plaid_items (item_id, institution_id, institution_name, access_token, status, created_at, updated_at)
-     VALUES (@item_id, @institution_id, @institution_name, @access_token, 'ok', @ts, @ts)
+    `INSERT INTO plaid_items (item_id, institution_id, institution_name, access_token, status, profile_id, created_at, updated_at)
+     VALUES (@item_id, @institution_id, @institution_name, @access_token, 'ok', @profile_id, @ts, @ts)
      ON CONFLICT(item_id) DO UPDATE SET
        institution_id   = COALESCE(excluded.institution_id, plaid_items.institution_id),
        institution_name = COALESCE(excluded.institution_name, plaid_items.institution_name),
@@ -127,6 +140,7 @@ export function saveItem(
     institution_id: item.institution_id ?? null,
     institution_name: item.institution_name ?? null,
     access_token: encryptToken(item.access_token, config.tokenEncKey),
+    profile_id: profileId,
     ts,
   });
 }
@@ -211,15 +225,19 @@ export function categoryFor(account: AccountBase): string {
 
 export type PlaidReport = Record<string, unknown> & { skipped?: true; reason?: string };
 
-export async function syncPlaid(db: DB, rates: RateMap): Promise<PlaidReport> {
-  if (!plaidReady(db)) {
+export async function syncPlaid(
+  db: DB,
+  rates: RateMap,
+  profileId = DEFAULT_PROFILE_ID,
+): Promise<PlaidReport> {
+  if (!plaidReady(db, profileId)) {
     return { skipped: true, reason: 'PLAID_CLIENT_ID / PLAID_SECRET not set' };
   }
-  const items = listItems(db);
+  const items = listItems(db, profileId);
   if (items.length === 0) return { items: 0, note: 'no Items linked yet — run `npm run link`' };
 
   const fx = makeConverter(rates);
-  const api = plaidClient(db);
+  const api = plaidClient(db, profileId);
   const perItem: Record<string, unknown> = {};
   const seen: string[] = [];
   let accountCount = 0;
@@ -239,7 +257,9 @@ export async function syncPlaid(db: DB, rates: RateMap): Promise<PlaidReport> {
           config.baseCurrency,
         );
         const balance = normalizeBalance(acct);
-        upsertAccount(db, {
+        upsertAccount(
+          db,
+          {
           id,
           source: 'plaid',
           institution: item.institution_name,
@@ -254,18 +274,20 @@ export async function syncPlaid(db: DB, rates: RateMap): Promise<PlaidReport> {
           available: acct.balances?.available ?? null,
           active: true,
           status: 'ok',
-          item_id: item.item_id,
-        });
+            item_id: item.item_id,
+          },
+          profileId,
+        );
         seen.push(id);
         accountCount += 1;
       }
 
-      const tx = await syncItemTransactions(db, item, token, fx);
+      const tx = await syncItemTransactions(db, item, token, fx, profileId);
       txCount += tx.added + tx.modified;
 
       let liabilities: number | undefined;
       if (config.plaid.products.includes('liabilities')) {
-        liabilities = await syncLiabilities(db, token, label);
+        liabilities = await syncLiabilities(db, token, label, profileId);
       }
 
       db.prepare('UPDATE plaid_items SET last_synced_at = ?, updated_at = ? WHERE item_id = ?').run(
@@ -291,15 +313,16 @@ export async function syncPlaid(db: DB, rates: RateMap): Promise<PlaidReport> {
   // Note: accounts under an Item that failed this run are intentionally left
   // active — a login_required Item still holds real money.
   const failedItems = new Set(
-    listItems(db)
+    listItems(db, profileId)
       .filter((i) => i.status !== 'ok')
       .map((i) => i.item_id),
   );
-  const keep = (db.prepare('SELECT id, item_id FROM accounts WHERE source = ?').all('plaid') as
-    Array<{ id: string; item_id: string | null }>)
+  const keep = (db
+    .prepare('SELECT id, item_id FROM accounts WHERE source = ? AND source_profile_id = ?')
+    .all('plaid', profileId) as Array<{ id: string; item_id: string | null }>)
     .filter((r) => r.item_id !== null && failedItems.has(r.item_id))
     .map((r) => r.id);
-  const deactivated = deactivateMissing(db, 'plaid', [...seen, ...keep]);
+  const deactivated = deactivateMissing(db, 'plaid', [...seen, ...keep], profileId);
 
   const misses = fx.misses();
   return {
@@ -317,8 +340,9 @@ async function syncItemTransactions(
   item: PlaidItemRow,
   token: string,
   fx: { toBase: (amount: number, from: string) => number },
+  profileId: string,
 ): Promise<{ added: number; modified: number; removed: number }> {
-  const api = plaidClient(db);
+  const api = plaidClient(db, profileId);
   let cursor = item.cursor ?? undefined;
   let added = 0;
   let modified = 0;
@@ -375,9 +399,14 @@ export function mapTransaction(
 }
 
 /** Statement balance / minimum payment / due date for credit cards. */
-async function syncLiabilities(db: DB, token: string, label: string): Promise<number> {
+async function syncLiabilities(
+  db: DB,
+  token: string,
+  label: string,
+  profileId: string,
+): Promise<number> {
   try {
-    const res = await plaidClient(db).liabilitiesGet({ access_token: token });
+    const res = await plaidClient(db, profileId).liabilitiesGet({ access_token: token });
     const credit = res.data.liabilities?.credit ?? [];
     for (const c of credit) {
       if (!c.account_id) continue;
@@ -402,10 +431,14 @@ async function syncLiabilities(db: DB, token: string, label: string): Promise<nu
 
 // --- Link helpers (used only by link-server.ts, never by the MCP server) ----
 
-export async function createLinkToken(db: DB, redirectUri?: string): Promise<string> {
+export async function createLinkToken(
+  db: DB,
+  redirectUri?: string,
+  profileId = DEFAULT_PROFILE_ID,
+): Promise<string> {
   const redirect = redirectUri ?? config.plaid.redirectUri;
-  const res = await plaidClient(db).linkTokenCreate({
-    user: { client_user_id: 'household' },
+  const res = await plaidClient(db, profileId).linkTokenCreate({
+    user: { client_user_id: `household-${profileId}` },
     client_name: 'tally',
     products: plaidProducts(),
     ...(plaidOptionalProducts().length ? { optional_products: plaidOptionalProducts() } : {}),
@@ -421,13 +454,14 @@ export async function createUpdateLinkToken(
   db: DB,
   itemId: string,
   redirectUri?: string,
+  profileId = DEFAULT_PROFILE_ID,
 ): Promise<string> {
   const item = db.prepare('SELECT * FROM plaid_items WHERE item_id = ?').get(itemId) as
     | PlaidItemRow
     | undefined;
   if (!item) throw new Error(`unknown Plaid item_id ${itemId}`);
-  const res = await plaidClient(db).linkTokenCreate({
-    user: { client_user_id: 'household' },
+  const res = await plaidClient(db, item.profile_id ?? profileId).linkTokenCreate({
+    user: { client_user_id: `household-${item.profile_id ?? profileId}` },
     client_name: 'tally',
     country_codes: plaidCountryCodes(),
     language: 'en',
@@ -440,8 +474,9 @@ export async function createUpdateLinkToken(
 export async function exchangePublicToken(
   db: DB,
   publicToken: string,
+  profileId = DEFAULT_PROFILE_ID,
 ): Promise<{ item_id: string; institution_name: string | null }> {
-  const api = plaidClient(db);
+  const api = plaidClient(db, profileId);
   const ex = await api.itemPublicTokenExchange({ public_token: publicToken });
   const accessToken = ex.data.access_token;
   const itemId = ex.data.item_id;
@@ -462,18 +497,23 @@ export async function exchangePublicToken(
     log.warn(`plaid: could not resolve institution (${errMessage(e)})`);
   }
 
-  saveItem(db, {
-    item_id: itemId,
-    access_token: accessToken,
-    institution_id: institutionId,
-    institution_name: institutionName,
-  });
+  saveItem(
+    db,
+    {
+      item_id: itemId,
+      access_token: accessToken,
+      institution_id: institutionId,
+      institution_name: institutionName,
+    },
+    profileId,
+  );
   return { item_id: itemId, institution_name: institutionName };
 }
 
-export function plaidStatus(db: DB): Array<Record<string, unknown>> {
-  return listItems(db).map((i) => ({
+export function plaidStatus(db: DB, profileId?: string): Array<Record<string, unknown>> {
+  return listItems(db, profileId).map((i) => ({
     item_id: i.item_id,
+    profile_id: i.profile_id,
     institution: i.institution_name ?? i.institution_id ?? 'unknown',
     status: i.status,
     error_code: i.error_code,

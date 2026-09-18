@@ -6,7 +6,7 @@
 import type { DB } from './db.ts';
 import { nowISO, round2 } from './lib/money.ts';
 import type { RegisteredType } from './lib/registered.ts';
-import { config } from './config.ts';
+import { DEFAULT_PROFILE_ID } from './profiles.ts';
 
 export type AccountRow = {
   id: string;
@@ -61,17 +61,21 @@ export type TransactionRow = {
  * user has tagged an account through set_account_owner, no sync may overwrite
  * it. New accounts inherit DEFAULT_OWNER.
  */
-export function upsertAccount(db: DB, a: AccountRow): void {
+export function upsertAccount(
+  db: DB,
+  a: AccountRow,
+  sourceProfileId = DEFAULT_PROFILE_ID,
+): void {
   const ts = nowISO();
   db.prepare(
     `INSERT INTO accounts (
        id, source, institution, name, mask, account_category, account_subtype,
-       registered_type, currency, balance, balance_cad, available, owner, active,
-       status, item_id, first_seen, updated_at
+       registered_type, currency, balance, balance_cad, available, owner, profile_id,
+       source_profile_id, active, status, item_id, first_seen, updated_at
      ) VALUES (
        @id, @source, @institution, @name, @mask, @account_category, @account_subtype,
-       @registered_type, @currency, @balance, @balance_cad, @available, @owner, @active,
-       @status, @item_id, @ts, @ts
+       @registered_type, @currency, @balance, @balance_cad, @available, @owner, @profile_id,
+       @source_profile_id, @active, @status, @item_id, @ts, @ts
      )
      ON CONFLICT(id) DO UPDATE SET
        source           = excluded.source,
@@ -85,10 +89,11 @@ export function upsertAccount(db: DB, a: AccountRow): void {
        balance          = excluded.balance,
        balance_cad      = excluded.balance_cad,
        available        = excluded.available,
-       active           = excluded.active,
-       status           = excluded.status,
-       item_id          = excluded.item_id,
-       updated_at       = excluded.updated_at`,
+       active            = excluded.active,
+       status            = excluded.status,
+       item_id           = excluded.item_id,
+       source_profile_id = excluded.source_profile_id,
+       updated_at        = excluded.updated_at`,
   ).run({
     id: a.id,
     source: a.source,
@@ -102,7 +107,12 @@ export function upsertAccount(db: DB, a: AccountRow): void {
     balance: round2(a.balance),
     balance_cad: round2(a.balance_cad),
     available: a.available === null ? null : round2(a.available),
-    owner: config.defaultOwner,
+    // owner and profile_id are written on INSERT only. A nightly sync that
+    // reset a hand-set attribution would silently corrupt every per-profile
+    // number, and it would look like a market move rather than a bug.
+    owner: sourceProfileId,
+    profile_id: sourceProfileId,
+    source_profile_id: sourceProfileId,
     active: a.active ? 1 : 0,
     status: a.status,
     item_id: a.item_id,
@@ -191,9 +201,22 @@ export function removeTransactions(db: DB, ids: string[]): number {
  * account was closed, or an Item was removed). Deactivate rather than delete so
  * history and owner tags survive.
  */
-export function deactivateMissing(db: DB, source: string, seenIds: string[]): number {
-  const rows = db.prepare('SELECT id FROM accounts WHERE source = ? AND active = 1').all(source) as
-    Array<{ id: string }>;
+/**
+ * Scoped to the credentials that just ran. Without the source_profile_id filter
+ * one profile's sync would deactivate every other profile's accounts, which
+ * would read as the household losing most of its money overnight.
+ */
+export function deactivateMissing(
+  db: DB,
+  source: string,
+  seenIds: string[],
+  sourceProfileId = DEFAULT_PROFILE_ID,
+): number {
+  const rows = db
+    .prepare(
+      'SELECT id FROM accounts WHERE source = ? AND source_profile_id = ? AND active = 1',
+    )
+    .all(source, sourceProfileId) as Array<{ id: string }>;
   const seen = new Set(seenIds);
   const stale = rows.map((r) => r.id).filter((id) => !seen.has(id));
   if (stale.length === 0) return 0;

@@ -11,6 +11,7 @@ import { syncPlaid } from './sources/plaid.ts';
 import { syncSnapTrade } from './sources/snaptrade.ts';
 import { syncWise } from './sources/wise.ts';
 import { writeSnapshot } from './snapshots.ts';
+import { listProfiles } from './profiles.ts';
 
 export type SyncReport = {
   started_at: string;
@@ -18,6 +19,14 @@ export type SyncReport = {
   duration_ms: number;
   ok: boolean;
   fx: Record<string, unknown>;
+  /** Per profile, since each has its own provider credentials. */
+  profiles: Record<string, {
+    name: string;
+    snaptrade: Record<string, unknown>;
+    plaid: Record<string, unknown>;
+    wise: Record<string, unknown>;
+  }>;
+  /** Merged across profiles, kept so existing readers keep working. */
   snaptrade: Record<string, unknown>;
   plaid: Record<string, unknown>;
   wise: Record<string, unknown>;
@@ -53,15 +62,40 @@ export async function runSync(db: DB = getDb()): Promise<SyncReport> {
   const fx = await timed('fx', timings, () => refreshFxRatesSafe(db));
   const rates = loadRates(db);
 
-  const snaptrade = await timed('snaptrade', timings, () => syncSnapTrade(db, rates));
-  const plaid = await timed('plaid', timings, () => syncPlaid(db, rates));
-  const wise = await timed('wise', timings, () => syncWise(db, rates));
+  // Each profile carries its own Plaid team and SnapTrade key, so every source
+  // runs once per profile. A profile with no credentials simply reports
+  // {skipped} and costs nothing.
+  const profiles = listProfiles(db);
+  const perProfile: SyncReport['profiles'] = {};
+  const results: unknown[] = [fx];
+
+  for (const profile of profiles) {
+    const tag = (name: string): string => `${name}:${profile.id}`;
+    const snaptrade = await timed(tag('snaptrade'), timings, () =>
+      syncSnapTrade(db, rates, profile.id),
+    );
+    const plaid = await timed(tag('plaid'), timings, () => syncPlaid(db, rates, profile.id));
+    const wise = await timed(tag('wise'), timings, () => syncWise(db, rates, profile.id));
+    perProfile[profile.id] = {
+      name: profile.name,
+      snaptrade: snaptrade as Record<string, unknown>,
+      plaid: plaid as Record<string, unknown>,
+      wise: wise as Record<string, unknown>,
+    };
+    results.push(snaptrade, plaid, wise);
+  }
+
+  const merge = (source: 'snaptrade' | 'plaid' | 'wise'): Record<string, unknown> => {
+    const entries = Object.entries(perProfile);
+    if (entries.length === 1) return entries[0]![1][source];
+    const out: Record<string, unknown> = {};
+    for (const [id, r] of entries) out[id] = r[source];
+    return out;
+  };
 
   const totals = writeSnapshot(db);
 
-  const ok = ![fx, snaptrade, plaid, wise].some(
-    (r) => typeof r === 'object' && r !== null && 'error' in r,
-  );
+  const ok = !results.some((r) => typeof r === 'object' && r !== null && 'error' in r);
 
   const report: SyncReport = {
     started_at: startedAt,
@@ -69,9 +103,10 @@ export async function runSync(db: DB = getDb()): Promise<SyncReport> {
     duration_ms: Date.now() - t0,
     ok,
     fx: fx as Record<string, unknown>,
-    snaptrade: snaptrade as Record<string, unknown>,
-    plaid: plaid as Record<string, unknown>,
-    wise: wise as Record<string, unknown>,
+    profiles: perProfile,
+    snaptrade: merge('snaptrade'),
+    plaid: merge('plaid'),
+    wise: merge('wise'),
     totals: totals as unknown as Record<string, unknown>,
     timings_ms: timings,
   };
@@ -102,8 +137,12 @@ export function lastSyncReport(db: DB): SyncReport | null {
 export function formatReport(r: SyncReport): string {
   const lines: string[] = [];
   lines.push(`sync ${r.ok ? 'OK' : 'WITH ERRORS'} in ${(r.duration_ms / 1000).toFixed(1)}s`);
-  for (const source of ['fx', 'snaptrade', 'plaid', 'wise'] as const) {
-    lines.push(`  ${source.padEnd(10)} ${JSON.stringify(r[source])}`);
+  lines.push(`  ${'fx'.padEnd(10)} ${JSON.stringify(r.fx)}`);
+  for (const [id, p] of Object.entries(r.profiles ?? {})) {
+    lines.push(`  profile ${id} (${p.name})`);
+    for (const source of ['snaptrade', 'plaid', 'wise'] as const) {
+      lines.push(`    ${source.padEnd(10)} ${JSON.stringify(p[source])}`);
+    }
   }
   const t = r.totals as { net_worth_cad?: number; by_registered_type?: Record<string, number> };
   lines.push(`  net worth  ${t.net_worth_cad ?? 0} CAD`);

@@ -96,6 +96,8 @@ describe('tools', () => {
     const tools = (json['result'] as { tools: Array<{ name: string }> }).tools;
     const names = tools.map((t) => t.name).sort();
     expect(names).toEqual([
+      'create_profile',
+      'delete_profile',
       'fx_rates',
       'get_cashflow',
       'get_contribution_room',
@@ -104,9 +106,11 @@ describe('tools', () => {
       'get_net_worth_history',
       'get_transactions',
       'list_accounts',
+      'list_profiles',
+      'move_account',
       'plaid_relink_url',
       'plaid_status',
-      'set_account_owner',
+      'rename_profile',
       'set_contributed',
       'set_room_limit',
       'sync_now',
@@ -131,16 +135,25 @@ describe('tools', () => {
     expect(result?.isError ?? json['error'] !== undefined).toBe(true);
   });
 
-  it('round-trips an owner tag through set_account_owner', async () => {
+  it('reports a missing account when moving it to a profile', async () => {
     const json = await body(
       await rpc('tools/call', {
-        name: 'set_account_owner',
-        arguments: { account_id: 'snaptrade:does-not-exist', owner: 'spouse' },
+        name: 'move_account',
+        arguments: { account_id: 'snaptrade:does-not-exist', profile: 'me' },
       }),
     );
     const result = json['result'] as { isError?: boolean; content: Array<{ text: string }> };
     expect(result.isError).toBe(true);
     expect(result.content[0]!.text).toContain('does-not-exist');
+  });
+
+  it('lists the default profile and caps creation at five', async () => {
+    const listed = await body(await rpc('tools/call', { name: 'list_profiles', arguments: {} }));
+    const payload = JSON.parse(
+      (listed['result'] as { content: Array<{ text: string }> }).content[0]!.text,
+    ) as { count: number; max: number };
+    expect(payload.max).toBe(5);
+    expect(payload.count).toBeGreaterThanOrEqual(1);
   });
 });
 
