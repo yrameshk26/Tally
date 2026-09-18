@@ -507,7 +507,11 @@ export function connectionsPage(opts: {
                     <td>${ok ? html`<span class="pill ok">ok</span>` : html`<span class="pill bad">${String(i['status'])}${i['error_code'] ? html` ${String(i['error_code'])}` : raw('')}</span>`}</td>
                     <td class="num">${String(i['accounts'] ?? 0)}</td>
                     <td class="num">${money(Number(i['balance_cad'] ?? 0))}</td>
-                    <td class="muted">${i['last_synced_at'] ? String(i['last_synced_at']).slice(0, 16).replace('T', ' ') : '—'}</td>
+                    <td class="muted">${
+                      i['last_synced_at']
+                        ? String(i['last_synced_at']).slice(0, 16).replace('T', ' ')
+                        : html`<span class="pill warn">never synced</span>`
+                    }</td>
                     <td class="num"><div class="row tight">
                       <button class="secondary" type="button"
                         data-relink="${String(i['item_id'])}">Repair</button>

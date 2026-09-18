@@ -74,10 +74,12 @@ import {
   plaidErrorDetail,
   plaidOptionalProducts,
   removeItem,
+  syncNewItem,
   plaidProducts,
   plaidStatus,
 } from '../sources/plaid.ts';
 import { runSync } from '../sync.ts';
+import { loadRates } from '../fx.ts';
 import { createFailureLimiter } from '../ratelimit.ts';
 
 type Ctx = Request & { session?: Session; nonce?: string };
@@ -552,7 +554,15 @@ export function createWebRouter(db: DB): express.Router {
       const profile = requiredProfile(req);
       const saved = await exchangePublicToken(db, publicToken, profile.id);
       log.info(`linked ${saved.institution_name ?? saved.item_id} to profile ${profile.id}`);
-      res.json({ ok: true, profile: profile.id, ...saved });
+      // Pull balances straight away so the new row is not sitting at zero
+      // accounts until the nightly sync. Failure here is not a failed link.
+      let accounts = 0;
+      try {
+        accounts = await syncNewItem(db, saved.item_id, loadRates(db), profile.id);
+      } catch (e) {
+        log.warn(`initial sync for ${saved.item_id} failed (${errMessage(e)})`);
+      }
+      res.json({ ok: true, profile: profile.id, accounts, ...saved });
     } catch (e) {
       res.status(400).json({ error: plaidErrorDetail(e) });
     }

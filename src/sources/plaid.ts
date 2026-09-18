@@ -510,6 +510,63 @@ export async function exchangePublicToken(
   return { item_id: itemId, institution_name: institutionName };
 }
 
+/**
+ * Pull one Item's accounts immediately after linking.
+ *
+ * Without this a freshly linked bank shows zero accounts and no balance until
+ * the next sync, which reads as a broken connection rather than a pending one.
+ * Balances only — transactions can wait for the nightly run.
+ */
+export async function syncNewItem(
+  db: DB,
+  itemId: string,
+  rates: RateMap,
+  profileId = DEFAULT_PROFILE_ID,
+): Promise<number> {
+  const item = db.prepare('SELECT * FROM plaid_items WHERE item_id = ?').get(itemId) as
+    | PlaidItemRow
+    | undefined;
+  if (!item) return 0;
+  const fx = makeConverter(rates);
+  const res = await plaidClient(db, profileId).accountsBalanceGet({
+    access_token: accessTokenFor(item),
+  });
+  for (const acct of res.data.accounts) {
+    const currency = ccy(
+      acct.balances?.iso_currency_code ?? acct.balances?.unofficial_currency_code,
+      config.baseCurrency,
+    );
+    const balance = normalizeBalance(acct);
+    upsertAccount(
+      db,
+      {
+        id: `plaid:${acct.account_id}`,
+        source: 'plaid',
+        institution: item.institution_name,
+        name: acct.name ?? acct.official_name ?? null,
+        mask: acct.mask ?? null,
+        account_category: categoryFor(acct),
+        account_subtype: acct.subtype ? String(acct.subtype) : null,
+        registered_type: guessRegistered(acct.name, acct.official_name, String(acct.subtype ?? '')),
+        currency,
+        balance,
+        balance_cad: fx.toBase(balance, currency),
+        available: acct.balances?.available ?? null,
+        active: true,
+        status: 'ok',
+        item_id: item.item_id,
+      },
+      profileId,
+    );
+  }
+  db.prepare('UPDATE plaid_items SET last_synced_at = ?, updated_at = ? WHERE item_id = ?').run(
+    nowISO(),
+    nowISO(),
+    itemId,
+  );
+  return res.data.accounts.length;
+}
+
 export function plaidStatus(db: DB, profileId?: string): Array<Record<string, unknown>> {
   return listItems(db, profileId).map((i) => ({
     item_id: i.item_id,
