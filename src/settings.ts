@@ -43,6 +43,17 @@ export const MANAGED_KEYS = [
 
 export type ManagedKey = (typeof MANAGED_KEYS)[number];
 
+/**
+ * Values the code falls back to when neither the database nor the environment
+ * has one. These must be surfaced in the UI: a blank "Plaid environment" field
+ * that silently means "production" is how a Sandbox secret ends up being sent
+ * to the production API.
+ */
+export const DEFAULTS: Partial<Record<ManagedKey, string>> = {
+  SNAPTRADE_TRANSPORT: 'rest',
+  PLAID_ENV: 'production',
+};
+
 function isManaged(key: string): key is ManagedKey {
   return (MANAGED_KEYS as readonly string[]).includes(key);
 }
@@ -96,9 +107,10 @@ export function deleteSetting(db: DB, key: string): boolean {
  */
 export function describeSettings(db: DB): Array<{
   key: ManagedKey;
-  source: 'database' | 'environment' | 'unset';
+  source: 'database' | 'environment' | 'default' | 'unset';
   secret: boolean;
   value: string | null;
+  effective: string | null;
   configured: boolean;
 }> {
   const rows = db.prepare('SELECT key, is_secret FROM settings').all() as Array<{
@@ -111,16 +123,31 @@ export function describeSettings(db: DB): Array<{
     const secret = SECRET_KEYS.has(key);
     const fromDb = inDb.has(key);
     const fromEnv = Boolean(process.env[key]);
-    const source = fromDb ? 'database' : fromEnv ? 'environment' : 'unset';
+    const fallback = DEFAULTS[key] ?? null;
+    const source = fromDb
+      ? 'database'
+      : fromEnv
+        ? 'environment'
+        : fallback !== null
+          ? 'default'
+          : 'unset';
     let value: string | null = null;
-    if (!secret && source !== 'unset') {
+    if (!secret && (fromDb || fromEnv)) {
       try {
         value = getSetting(db, key);
       } catch {
         value = null;
       }
     }
-    return { key, source, secret, value, configured: source !== 'unset' };
+    return {
+      key,
+      source,
+      secret,
+      value,
+      // What the code will actually use. Secrets report null, never the value.
+      effective: secret ? null : (value ?? fallback),
+      configured: fromDb || fromEnv,
+    };
   });
 }
 

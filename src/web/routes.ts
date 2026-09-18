@@ -48,7 +48,7 @@ import {
   type Session,
 } from '../auth/session.ts';
 import { describeSettings, setSetting, MANAGED_KEYS, SECRET_KEYS } from '../settings.ts';
-import { plaidReady, snaptradeReady, wiseReady } from '../credentials.ts';
+import { plaidReady, snaptradeReady, testCredentials, wiseReady } from '../credentials.ts';
 import { getHoldings, getNetWorth, listAccounts } from '../queries.ts';
 import {
   createLinkToken,
@@ -267,7 +267,11 @@ export function createWebRouter(db: DB): express.Router {
 
   // --- settings ------------------------------------------------------------
 
-  router.get('/settings', requireAuth, (req: Ctx, res: Response) => {
+  const settings = (
+    req: Ctx,
+    res: Response,
+    checks: Awaited<ReturnType<typeof testCredentials>> | null,
+  ): void => {
     render(
       req,
       res,
@@ -276,10 +280,21 @@ export function createWebRouter(db: DB): express.Router {
         settings: describeSettings(db),
         csrf: req.session!.csrf,
         encryptionReady: Boolean(config.tokenEncKey),
+        checks,
         flash: raw(flash(req, 'ok').value + flash(req, 'err').value),
       }),
       '/settings',
     );
+  };
+
+  router.get('/settings', requireAuth, (req: Ctx, res: Response) => settings(req, res, null));
+
+  router.post('/settings/test', requireAuth, requireCsrf, async (req: Ctx, res: Response) => {
+    try {
+      settings(req, res, await testCredentials(db));
+    } catch (e) {
+      res.redirect(303, `/settings?err=${encodeURIComponent(errMessage(e))}`);
+    }
   });
 
   router.post('/settings', requireAuth, requireCsrf, (req: Ctx, res: Response) => {

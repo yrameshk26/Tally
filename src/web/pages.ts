@@ -178,10 +178,18 @@ export function overviewPage(opts: {
 
 export type SettingView = {
   key: ManagedKey;
-  source: 'database' | 'environment' | 'unset';
+  source: 'database' | 'environment' | 'default' | 'unset';
   secret: boolean;
   value: string | null;
+  effective: string | null;
   configured: boolean;
+};
+
+export type CredentialCheckView = {
+  provider: string;
+  configured: boolean;
+  ok: boolean;
+  detail: string;
 };
 
 const LABELS: Record<string, { label: string; hint: string }> = {
@@ -199,6 +207,7 @@ export function settingsPage(opts: {
   csrf: string;
   flash?: SafeHtml;
   encryptionReady: boolean;
+  checks?: CredentialCheckView[] | null;
 }): SafeHtml {
   const field = (s: SettingView): SafeHtml => {
     const meta = LABELS[s.key] ?? { label: s.key, hint: '' };
@@ -207,15 +216,25 @@ export function settingsPage(opts: {
         ? html`<span class="pill ok">saved</span>`
         : s.source === 'environment'
           ? html`<span class="pill warn">from env</span>`
-          : html`<span class="pill">not set</span>`;
+          : s.source === 'default'
+            ? html`<span class="pill warn">using default</span>`
+            : html`<span class="pill">not set</span>`;
+    // An unset field that silently falls back to a default is shown as a
+    // placeholder, so the page never implies "nothing is configured" when the
+    // code is in fact about to use a real value.
+    const placeholder = s.secret
+      ? s.configured
+        ? '•••••••• (unchanged)'
+        : ''
+      : (s.source === 'default' ? `${s.effective} (default)` : '');
     return html`<div class="field">
       <label for="${s.key}">${meta.label} ${badge}</label>
       <input id="${s.key}" name="${s.key}"
              type="${s.secret ? 'password' : 'text'}"
              autocomplete="off" spellcheck="false"
              value="${s.secret ? '' : (s.value ?? '')}"
-             placeholder="${s.secret && s.configured ? '•••••••• (unchanged)' : ''}">
-      <div class="hint">${meta.hint}${s.secret && s.configured ? ' Leave blank to keep the current value.' : ''}</div>
+             placeholder="${placeholder}">
+      <div class="hint">${meta.hint}${s.secret && s.configured ? ' Leave blank to keep the current value.' : ''}${s.source === 'default' ? ` Nothing is set, so “${s.effective}” is being used.` : ''}</div>
     </div>`;
   };
 
@@ -242,7 +261,37 @@ export function settingsPage(opts: {
       ${group('Wise — multi-currency', ['WISE_API_TOKEN'])}
       <div class="row"><button type="submit">Save credentials</button>
         <span class="muted">Secrets are encrypted at rest and never displayed again.</span></div>
-    </form>`;
+    </form>
+
+    <section style="margin-top:1.1rem">
+      <h2>Check credentials</h2>
+      <p class="hint" style="margin-bottom:.9rem">Runs one cheap read-only call per provider, so a
+        wrong key is found here rather than halfway through a bank login.</p>
+      ${
+        opts.checks && opts.checks.length
+          ? html`<table>
+              <thead><tr><th>Provider</th><th>Result</th></tr></thead>
+              <tbody>${join(
+                opts.checks.map(
+                  (c) => html`<tr>
+                    <td>${c.provider}</td>
+                    <td>${
+                      !c.configured
+                        ? html`<span class="pill">not configured</span>`
+                        : c.ok
+                          ? html`<span class="pill ok">ok</span> <span class="muted">${c.detail}</span>`
+                          : html`<span class="pill bad">failed</span> <span class="muted">${c.detail}</span>`
+                    }</td>
+                  </tr>`,
+                ),
+              )}</tbody>
+            </table>`
+          : raw('')
+      }
+      <form method="post" action="/settings/test" style="margin-top:.9rem">
+        ${csrfField(opts.csrf)}<button class="secondary" type="submit">Test all providers</button>
+      </form>
+    </section>`;
 }
 
 export function connectionsPage(opts: {

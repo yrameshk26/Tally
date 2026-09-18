@@ -142,3 +142,37 @@ describe('readiness', () => {
     expect(sourceReady(db, 'snaptrade')).toBe(true);
   });
 });
+
+describe('effective defaults', () => {
+  it('reports the default the code will actually use, not a blank', () => {
+    // A blank "Plaid environment" field that silently means production is how a
+    // Sandbox secret ends up being sent to the production API.
+    const env = describeSettings(db).find((s) => s.key === 'PLAID_ENV')!;
+    expect(env.source).toBe('default');
+    expect(env.effective).toBe('production');
+    expect(env.configured).toBe(false);
+  });
+
+  it('marks a genuinely unset key with no default as unset', () => {
+    const wise = describeSettings(db).find((s) => s.key === 'WISE_API_TOKEN')!;
+    expect(wise.source).toBe('unset');
+    expect(wise.effective).toBeNull();
+  });
+
+  it('a saved value overrides the default and is reported as such', () => {
+    setSetting(db, 'PLAID_ENV', 'sandbox');
+    const env = describeSettings(db).find((s) => s.key === 'PLAID_ENV')!;
+    expect(env.source).toBe('database');
+    expect(env.effective).toBe('sandbox');
+    expect(getSetting(db, 'PLAID_ENV')).toBe('sandbox');
+  });
+
+  it('never exposes a secret through the effective field', () => {
+    setSetting(db, 'PLAID_SECRET', 'super-secret-value');
+    const sec = describeSettings(db).find((s) => s.key === 'PLAID_SECRET')!;
+    expect(sec.effective).toBeNull();
+    expect(sec.value).toBeNull();
+    expect(sec.configured).toBe(true);
+    expect(JSON.stringify(describeSettings(db))).not.toContain('super-secret-value');
+  });
+});
