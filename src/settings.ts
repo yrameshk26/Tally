@@ -29,6 +29,7 @@ export const SECRET_KEYS = new Set([
   'SNAPTRADE_CONSUMER_KEY',
   'PLAID_SECRET',
   'WISE_API_TOKEN',
+  'LLM_API_KEY',
 ]);
 
 /** Provider settings the onboarding UI is allowed to write. */
@@ -40,6 +41,10 @@ export const MANAGED_KEYS = [
   'PLAID_SECRET',
   'PLAID_ENV',
   'WISE_API_TOKEN',
+  'LLM_PROVIDER',
+  'LLM_API_KEY',
+  'LLM_MODEL',
+  'LLM_BASE_URL',
 ] as const;
 
 export type ManagedKey = (typeof MANAGED_KEYS)[number];
@@ -53,6 +58,7 @@ export type ManagedKey = (typeof MANAGED_KEYS)[number];
 export const DEFAULTS: Partial<Record<ManagedKey, string>> = {
   SNAPTRADE_TRANSPORT: 'rest',
   PLAID_ENV: 'production',
+  LLM_PROVIDER: 'anthropic',
 };
 
 function isManaged(key: string): key is ManagedKey {

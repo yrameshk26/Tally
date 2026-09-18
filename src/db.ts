@@ -39,6 +39,7 @@ CREATE TABLE IF NOT EXISTS accounts (
   balance_cad       REAL NOT NULL DEFAULT 0,
   available         REAL,
   credit_limit      REAL,
+  currency_override TEXT,
   owner             TEXT NOT NULL DEFAULT 'me',
   active            INTEGER NOT NULL DEFAULT 1,
   status            TEXT,
@@ -227,6 +228,58 @@ CREATE TABLE IF NOT EXISTS oauth_tokens (
 );
 CREATE INDEX IF NOT EXISTS idx_oauth_tokens_client ON oauth_tokens(client_id);
 
+-- Hand corrections to what an institution reported.
+--
+-- Kept separate from the synced rows on purpose: a sync overwrites everything it
+-- fetches, so a correction written into the transactions table would survive
+-- exactly one night. They are applied on read instead, which also makes a rule
+-- retroactive
+-- over history the moment it is created.
+CREATE TABLE IF NOT EXISTS tx_overrides (
+  transaction_id TEXT PRIMARY KEY,
+  merchant       TEXT,
+  category       TEXT,
+  note           TEXT,
+  updated_at     TEXT NOT NULL
+);
+
+-- "Everything matching this pattern is really <merchant>, category <category>."
+-- Ordered by position; the first match wins.
+CREATE TABLE IF NOT EXISTS merchant_rules (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  match_type TEXT NOT NULL DEFAULT 'contains',   -- contains | prefix | exact
+  pattern    TEXT NOT NULL,
+  merchant   TEXT,
+  category   TEXT,
+  position   INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_merchant_rules_pos ON merchant_rules(position, id);
+
+-- Assistant conversations. Stored in full (including tool calls) so a thread
+-- can be reopened, and so it is always possible to see exactly what was sent to
+-- the provider on the user's behalf.
+CREATE TABLE IF NOT EXISTS chats (
+  id          TEXT PRIMARY KEY,
+  title       TEXT NOT NULL,
+  profile_id  TEXT,
+  created_at  TEXT NOT NULL,
+  updated_at  TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS chat_messages (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  chat_id     TEXT NOT NULL,
+  role        TEXT NOT NULL,          -- user | assistant | tool
+  content     TEXT NOT NULL DEFAULT '',
+  -- JSON: assistant tool calls, or a tool result's name/id.
+  meta        TEXT,
+  model       TEXT,
+  created_at  TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_chat_messages_chat ON chat_messages(chat_id, id);
+
 CREATE TABLE IF NOT EXISTS meta (
   key   TEXT PRIMARY KEY,
   value TEXT NOT NULL
@@ -272,6 +325,9 @@ export function migrate(db: DB): void {
   };
   addColumn('accounts', 'available', 'REAL');
   addColumn('accounts', 'credit_limit', 'REAL');
+  // "The institution says USD, but this account is really CAD." Null means
+  // trust the institution.
+  addColumn('accounts', 'currency_override', 'TEXT');
   addColumn('plaid_items', 'consent_expiration', 'TEXT');
   addColumn('room', 'note', 'TEXT');
   addColumn('sessions', 'pending', "INTEGER NOT NULL DEFAULT 0");

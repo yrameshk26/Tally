@@ -28,7 +28,8 @@
     "express": "^5.1.0",
     "plaid": "^42.0.0",
     "snaptrade-typescript-sdk": "^9.0.129",
-    "zod": "^3.25.76"
+    "zod": "^3.25.76",
+    "zod-to-json-schema": "^3.24.6"
   },
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.13",

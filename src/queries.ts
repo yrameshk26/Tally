@@ -11,6 +11,7 @@ import type { DB } from './db.ts';
 import { round2, todayISO } from './lib/money.ts';
 import { computeTotals, type NetWorthTotals } from './snapshots.ts';
 import { moveAccount } from './profiles.ts';
+import { corrector, effectiveCurrency } from './overrides.ts';
 
 export type AccountView = {
   id: string;
@@ -22,6 +23,8 @@ export type AccountView = {
   subtype: string | null;
   registered_type: string;
   currency: string;
+  /** Set when the institution's currency was corrected by hand. */
+  currency_override: string | null;
   balance: number;
   balance_cad: number;
   available: number | null;
@@ -79,7 +82,11 @@ export function listAccounts(
       category: (r['account_category'] as string) ?? null,
       subtype: (r['account_subtype'] as string) ?? null,
       registered_type: String(r['registered_type']),
-      currency: String(r['currency']),
+      currency: effectiveCurrency({
+        currency: String(r['currency']),
+        currency_override: (r['currency_override'] as string) ?? null,
+      }),
+      currency_override: (r['currency_override'] as string) ?? null,
       balance: Number(r['balance']),
       balance_cad: Number(r['balance_cad']),
       available: r['available'] === null ? null : Number(r['available']),
@@ -271,6 +278,7 @@ export type TransactionView = {
   id: string;
   date: string;
   account: string | null;
+  account_id: string;
   profile: string;
   name: string | null;
   merchant: string | null;
@@ -281,6 +289,9 @@ export type TransactionView = {
   category: string | null;
   category_detailed: string | null;
   pending: boolean;
+  /** 'override' or 'rule' when the merchant/category below are not the bank's. */
+  corrected_by?: 'override' | 'rule' | null;
+  rule_id?: number;
 };
 
 export function getTransactions(
@@ -338,20 +349,24 @@ export function getTransactions(
     )
     .all(...args, opts.limit ?? 200) as Array<Record<string, unknown>>;
 
-  return rows.map((r) => ({
-    id: String(r['id']),
-    date: String(r['date']),
-    account: (r['account_name'] as string) ?? null,
-    profile: String(r['profile'] ?? 'me'),
-    name: (r['name'] as string) ?? null,
-    merchant: (r['merchant'] as string) ?? null,
-    amount_cad: round2(-Number(r['amount_cad'])),
-    amount: round2(-Number(r['amount'])),
-    currency: String(r['currency']),
-    category: (r['category'] as string) ?? null,
-    category_detailed: (r['category_detailed'] as string) ?? null,
-    pending: Boolean(r['pending']),
-  }));
+  const correct = corrector(db);
+  return rows.map((r) =>
+    correct({
+      id: String(r['id']),
+      date: String(r['date']),
+      account: (r['account_name'] as string) ?? null,
+      account_id: String(r['account_id']),
+      profile: String(r['profile'] ?? 'me'),
+      name: (r['name'] as string) ?? null,
+      merchant: (r['merchant'] as string) ?? null,
+      amount_cad: round2(-Number(r['amount_cad'])),
+      amount: round2(-Number(r['amount'])),
+      currency: String(r['currency']),
+      category: (r['category'] as string) ?? null,
+      category_detailed: (r['category_detailed'] as string) ?? null,
+      pending: Boolean(r['pending']),
+    }),
+  );
 }
 
 export type ActivityView = {
@@ -595,19 +610,18 @@ export function getCashflow(
     where.push('a.profile_id = ?');
     args.push(opts.profile);
   }
-  if (excluded.length) {
-    where.push(`COALESCE(t.category,'') NOT IN (${excluded.map(() => '?').join(',')})`);
-    args.push(...excluded);
-  }
-
-  const rows = db
+  // The exclusion is applied AFTER corrections, below — a rule that
+  // recategorises something as a transfer has to actually exclude it, and a
+  // rule that rescues a row out of TRANSFER_OUT has to bring it back in.
+  const raw = db
     .prepare(
-      `SELECT t.date, t.amount_cad, t.category, t.merchant, t.name, a.profile_id AS profile
+      `SELECT t.id, t.date, t.amount_cad, t.category, t.merchant, t.name, a.profile_id AS profile
        FROM transactions t
        LEFT JOIN accounts a ON a.id = t.account_id
        WHERE ${where.join(' AND ')}`,
     )
     .all(...args) as Array<{
+    id: string;
     date: string;
     amount_cad: number;
     category: string | null;
@@ -615,6 +629,14 @@ export function getCashflow(
     name: string | null;
     profile: string | null;
   }>;
+
+  // Corrections apply here too: a merchant rule that only fixed the transaction
+  // list while cashflow kept the bank's spelling would be worse than no rule.
+  const correct = corrector(db);
+  const excludedSet = new Set(excluded);
+  const rows = raw
+    .map((r) => correct(r))
+    .filter((r) => !excludedSet.has(r.category ?? ''));
 
   const months = new Map<string, { income: number; spend: number }>();
   const categories = new Map<string, number>();
@@ -798,6 +820,94 @@ export function getContributionRoom(
 // --- user-owned setters -----------------------------------------------------
 
 /** Re-attribute an account to another profile. Its connection does not move. */
+export type MerchantGroup = {
+  merchant: string;
+  spend_cad: number;
+  received_cad: number;
+  net_cad: number;
+  count: number;
+  first: string;
+  last: string;
+  categories: string[];
+  /** True when every row in the group already carries a correction. */
+  corrected: boolean;
+};
+
+/**
+ * Transactions rolled up by merchant, after corrections. This is the view that
+ * makes bad merchant data obvious: two spellings of one company sit next to
+ * each other with their own totals until a rule merges them.
+ */
+export function groupByMerchant(rows: TransactionView[]): MerchantGroup[] {
+  const groups = new Map<string, MerchantGroup>();
+  for (const t of rows) {
+    const key = t.merchant ?? t.name ?? 'Unknown';
+    const g = groups.get(key) ?? {
+      merchant: key,
+      spend_cad: 0,
+      received_cad: 0,
+      net_cad: 0,
+      count: 0,
+      first: t.date,
+      last: t.date,
+      categories: [],
+      corrected: true,
+    };
+    // amount_cad is already flipped for reading: negative is money out.
+    if (t.amount_cad < 0) g.spend_cad = round2(g.spend_cad + -t.amount_cad);
+    else g.received_cad = round2(g.received_cad + t.amount_cad);
+    g.net_cad = round2(g.received_cad - g.spend_cad);
+    g.count += 1;
+    if (t.date < g.first) g.first = t.date;
+    if (t.date > g.last) g.last = t.date;
+    if (t.category && !g.categories.includes(t.category)) g.categories.push(t.category);
+    if (!t.corrected_by) g.corrected = false;
+    groups.set(key, g);
+  }
+  return [...groups.values()].sort((a, b) => b.spend_cad - a.spend_cad || b.count - a.count);
+}
+
+export type CategoryGroup = {
+  category: string;
+  spend_cad: number;
+  received_cad: number;
+  count: number;
+  merchants: number;
+};
+
+export function groupByCategory(rows: TransactionView[]): CategoryGroup[] {
+  const groups = new Map<string, CategoryGroup & { seen: Set<string> }>();
+  for (const t of rows) {
+    const key = t.category ?? 'UNCATEGORIZED';
+    const g =
+      groups.get(key) ??
+      ({ category: key, spend_cad: 0, received_cad: 0, count: 0, merchants: 0, seen: new Set() } as CategoryGroup & {
+        seen: Set<string>;
+      });
+    if (t.amount_cad < 0) g.spend_cad = round2(g.spend_cad + -t.amount_cad);
+    else g.received_cad = round2(g.received_cad + t.amount_cad);
+    g.count += 1;
+    g.seen.add(t.merchant ?? t.name ?? 'Unknown');
+    groups.set(key, g);
+  }
+  return [...groups.values()]
+    .map(({ seen, ...g }) => ({ ...g, merchants: seen.size }))
+    .sort((a, b) => b.spend_cad - a.spend_cad);
+}
+
+/** Every category currently in use, for populating a picker. */
+export function knownCategories(db: DB): string[] {
+  const rows = db
+    .prepare(
+      `SELECT DISTINCT category AS c FROM transactions WHERE category IS NOT NULL AND category != ''
+       UNION SELECT DISTINCT category FROM tx_overrides WHERE category IS NOT NULL AND category != ''
+       UNION SELECT DISTINCT category FROM merchant_rules WHERE category IS NOT NULL AND category != ''
+       ORDER BY c`,
+    )
+    .all() as Array<{ c: string }>;
+  return rows.map((r) => r.c);
+}
+
 export function setAccountProfile(db: DB, accountId: string, profileId: string): boolean {
   return moveAccount(db, accountId, profileId);
 }

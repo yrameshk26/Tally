@@ -86,6 +86,23 @@ export const config = {
     baseUrl: str('WISE_API_BASE', 'https://api.transferwise.com'),
   },
 
+  /**
+   * The built-in chat assistant. Off unless a key is configured: turning it on
+   * means this server sends account data to a third party on every message,
+   * which is a different trust model from the rest of the app, where the data
+   * only ever leaves in response to a request the user's own MCP client made.
+   */
+  llm: {
+    provider: str('LLM_PROVIDER', 'anthropic'),
+    apiKey: str('LLM_API_KEY'),
+    model: str('LLM_MODEL'),
+    baseUrl: str('LLM_BASE_URL'),
+    /** How many tool round trips one answer may take before it must conclude. */
+    maxSteps: int('LLM_MAX_STEPS', 8),
+    /** Wall clock for one provider request. */
+    timeoutMs: int('LLM_TIMEOUT_MS', 120_000),
+  },
+
   // --- web UI ---
   uiEnabled: bool('UI_ENABLED', false),
   adminUsername: str('ADMIN_USERNAME'),
