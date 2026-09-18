@@ -75,10 +75,23 @@ dashboard action only the owner can do.
 - [x] `sync_report` tool with `age_hours` and `stale`
 - [x] Nightly backup to `/data/backups/`, 14 days retained
 
+## Phase 8 — the complete picture ✅
+- [x] `get_financial_summary` — every section in one call, `sections` to narrow
+- [x] `get_activities` — brokerage dividends, buys, sells, fees, contributions
+- [x] `get_holdings by_account` — positions under their account, invested vs balance
+- [x] Credit limits and utilisation from Plaid `balances.limit`
+- [x] Overview charts: net worth over time, allocation, largest holdings,
+      income vs spend — each with a table view
+- [x] README and CLAUDE.md rewritten for OAuth, profiles, the UI and the charts
+
 ## Discovered work
-- [ ] MCP endpoint auth: the secret-in-URL is written to Traefik's access log on
-      every request (Dokploy enables request logging globally). Rotating helps;
-      OAuth or a header-based token is the real fix.
+- [x] MCP endpoint auth: the secret-in-URL is written to Traefik's access log on
+      every request (Dokploy enables request logging globally). Fixed by OAuth
+      2.1; set `MCP_ALLOW_PATH_SECRET=false` to close the legacy route.
+- [ ] Merchant names arrive unnormalised — "Primmum Insurance Co" and "Primmum
+      Insurance Comp" are one merchant split across two rows in `top_merchants`.
+- [ ] Plaid Trial caps Items at 10 per team; `me` is at 9 with two Items needing
+      repair (BMO US, Tangerine) and duplicate Amex/Chase links to prune.
 - [ ] Wise `/v2/profiles` response shape is assumed from the docs — confirm the
       `type` field really is `personal`/`business` on a live token.
 - [ ] SnapTrade `/accounts/{id}/activities` pagination is assumed to be
@@ -86,4 +99,5 @@ dashboard action only the owner can do.
 - [ ] Managed-portfolio holdings (DPSP, managed TFSA, group RRSP) have no
       position breakdown from SnapTrade. Check whether an add-on exposes them.
 - [ ] Consider a `get_income_summary` tool once a year of activity has
-      accumulated (dividends + interest by account).
+      accumulated — `get_activities` now has the raw rows and a per-type
+      rollup, so this is a shaping question, not a data one.
