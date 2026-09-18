@@ -78,6 +78,14 @@ export function plaidProducts(): Products[] {
   return config.plaid.products.map((p) => p as Products);
 }
 
+export function plaidOptionalProducts(): Products[] {
+  // Never overlap with `products` — Plaid rejects the request if they do.
+  const required = new Set(config.plaid.products);
+  return config.plaid.optionalProducts
+    .filter((p) => !required.has(p))
+    .map((p) => p as Products);
+}
+
 export function plaidCountryCodes(): CountryCode[] {
   return config.plaid.countryCodes.map((c) => {
     const key = c.charAt(0).toUpperCase() + c.slice(1).toLowerCase();
@@ -141,6 +149,46 @@ export function plaidErrorCode(e: unknown): string | null {
   const data = (e as { response?: { data?: { error_code?: string } } })?.response?.data;
   return data?.error_code ?? null;
 }
+
+type PlaidErrorBody = {
+  error_code?: string;
+  error_message?: string;
+  display_message?: string | null;
+  error_type?: string;
+};
+
+/**
+ * A message worth showing a human.
+ *
+ * Axios reports every Plaid rejection as "Request failed with status code 400",
+ * which says nothing — the actual cause is in the response body. This pulls it
+ * out and, for the handful of misconfigurations that actually happen during
+ * setup, says what to do about it.
+ */
+export function plaidErrorDetail(e: unknown): string {
+  const body = (e as { response?: { data?: PlaidErrorBody } })?.response?.data;
+  if (!body?.error_code) {
+    return e instanceof Error ? e.message : String(e);
+  }
+  const base = `${body.error_code}: ${body.display_message ?? body.error_message ?? ''}`.trim();
+  const hint = HINTS[body.error_code];
+  return hint ? `${base} — ${hint}` : base;
+}
+
+const HINTS: Record<string, string> = {
+  INVALID_API_KEYS:
+    'check PLAID_CLIENT_ID and PLAID_SECRET under Settings, and that the secret matches PLAID_ENV (a Sandbox secret will not work against production)',
+  INVALID_FIELD:
+    'if this mentions redirect_uri, add the exact URI shown below to Plaid dashboard → Developers → API → Allowed redirect URIs, then try again',
+  INVALID_PRODUCT:
+    'your Plaid account does not have this product enabled — remove it from PLAID_PRODUCTS, or request access in the dashboard',
+  PRODUCTS_NOT_SUPPORTED:
+    'the selected institution does not support a required product; move it to PLAID_OPTIONAL_PRODUCTS',
+  INVALID_INPUT: 'check the client ID, secret and environment under Settings',
+  ITEM_LOGIN_REQUIRED: 'this Item needs re-authentication — use Repair',
+  ADDITIONAL_CONSENT_REQUIRED:
+    'the product set changed since this Item was linked; use Repair to re-consent',
+};
 
 const LIABILITY_TYPES = new Set(['credit', 'loan']);
 
@@ -360,6 +408,7 @@ export async function createLinkToken(db: DB, redirectUri?: string): Promise<str
     user: { client_user_id: 'household' },
     client_name: 'tally',
     products: plaidProducts(),
+    ...(plaidOptionalProducts().length ? { optional_products: plaidOptionalProducts() } : {}),
     country_codes: plaidCountryCodes(),
     language: 'en',
     ...(redirect ? { redirect_uri: redirect } : {}),

@@ -55,6 +55,7 @@ import {
   createUpdateLinkToken,
   exchangePublicToken,
   listItems,
+  plaidErrorDetail,
   plaidStatus,
 } from '../sources/plaid.ts';
 import { runSync } from '../sync.ts';
@@ -336,7 +337,8 @@ export function createWebRouter(db: DB): express.Router {
       if (listItems(db).length >= 10) throw new Error('All 10 Plaid Items are already in use');
       res.json({ link_token: await createLinkToken(db, redirectUriFor(req)) });
     } catch (e) {
-      res.status(400).json({ error: errMessage(e) });
+      log.warn('plaid link-token failed', { error: plaidErrorDetail(e) });
+      res.status(400).json({ error: plaidErrorDetail(e) });
     }
   });
 
@@ -345,7 +347,7 @@ export function createWebRouter(db: DB): express.Router {
       const itemId = String((req.body as { item_id?: string })?.item_id ?? '');
       res.json({ link_token: await createUpdateLinkToken(db, itemId, redirectUriFor(req)) });
     } catch (e) {
-      res.status(400).json({ error: errMessage(e) });
+      res.status(400).json({ error: plaidErrorDetail(e) });
     }
   });
 
@@ -357,7 +359,7 @@ export function createWebRouter(db: DB): express.Router {
       log.info(`linked ${saved.institution_name ?? saved.item_id}`);
       res.json({ ok: true, ...saved });
     } catch (e) {
-      res.status(400).json({ error: errMessage(e) });
+      res.status(400).json({ error: plaidErrorDetail(e) });
     }
   });
 

@@ -110,3 +110,59 @@ describe('plaidErrorCode', () => {
     expect(plaidErrorCode(new Error('boom'))).toBeNull();
   });
 });
+
+describe('plaidErrorDetail', () => {
+  it('surfaces the Plaid error instead of the generic axios message', async () => {
+    const { plaidErrorDetail } = await import('../src/sources/plaid.ts');
+    const axiosish = Object.assign(new Error('Request failed with status code 400'), {
+      response: {
+        data: {
+          error_type: 'INVALID_REQUEST',
+          error_code: 'INVALID_FIELD',
+          error_message: 'redirect_uri must be configured in the dashboard',
+        },
+      },
+    });
+    const msg = plaidErrorDetail(axiosish);
+    expect(msg).toContain('INVALID_FIELD');
+    expect(msg).toContain('redirect_uri');
+    expect(msg).not.toBe('Request failed with status code 400');
+  });
+
+  it('prefers the display message and appends an actionable hint', async () => {
+    const { plaidErrorDetail } = await import('../src/sources/plaid.ts');
+    const e = {
+      response: {
+        data: {
+          error_code: 'INVALID_API_KEYS',
+          error_message: 'invalid client_id or secret provided',
+          display_message: 'Invalid credentials',
+        },
+      },
+    };
+    const msg = plaidErrorDetail(e);
+    expect(msg).toContain('Invalid credentials');
+    expect(msg).toContain('PLAID_ENV');
+  });
+
+  it('falls back to the error message when the body is not a Plaid error', async () => {
+    const { plaidErrorDetail } = await import('../src/sources/plaid.ts');
+    expect(plaidErrorDetail(new Error('socket hang up'))).toBe('socket hang up');
+  });
+});
+
+describe('link token products', () => {
+  it('keeps required products minimal and liabilities optional', async () => {
+    const { plaidProducts, plaidOptionalProducts } = await import('../src/sources/plaid.ts');
+    // Required products restrict which institutions Link offers at all, so a
+    // product the account may not have must never sit in the required list.
+    expect(plaidProducts().map(String)).toEqual(['transactions']);
+    expect(plaidOptionalProducts().map(String)).toContain('liabilities');
+  });
+
+  it('never lets a product appear in both lists — Plaid rejects the request', async () => {
+    const { plaidProducts, plaidOptionalProducts } = await import('../src/sources/plaid.ts');
+    const required = new Set(plaidProducts().map(String));
+    for (const p of plaidOptionalProducts().map(String)) expect(required.has(p)).toBe(false);
+  });
+});

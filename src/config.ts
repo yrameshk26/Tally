@@ -63,7 +63,11 @@ export const config = {
     clientId: str('PLAID_CLIENT_ID'),
     secret: str('PLAID_SECRET'),
     env: str('PLAID_ENV', 'production'),
+    // Required products limit which institutions Link will even offer, so keep
+    // this minimal. Anything nice-to-have goes in optionalProducts, which Plaid
+    // fetches best-effort and which never blocks Item creation.
     products: list('PLAID_PRODUCTS', ['transactions']),
+    optionalProducts: list('PLAID_OPTIONAL_PRODUCTS', ['liabilities']),
     countryCodes: list('PLAID_COUNTRY_CODES', ['US', 'CA']),
     linkPort: int('PLAID_LINK_PORT', 8788),
     redirectUri: str('PLAID_REDIRECT_URI'),
