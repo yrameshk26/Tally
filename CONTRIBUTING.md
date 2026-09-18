@@ -19,11 +19,37 @@ pull request doesn't hit a rule it couldn't have known about.
    silently passed off as CAD.
 5. **Never scrape.** Official APIs only.
 
-## Before you open a PR
+## How to send a change
+
+There is no write access to this repository for anyone else, and that is fine —
+**fork it and open a pull request.** The whole loop:
 
 ```bash
+# 1. Fork on GitHub (the Fork button, top right), then clone your fork
+git clone https://github.com/<your-username>/Tally.git
+cd Tally
+git remote add upstream https://github.com/yrameshk26/Tally.git
+
+# 2. Branch. Never work on main — it makes the next sync painful for you.
+git checkout -b fix/wise-rate-rounding
+
+# 3. Make the change, then prove it
 npm run check      # typecheck + the full test suite; both must be clean
+
+# 4. Push to your fork and open the PR against yrameshk26/Tally:main
+git push -u origin fix/wise-rate-rounding
 ```
+
+GitHub then offers a "Compare & pull request" button on your fork. In the
+description, say what broke, what you changed, and how you tested it — against
+`npm run demo` data is fine, and is the only way to show a bug publicly without
+posting your own balances.
+
+Small PRs get read and merged; a large one that rewrites a subsystem will sit,
+so open an issue first for anything big and we'll agree the shape before you
+spend an evening on it. Draft PRs are welcome if you want early feedback.
+
+## Before you open a PR
 
 Then, per `CLAUDE.md` rule 10, update `README.md` and `CLAUDE.md` in the *same*
 commit: a new tool goes in the tool table, a new page in the Web UI section, a

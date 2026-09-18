@@ -426,11 +426,14 @@ end to end (auth, 405 on GET, rate limiting, `tools/list`, a tool call).
 
 ## Contributing
 
-Issues and pull requests are welcome — read [CONTRIBUTING.md](CONTRIBUTING.md)
-first, because a few rules here are non-negotiable (read-only forever, statement
-PDFs never persisted, docs ship in the same commit as the change). Source
-adapters for other institutions and other countries' registered-account types are
-the most useful thing anyone could add.
+Issues and pull requests are welcome. **Fork the repository, branch, and open a
+pull request** against `main` — there is no other way in, and it is the way this
+project expects changes to arrive. [CONTRIBUTING.md](CONTRIBUTING.md) has the
+exact commands and the rules that are non-negotiable (read-only forever,
+statement PDFs never persisted, docs ship in the same commit as the change).
+Run `npm run check` before you open it. Source adapters for other institutions
+and other countries' registered-account types are the most useful thing anyone
+could add.
 
 Please report vulnerabilities privately — see [SECURITY.md](SECURITY.md).
 
@@ -456,6 +459,8 @@ exist because breaking one caused a real outage.
 This is maintained by one person, in evenings, for free.
 
 - **⭐ Star the repo.** Free, and it is how anyone else finds this.
+- **Fork it and send a pull request.** A fix you carry in your own fork helps
+  one person; the same fix as a PR helps everyone who connects that bank.
 - **Report what breaks.** A good bug report against a real institution is worth
   more than a donation — nobody can test every bank.
 - **[Sponsor](https://github.com/sponsors/yrameshk26)** if it saved you the

@@ -102,8 +102,9 @@ function main(): void {
       institution,
       name,
       // Four digits, like a real account mask — id.slice(-4) produced "rrsp"
-      // and "o:mc", which reads as a bug in the screenshot.
-      mask: String(1000 + (id.length * 137) % 9000),
+      // and "o:mc", which reads as a bug in the screenshot, and keying off the
+      // id's length gave half the accounts the same four digits.
+      mask: String(1000 + [...id].reduce((h, c) => (h * 31 + c.charCodeAt(0)) % 9000, 7)),
       account_category: 'INVESTMENT',
       account_subtype: null,
       registered_type: registered,
@@ -119,38 +120,38 @@ function main(): void {
   };
 
   // Brokerage — one person's registered accounts, one partner's.
-  account('demo:rrsp', 'Evergreen RRSP', 'Evergreen Invest', 'RRSP' as RegisteredType, 94_200);
-  account('demo:tfsa', 'Evergreen TFSA', 'Evergreen Invest', 'TFSA' as RegisteredType, 38_450);
-  account('demo:lira', 'Evergreen LIRA', 'Evergreen Invest', 'LIRA' as RegisteredType, 21_800);
-  account('demo:p-tfsa', 'Evergreen TFSA', 'Evergreen Invest', 'TFSA' as RegisteredType, 16_300);
+  account('demo:rrsp', 'Evergreen RRSP', 'Evergreen Invest', 'RRSP' as RegisteredType, 844_860);
+  account('demo:tfsa', 'Evergreen TFSA', 'Evergreen Invest', 'TFSA' as RegisteredType, 231_570);
+  account('demo:lira', 'Evergreen LIRA', 'Evergreen Invest', 'LIRA' as RegisteredType, 167_990);
+  account('demo:p-tfsa', 'Evergreen TFSA', 'Evergreen Invest', 'TFSA' as RegisteredType, 128_000);
 
   // Banking and cards.
-  account('demo:chq', 'Everyday Chequing', 'Northwind Bank', 'NON_REG' as RegisteredType, 4_820.55, {
+  account('demo:chq', 'Everyday Chequing', 'Northwind Bank', 'NON_REG' as RegisteredType, 24_820.55, {
     account_category: 'DEPOSITORY',
     account_subtype: 'checking',
-    available: 4_820.55,
+    available: 24_820.55,
   });
-  account('demo:save', 'Rainy Day Savings', 'Northwind Bank', 'NON_REG' as RegisteredType, 12_000, {
+  account('demo:save', 'Rainy Day Savings', 'Northwind Bank', 'NON_REG' as RegisteredType, 95_000, {
     account_category: 'DEPOSITORY',
     account_subtype: 'savings',
   });
-  account('demo:visa', 'Northwind Rewards Visa', 'Northwind Bank', 'NA' as RegisteredType, -1_284.32, {
+  account('demo:visa', 'Northwind Rewards Visa', 'Northwind Bank', 'NA' as RegisteredType, -2_640.18, {
     account_category: 'LOC',
     account_subtype: 'credit card',
-    available: 8_715.68,
+    available: 7_359.82,
     credit_limit: 10_000,
   });
-  account('demo:mc', 'Summit Mastercard', 'Summit Credit Union', 'NA' as RegisteredType, -412.9, {
+  account('demo:mc', 'Summit Mastercard', 'Summit Credit Union', 'NA' as RegisteredType, -889.4, {
     account_category: 'LOC',
     account_subtype: 'credit card',
-    available: 4_587.1,
+    available: 4_110.6,
     credit_limit: 5_000,
   });
   account('demo:usd', 'USD Balance', 'Wavelength', 'NON_REG' as RegisteredType, 0, {
     account_category: 'DEPOSITORY',
     currency: 'USD',
-    balance: 1_240,
-    balance_cad: 1_711.2,
+    balance: 8_900,
+    balance_cad: 12_282,
   });
 
   setAccountProfile(db, 'demo:p-tfsa', 'partner');
@@ -158,18 +159,18 @@ function main(): void {
   // Holdings: one broad-market ETF dominating, which is what makes the
   // concentration number on the Overview say something.
   replaceHoldings(db, 'demo:rrsp', [
-    holding('demo:rrsp', 'VGRO', 'Vanguard Growth ETF Portfolio', 2_640, 34.2, 28.9),
-    holding('demo:rrsp', 'ZAG', 'BMO Aggregate Bond Index ETF', 300, 13.4, 13.9),
+    holding('demo:rrsp', 'VGRO', 'Vanguard Growth ETF Portfolio', 22_000, 34.2, 28.9),
+    holding('demo:rrsp', 'ZAG', 'BMO Aggregate Bond Index ETF', 6_900, 13.4, 13.9),
   ]);
   replaceHoldings(db, 'demo:tfsa', [
-    holding('demo:tfsa', 'VGRO', 'Vanguard Growth ETF Portfolio', 900, 34.2, 30.1),
-    holding('demo:tfsa', 'XEF', 'iShares Core MSCI EAFE IMI', 240, 32.1, 29.4),
+    holding('demo:tfsa', 'VGRO', 'Vanguard Growth ETF Portfolio', 4_800, 34.2, 30.1),
+    holding('demo:tfsa', 'XEF', 'iShares Core MSCI EAFE IMI', 2_100, 32.1, 29.4),
   ]);
   replaceHoldings(db, 'demo:lira', [
-    holding('demo:lira', 'VGRO', 'Vanguard Growth ETF Portfolio', 637, 34.2, 31.8),
+    holding('demo:lira', 'VGRO', 'Vanguard Growth ETF Portfolio', 4_912, 34.2, 31.8),
   ]);
   replaceHoldings(db, 'demo:p-tfsa', [
-    holding('demo:p-tfsa', 'VEQT', 'Vanguard All-Equity ETF Portfolio', 420, 38.8, 35.2),
+    holding('demo:p-tfsa', 'VEQT', 'Vanguard All-Equity ETF Portfolio', 3_299, 38.8, 35.2),
   ]);
 
   // Brokerage activity, so get_activities and contribution room have something.
@@ -182,9 +183,9 @@ function main(): void {
       type: 'DIVIDEND',
       description: 'VGRO distribution',
       symbol: 'VGRO',
-      amount: 212.4 * wobble(m + 1, 0.2),
+      amount: 1_840 * wobble(m + 1, 0.2),
       currency: 'CAD',
-      amount_cad: 212.4 * wobble(m + 1, 0.2),
+      amount_cad: 1_840 * wobble(m + 1, 0.2),
     });
     activities.push({
       id: `demo:act:con:${String(m)}`,
@@ -234,9 +235,9 @@ function main(): void {
         date: dayISO(day),
         name: 'ACME LOGISTICS PAYROLL',
         merchant: 'Acme Logistics',
-        amount: -2_640,
+        amount: -4_200,
         currency: 'CAD',
-        amount_cad: -2_640,
+        amount_cad: -4_200,
         category: 'INCOME',
         category_detailed: 'INCOME_WAGES',
         pending: false,
@@ -266,7 +267,7 @@ function main(): void {
       `INSERT INTO snapshots (ts, total_assets_cad, total_liabilities_cad, net_worth_cad, by_owner, by_registered_type, origin)
        VALUES (?, ?, ?, ?, '{}', '{}', 'demo')
        ON CONFLICT(substr(ts,1,10), origin) DO NOTHING`,
-    ).run(`${dayISO(day)}T12:00:00.000Z`, value + 1_700, -1_700, value);
+    ).run(`${dayISO(day)}T12:00:00.000Z`, value + 3_530, -3_530, value);
   }
 
   db.prepare(
