@@ -105,6 +105,7 @@ export type StAccount = {
   institution_name?: string | null;
   status?: string | null;
   raw_type?: string | null;
+  account_category?: string | null;
   meta?: Record<string, unknown> | null;
   balance?: { total?: { amount?: number | null; currency?: string | null } | null } | null;
 };
@@ -119,14 +120,45 @@ export type StPosition = {
     } | null;
     option_symbol?: { ticker?: string | null; option_type?: string | null } | null;
   } | null;
-  units?: number | null;
-  price?: number | null;
-  currency?: StCurrency;
-  average_purchase_price?: number | null;
-  open_pnl?: number | null;
+  // Numerics are typed loosely because SnapTrade sends them as strings on the
+  // current API and as numbers on older responses. num() normalises both.
+  units?: number | string | null;
+  price?: number | string | null;
+  currency?: StCurrency | string;
+  average_purchase_price?: number | string | null;
+  open_pnl?: number | string | null;
 };
 
-export type StBalance = { currency?: StCurrency; cash?: number | null };
+/**
+ * Current SnapTrade position shape. The ticker lives under `instrument`, the
+ * numerics arrive as strings, and `cost_basis` is PER UNIT (not the position
+ * total). The older nested `symbol.symbol.symbol` form is still handled below
+ * for brokerages that return it.
+ */
+export type StInstrument = {
+  kind?: string | null;
+  symbol?: string | null;
+  raw_symbol?: string | null;
+  description?: string | null;
+  currency?: string | null;
+  exchange?: string | null;
+};
+
+export type StPositionV2 = {
+  instrument?: StInstrument | null;
+  units?: number | string | null;
+  price?: number | string | null;
+  /** Average cost per unit, not the position total. */
+  cost_basis?: number | string | null;
+  currency?: StCurrency | string | null;
+};
+
+export type StPositionsResponse = {
+  positions?: Array<StPosition & StPositionV2> | null;
+  data_freshness?: { as_of?: string | null } | null;
+};
+
+export type StBalance = { currency?: StCurrency | string; cash?: number | string | null };
 
 export type StHoldings = {
   account?: StAccount;
@@ -143,6 +175,16 @@ export type StAuthorization = {
   brokerage?: { name?: string | null; slug?: string | null } | null;
 };
 
+/** SnapTrade returns currency as either "CAD" or { code: "CAD" } depending on endpoint. */
+function readCurrency(v: unknown, fallback: string): string {
+  if (typeof v === 'string') return ccy(v, fallback);
+  if (v && typeof v === 'object') {
+    const code = (v as { code?: unknown }).code;
+    if (typeof code === 'string') return ccy(code, fallback);
+  }
+  return fallback;
+}
+
 // --- classification ---------------------------------------------------------
 
 const CARD_RE = /credit\s*card|\bvisa\b|\bmastercard\b|\bamex\b|line\s+of\s+credit|\bloc\b/i;
@@ -150,6 +192,10 @@ const LOAN_RE = /\bloan\b|\bmortgage\b/i;
 const CRYPTO_RE = /crypto|coinbase|\bbtc\b|\beth\b/i;
 
 export function classifyAccount(a: StAccount): string {
+  // SnapTrade labels credit cards itself on some connections; trust that over
+  // guessing from the name.
+  const declared = (a.account_category ?? '').toUpperCase();
+  if (declared === 'LOC' || declared === 'LOAN' || declared === 'CRYPTO') return declared;
   // Separators flattened for the same reason as in guessRegistered(): SnapTrade
   // raw types look like `CREDIT_CARD`, which \s* alone would not match.
   const hay = [a.name, a.raw_type, a.institution_name, JSON.stringify(a.meta ?? {})]
@@ -164,8 +210,12 @@ export function classifyAccount(a: StAccount): string {
 
 /** Closed and archived accounts must not appear in net worth. */
 export function isLiveAccount(a: StAccount): boolean {
-  const status = (a.status ?? 'open').toLowerCase();
-  return status !== 'closed' && status !== 'archived' && status !== 'deleted';
+  const dead = new Set(['closed', 'archived', 'deleted']);
+  if (dead.has((a.status ?? 'open').toLowerCase())) return false;
+  // Wealthsimple reports the real state in meta.status; the top-level field is
+  // null for several brokerages.
+  const metaStatus = a.meta && typeof a.meta['status'] === 'string' ? a.meta['status'] : '';
+  return !dead.has(metaStatus.toLowerCase());
 }
 
 export function registeredFor(a: StAccount): RegisteredType {
@@ -186,6 +236,7 @@ export type SnapTradeReport = {
   excluded_closed?: number;
   cards_deactivated?: number;
   holdings?: number;
+  holdings_errors?: number;
   deactivated?: number;
   by_registered_type?: Record<string, number>;
   total_cad?: number;
@@ -272,12 +323,25 @@ export async function syncSnapTrade(db: DB, rates: RateMap): Promise<SnapTradeRe
     if (!active) continue;
 
     try {
-      const holdings = await snaptradeGet<StHoldings>(db, `/accounts/${acct.id}/holdings`);
-      const rows = mapHoldings(id, holdings, currency, fx);
+      const positions = await snaptradeGet<StPositionsResponse>(
+        db,
+        `/accounts/${acct.id}/positions/all`,
+      );
+      // Balances are a separate call and are allowed to fail: the account total
+      // already came from /accounts, so a missing cash row costs detail, not
+      // correctness.
+      let balances: StBalance[] = [];
+      try {
+        balances = await snaptradeGet<StBalance[]>(db, `/accounts/${acct.id}/balances`);
+      } catch (e) {
+        log.debug(`snaptrade: balances for ${acct.id} unavailable (${errMessage(e)})`);
+      }
+      const rows = mapHoldings(id, { positions: positions.positions, balances }, currency, fx);
       replaceHoldings(db, id, rows);
       report.holdings = (report.holdings ?? 0) + rows.length;
     } catch (e) {
-      log.warn(`snaptrade: holdings for ${acct.name ?? acct.id} failed (${errMessage(e)})`);
+      log.warn(`snaptrade: positions for ${acct.name ?? acct.id} failed (${errMessage(e)})`);
+      report.holdings_errors = (report.holdings_errors ?? 0) + 1;
     }
 
     try {
@@ -299,9 +363,24 @@ export async function syncSnapTrade(db: DB, rates: RateMap): Promise<SnapTradeRe
   return report;
 }
 
+export type MappableHoldings = {
+  positions?: Array<StPosition & StPositionV2> | null;
+  option_positions?: Array<StPosition & StPositionV2> | null;
+  balances?: StBalance[] | null;
+};
+
+/**
+ * Map positions and cash into holding rows.
+ *
+ * Two position shapes are supported. The current API nests the security under
+ * `instrument` and sends every number as a string, with `cost_basis` expressed
+ * per unit. Older responses nest it under `symbol.symbol` with real numbers and
+ * an `average_purchase_price`. Both appear in the wild depending on brokerage,
+ * so both are read rather than assuming one.
+ */
 export function mapHoldings(
   accountId: string,
-  h: StHoldings,
+  h: MappableHoldings,
   accountCurrency: string,
   fx: { toBase: (amount: number, from: string) => number },
 ): HoldingRow[] {
@@ -310,7 +389,7 @@ export function mapHoldings(
   for (const b of h.balances ?? []) {
     const cash = num(b.cash);
     if (cash === 0) continue;
-    const cur = ccy(b.currency?.code, accountCurrency);
+    const cur = readCurrency(b.currency, accountCurrency);
     rows.push({
       account_id: accountId,
       symbol: `CASH.${cur}`,
@@ -326,20 +405,37 @@ export function mapHoldings(
     });
   }
 
-  const push = (p: StPosition, multiplier: number, fallbackType: string): void => {
-    const sym = p.symbol?.symbol;
-    const ticker = sym?.symbol ?? p.symbol?.option_symbol?.ticker ?? null;
+  const push = (p: StPosition & StPositionV2, fallbackType: string): void => {
+    const inst = p.instrument ?? null;
+    const legacy = p.symbol?.symbol ?? null;
+
+    const ticker =
+      inst?.raw_symbol ?? inst?.symbol ?? legacy?.symbol ?? p.symbol?.option_symbol?.ticker ?? null;
+    const description = inst?.description ?? legacy?.description ?? null;
+    const kind = (inst?.kind ?? legacy?.type?.code ?? fallbackType).toLowerCase();
+    // An option contract covers 100 shares and is priced per share.
+    const multiplier = kind.includes('option') ? 100 : 1;
+
     const units = num(p.units);
     const price = num(p.price);
-    const cur = ccy(p.currency?.code ?? sym?.currency?.code, accountCurrency);
+    const cur = readCurrency(p.currency ?? inst?.currency ?? legacy?.currency, accountCurrency);
     const mv = units * price * multiplier;
-    const avg = p.average_purchase_price;
-    const cost = avg === null || avg === undefined ? null : num(avg) * units * multiplier;
+
+    // Current API: cost_basis is per unit. Legacy: average_purchase_price is
+    // also per unit. Either way it must be multiplied out to a position total.
+    const perUnitCost =
+      p.cost_basis !== null && p.cost_basis !== undefined
+        ? num(p.cost_basis)
+        : p.average_purchase_price !== null && p.average_purchase_price !== undefined
+          ? num(p.average_purchase_price)
+          : null;
+    const cost = perUnitCost === null ? null : perUnitCost * units * multiplier;
+
     rows.push({
       account_id: accountId,
       symbol: ticker,
-      description: sym?.description ?? null,
-      asset_type: sym?.type?.code ?? fallbackType,
+      description,
+      asset_type: kind,
       quantity: units,
       price,
       currency: cur,
@@ -350,9 +446,8 @@ export function mapHoldings(
     });
   };
 
-  for (const p of h.positions ?? []) push(p, 1, 'security');
-  // An option contract covers 100 shares and SnapTrade prices it per share.
-  for (const p of h.option_positions ?? []) push(p, 100, 'option');
+  for (const p of h.positions ?? []) push(p, 'security');
+  for (const p of h.option_positions ?? []) push(p, 'option');
 
   return rows;
 }

@@ -65,7 +65,80 @@ describe('account classification', () => {
   });
 });
 
-describe('holdings mapping', () => {
+describe('holdings mapping — current API shape', () => {
+  // Captured verbatim from a live /accounts/{id}/positions/all response:
+  // numbers arrive as strings, the security is under `instrument`, and
+  // cost_basis is per unit.
+  const live = {
+    positions: [
+      {
+        instrument: {
+          kind: 'etf',
+          id: '9f7330fe',
+          symbol: 'XEQT.TO',
+          raw_symbol: 'XEQT',
+          description: 'iShares Core Equity ETF Portfolio',
+          currency: 'CAD',
+          exchange: 'XTSE',
+        },
+        units: '2826.3436',
+        price: '45.51',
+        cost_basis: '41.05150556',
+        currency: 'CAD',
+      },
+    ],
+    balances: [{ currency: 'CAD', cash: '12.50' }],
+  };
+
+  it('reads string numerics and the instrument block', () => {
+    const rows = mapHoldings('snaptrade:a', live, 'CAD', fx);
+    const xeqt = rows.find((r) => r.symbol === 'XEQT')!;
+    expect(xeqt.quantity).toBeCloseTo(2826.3436, 4);
+    expect(xeqt.price).toBe(45.51);
+    expect(xeqt.description).toBe('iShares Core Equity ETF Portfolio');
+    expect(xeqt.asset_type).toBe('etf');
+  });
+
+  it('values the position to the account balance', () => {
+    const xeqt = mapHoldings('snaptrade:a', live, 'CAD', fx).find((r) => r.symbol === 'XEQT')!;
+    // units x price = 128,626.90 against a reported account total of
+    // 128,626.937236 — agreeing to within four cents is the check that the
+    // whole mapping is right, not just that it produced a number.
+    const ACCOUNT_TOTAL = 128626.937236;
+    expect(Math.abs(xeqt.market_value_cad - ACCOUNT_TOTAL)).toBeLessThan(1);
+  });
+
+  it('multiplies the per-unit cost basis out to a position total', () => {
+    const xeqt = mapHoldings('snaptrade:a', live, 'CAD', fx).find((r) => r.symbol === 'XEQT')!;
+    // 41.05150556 x 2826.3436 — NOT the bare per-unit figure.
+    expect(xeqt.cost_basis_cad).toBeCloseTo(116025.66, 0);
+    expect(xeqt.cost_basis_cad).not.toBeCloseTo(41.05, 1);
+  });
+
+  it('prefers raw_symbol so the ticker is not exchange-suffixed', () => {
+    const rows = mapHoldings('snaptrade:a', live, 'CAD', fx);
+    expect(rows.some((r) => r.symbol === 'XEQT')).toBe(true);
+    expect(rows.some((r) => r.symbol === 'XEQT.TO')).toBe(false);
+  });
+
+  it('reads a plain-string currency on balances', () => {
+    const cash = mapHoldings('snaptrade:a', live, 'CAD', fx).find((r) => r.asset_type === 'cash')!;
+    expect(cash.symbol).toBe('CASH.CAD');
+    expect(cash.market_value).toBe(12.5);
+  });
+
+  it('prices an option contract at 100 shares via instrument.kind', () => {
+    const opt = mapHoldings(
+      'snaptrade:a',
+      { positions: [{ instrument: { kind: 'option', symbol: 'SPY 500C' }, units: '2', price: '3.5', currency: 'USD' }] },
+      'CAD',
+      fx,
+    )[0]!;
+    expect(opt.market_value).toBe(700);
+  });
+});
+
+describe('holdings mapping — legacy shape', () => {
   const holdings: StHoldings = {
     balances: [{ currency: { code: 'CAD' }, cash: 250.5 }, { currency: { code: 'USD' }, cash: 0 }],
     positions: [
