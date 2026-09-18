@@ -75,6 +75,16 @@ export const config = {
     baseUrl: str('WISE_API_BASE', 'https://api.transferwise.com'),
   },
 
+  // --- web UI ---
+  uiEnabled: bool('UI_ENABLED', false),
+  adminUsername: str('ADMIN_USERNAME'),
+  /** Argon2id PHC string. Generate with `npm run hash-password`. */
+  adminPasswordHash: str('ADMIN_PASSWORD_HASH'),
+  /** Send the session cookie only over HTTPS. Defaults on behind a proxy. */
+  cookieSecure: bool('COOKIE_SECURE', int('TRUST_PROXY', 0) > 0),
+  /** Failed logins allowed per 15 minutes, per IP. */
+  loginRateLimit: int('LOGIN_RATE_LIMIT', 10),
+
   tokenEncKey: str('TOKEN_ENC_KEY'),
 } as const;
 

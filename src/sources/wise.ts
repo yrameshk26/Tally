@@ -6,7 +6,8 @@
  * "Wise USD (personal)" and "Wise USD (business)" as separate accounts.
  */
 import type { DB } from '../db.ts';
-import { config, wiseConfigured } from '../config.ts';
+import { config } from '../config.ts';
+import { wiseCreds, wiseReady } from '../credentials.ts';
 import { errMessage, log } from '../lib/logger.ts';
 import { ccy, num, round2 } from '../lib/money.ts';
 import { deactivateMissing, upsertAccount } from '../store.ts';
@@ -24,10 +25,11 @@ export type WiseBalance = {
   cashAmount?: { value?: number | null } | null;
 };
 
-async function wiseGet<T>(path: string): Promise<T> {
-  const res = await fetch(`${config.wise.baseUrl}${path}`, {
+async function wiseGet<T>(db: DB, path: string): Promise<T> {
+  const { token, baseUrl } = wiseCreds(db);
+  const res = await fetch(`${baseUrl}${path}`, {
     headers: {
-      authorization: `Bearer ${config.wise.token}`,
+      authorization: `Bearer ${token}`,
       accept: 'application/json',
     },
   });
@@ -41,10 +43,10 @@ async function wiseGet<T>(path: string): Promise<T> {
 export type WiseReport = Record<string, unknown> & { skipped?: true; reason?: string };
 
 export async function syncWise(db: DB, rates: RateMap): Promise<WiseReport> {
-  if (!wiseConfigured()) return { skipped: true, reason: 'WISE_API_TOKEN not set' };
+  if (!wiseReady(db)) return { skipped: true, reason: 'WISE_API_TOKEN not set' };
 
   const fx = makeConverter(rates);
-  const profiles = await wiseGet<WiseProfile[]>('/v2/profiles');
+  const profiles = await wiseGet<WiseProfile[]>(db, '/v2/profiles');
   const seen: string[] = [];
   let total = 0;
   let count = 0;
@@ -54,7 +56,7 @@ export async function syncWise(db: DB, rates: RateMap): Promise<WiseReport> {
     for (const type of ['STANDARD', 'SAVINGS']) {
       let balances: WiseBalance[];
       try {
-        balances = await wiseGet<WiseBalance[]>(`/v4/profiles/${profile.id}/balances?types=${type}`);
+        balances = await wiseGet<WiseBalance[]>(db, `/v4/profiles/${profile.id}/balances?types=${type}`);
       } catch (e) {
         // SAVINGS 404s for accounts with no jars — not an error worth failing on.
         log.debug(`wise: ${type} balances for profile ${profile.id} (${errMessage(e)})`);

@@ -65,6 +65,29 @@ descriptions and security names come from institutions and, ultimately, from
 whoever typed the memo field on a transfer. They are safe as MCP text. If you
 add an HTML UI, escape them — they are a stored-XSS vector.
 
+## The web UI
+
+`UI_ENABLED` defaults to false, and the UI refuses to mount without
+`ADMIN_USERNAME`, an Argon2id `ADMIN_PASSWORD_HASH` and `TOKEN_ENC_KEY`.
+
+What it enforces: Argon2id at the OWASP minimum (19 MiB, t=2, p=1); a
+per-session CSRF token on every state-changing request; `HttpOnly`,
+`SameSite=Lax` and (behind a proxy) `Secure` session cookies held server-side so
+sign-out is real; a failure-only sign-in limiter checked before password
+verification; TOTP that is never persisted until a code proves enrolment
+succeeded, and that requires a current code to disable; and a CSP of
+`default-src 'none'` with nonces, whose only third-party allowance is Plaid Link
+on the one page that needs it.
+
+What it does not do: there is one account, so there is no password reset, no
+lockout recovery and no audit trail beyond the sessions list. If you lose the
+password, change `ADMIN_PASSWORD_HASH` in the environment and restart.
+
+**Consider not exposing it publicly at all.** Only the MCP endpoint needs to be
+reachable from the internet; the UI only needs to be reachable by your browser.
+Putting it behind a VPN or an identity-aware proxy removes most of the above
+from your threat model.
+
 ## Hardening checklist
 
 - [ ] `MCP_SECRET` at least 32 bytes from a CSPRNG (`openssl rand -hex 32`)
@@ -75,3 +98,5 @@ add an HTML UI, escape them — they are a stored-XSS vector.
       Docker image, but do not run it on a public host
 - [ ] Reverse-proxy access logs rotated, or path logging disabled
 - [ ] Database volume backed up, and those backups treated as secret
+- [ ] If `UI_ENABLED=true`: two-factor enrolled, `ADMIN_PASSWORD_HASH` is a real
+      Argon2id hash, and the password is long and unique

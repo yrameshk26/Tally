@@ -16,7 +16,8 @@
  */
 import { createHmac } from 'node:crypto';
 import type { DB } from '../db.ts';
-import { config, snaptradeConfigured } from '../config.ts';
+import { config } from '../config.ts';
+import { snaptradeCreds, snaptradeReady } from '../credentials.ts';
 import { errMessage, log } from '../lib/logger.ts';
 import { ccy, num, round2 } from '../lib/money.ts';
 import { guessRegistered, type RegisteredType } from '../lib/registered.ts';
@@ -58,10 +59,11 @@ export function signRequest(
 
 /** Signed GET against the SnapTrade REST API. */
 export async function snaptradeGet<T>(
+  db: DB,
   path: string,
   extraQuery: Record<string, string> = {},
 ): Promise<T> {
-  const { clientId, consumerKey, userId, userSecret, baseUrl, transport } = config.snaptrade;
+  const { clientId, consumerKey, userId, userSecret, baseUrl, transport } = snaptradeCreds(db);
   const params = new URLSearchParams();
   params.set('clientId', clientId);
   params.set('timestamp', String(Math.floor(Date.now() / 1000)));
@@ -194,7 +196,7 @@ export type SnapTradeReport = {
 };
 
 export async function syncSnapTrade(db: DB, rates: RateMap): Promise<SnapTradeReport> {
-  if (!snaptradeConfigured()) {
+  if (!snaptradeReady(db)) {
     return { skipped: true, reason: 'SNAPTRADE_CLIENT_ID / SNAPTRADE_CONSUMER_KEY not set' };
   }
 
@@ -209,13 +211,13 @@ export async function syncSnapTrade(db: DB, rates: RateMap): Promise<SnapTradeRe
     total_cad: 0,
   };
 
-  const auths = await snaptradeGet<StAuthorization[]>('/authorizations').catch((e) => {
+  const auths = await snaptradeGet<StAuthorization[]>(db, '/authorizations').catch((e) => {
     log.warn(`snaptrade: /authorizations failed (${errMessage(e)})`);
     return [] as StAuthorization[];
   });
   report.authorizations = auths.length;
 
-  const accounts = await snaptradeGet<StAccount[]>('/accounts');
+  const accounts = await snaptradeGet<StAccount[]>(db, '/accounts');
   const seen: string[] = [];
 
   for (const acct of accounts) {
@@ -270,7 +272,7 @@ export async function syncSnapTrade(db: DB, rates: RateMap): Promise<SnapTradeRe
     if (!active) continue;
 
     try {
-      const holdings = await snaptradeGet<StHoldings>(`/accounts/${acct.id}/holdings`);
+      const holdings = await snaptradeGet<StHoldings>(db, `/accounts/${acct.id}/holdings`);
       const rows = mapHoldings(id, holdings, currency, fx);
       replaceHoldings(db, id, rows);
       report.holdings = (report.holdings ?? 0) + rows.length;
@@ -374,6 +376,7 @@ export async function importBalanceHistory(
   for (const acct of accounts) {
     try {
       const points = await snaptradeGet<StBalanceHistoryPoint[]>(
+        db,
         `/accounts/${acct.id}/balanceHistory`,
       );
       for (const p of points ?? []) {
@@ -432,6 +435,7 @@ export async function fetchActivities(
 
   for (let offset = 0; offset < 5000; offset += limit) {
     const page = await snaptradeGet<StActivity[] | { data?: StActivity[] }>(
+      db,
       `/accounts/${snaptradeAccountId}/activities`,
       { startDate, endDate, offset: String(offset), limit: String(limit) },
     );

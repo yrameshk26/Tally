@@ -162,6 +162,24 @@ CREATE TABLE IF NOT EXISTS settings (
   updated_at  TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS auth (
+  key        TEXT PRIMARY KEY,
+  value      TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS sessions (
+  id           TEXT PRIMARY KEY,
+  username     TEXT NOT NULL,
+  csrf         TEXT NOT NULL,
+  created_at   TEXT NOT NULL,
+  last_seen_at TEXT NOT NULL,
+  expires_at   TEXT NOT NULL,
+  user_agent   TEXT,
+  ip           TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_sessions_expires ON sessions(expires_at);
+
 CREATE TABLE IF NOT EXISTS meta (
   key   TEXT PRIMARY KEY,
   value TEXT NOT NULL

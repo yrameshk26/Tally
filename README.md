@@ -107,6 +107,33 @@ from the bank side, so it is reported as
 `unattributed_brokerage_transfers_cad` and never silently subtracted. Set the
 real number with `set_contributed` and it wins over detection.
 
+## Web UI (optional)
+
+Off by default — with `UI_ENABLED=false` the server is a bare MCP endpoint with
+no login surface at all. Turn it on to onboard credentials and link banks
+without copying a database around:
+
+```bash
+npm run hash-password          # prints ADMIN_PASSWORD_HASH; the password is never stored
+```
+
+```
+UI_ENABLED=true
+ADMIN_USERNAME=you
+ADMIN_PASSWORD_HASH=$argon2id$v=19$m=19456,p=1,t=2$...
+TOKEN_ENC_KEY=...              # required: encrypts stored secrets and the TOTP seed
+```
+
+Four pages: **Overview** (net worth, accounts, cards with statement and due
+dates, holdings), **Connections** (Plaid Link to add banks and cards, item
+health, one-click repair), **Settings** (provider credentials, stored encrypted
+in the database and overriding the environment without a redeploy) and
+**Security** (two-factor enrolment, active sessions, sign out everywhere).
+
+**Turn on two-factor authentication.** A single password is otherwise the only
+thing between the public internet and every balance, transaction and stored
+bank token. The Security page walks through it; any authenticator app works.
+
 ## Deploying
 
 See [`DEPLOY.md`](DEPLOY.md) — Docker image, Dokploy application, persistent

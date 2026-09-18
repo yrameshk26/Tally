@@ -186,3 +186,49 @@ describe('proxy awareness', () => {
     expect(clientKey({ ip: undefined })).toBe('unknown');
   });
 });
+
+describe('login failure limiter', () => {
+  it('counts failures, not successes — a busy legitimate user is never locked out', async () => {
+    const { createFailureLimiter } = await import('../src/ratelimit.ts');
+    const lim = createFailureLimiter(3, 60_000);
+    const t = Date.now();
+    // A hundred successful sign-ins must not move it at all.
+    for (let i = 0; i < 100; i += 1) lim.reset('ip');
+    expect(lim.blocked('ip', t)).toBe(false);
+
+    lim.fail('ip', t);
+    lim.fail('ip', t);
+    expect(lim.blocked('ip', t)).toBe(false);
+    lim.fail('ip', t);
+    expect(lim.blocked('ip', t)).toBe(true);
+  });
+
+  it('clears the record on a success, so one typo does not linger', async () => {
+    const { createFailureLimiter } = await import('../src/ratelimit.ts');
+    const lim = createFailureLimiter(2, 60_000);
+    const t = Date.now();
+    lim.fail('ip', t);
+    lim.fail('ip', t);
+    expect(lim.blocked('ip', t)).toBe(true);
+    lim.reset('ip');
+    expect(lim.blocked('ip', t)).toBe(false);
+  });
+
+  it('lets the window expire', async () => {
+    const { createFailureLimiter } = await import('../src/ratelimit.ts');
+    const lim = createFailureLimiter(1, 1000);
+    const t = Date.now();
+    lim.fail('ip', t);
+    expect(lim.blocked('ip', t + 500)).toBe(true);
+    expect(lim.blocked('ip', t + 1500)).toBe(false);
+  });
+
+  it('tracks addresses independently', async () => {
+    const { createFailureLimiter } = await import('../src/ratelimit.ts');
+    const lim = createFailureLimiter(1, 60_000);
+    const t = Date.now();
+    lim.fail('a', t);
+    expect(lim.blocked('a', t)).toBe(true);
+    expect(lim.blocked('b', t)).toBe(false);
+  });
+});

@@ -18,10 +18,12 @@
     "backup": "node --experimental-strip-types --env-file-if-exists=.env scripts/backup.ts",
     "test": "vitest run",
     "seed:room": "node --experimental-strip-types --env-file-if-exists=.env scripts/db-init.ts",
-    "check": "npm run typecheck && npm test"
+    "check": "npm run typecheck && npm test",
+    "hash-password": "node --experimental-strip-types --env-file-if-exists=.env scripts/hash-password.ts"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.21.0",
+    "argon2": "^0.45.1",
     "better-sqlite3": "^12.2.0",
     "express": "^5.1.0",
     "plaid": "^42.0.0",

@@ -8,7 +8,8 @@ import express, { type Request, type Response } from 'express';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
-import { config, plaidConfigured } from './config.ts';
+import { config } from './config.ts';
+import { plaidReady } from './credentials.ts';
 import { getDb } from './db.ts';
 import { errMessage, log } from './lib/logger.ts';
 import {
@@ -47,7 +48,7 @@ export function createLinkApp(): express.Express {
 
   app.get('/api/link-token', async (_req: Request, res: Response) => {
     try {
-      res.json({ link_token: await createLinkToken() });
+      res.json({ link_token: await createLinkToken(db) });
     } catch (e) {
       res.status(500).json({ error: errMessage(e) });
     }
@@ -78,7 +79,7 @@ export function createLinkApp(): express.Express {
 }
 
 function main(): void {
-  if (!plaidConfigured()) {
+  if (!plaidReady(getDb())) {
     log.error('PLAID_CLIENT_ID / PLAID_SECRET must be set before linking');
     process.exit(1);
   }

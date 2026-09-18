@@ -16,6 +16,10 @@ import { getDb } from './db.ts';
 import { errMessage, log } from './lib/logger.ts';
 import { buildServer } from './mcp.ts';
 import { startScheduler } from './scheduler.ts';
+import { createRateLimiter } from './ratelimit.ts';
+import { createWebRouter, webDisabledReason } from './web/routes.ts';
+
+export { createRateLimiter };
 
 /** Compare secrets in constant time regardless of length. */
 export function secretMatches(given: string, expected: string): boolean {
@@ -23,25 +27,6 @@ export function secretMatches(given: string, expected: string): boolean {
   const a = createHash('sha256').update(given).digest();
   const b = createHash('sha256').update(expected).digest();
   return timingSafeEqual(a, b);
-}
-
-/** Fixed-window limiter, per IP. Small and in-memory: one household, one process. */
-export function createRateLimiter(limit: number, windowMs = 60_000) {
-  const hits = new Map<string, number[]>();
-  return function allow(key: string, now = Date.now()): boolean {
-    const cutoff = now - windowMs;
-    const recent = (hits.get(key) ?? []).filter((t) => t > cutoff);
-    if (recent.length >= limit) {
-      hits.set(key, recent);
-      return false;
-    }
-    recent.push(now);
-    hits.set(key, recent);
-    if (hits.size > 1000) {
-      for (const [k, v] of hits) if (v.every((t) => t <= cutoff)) hits.delete(k);
-    }
-    return true;
-  };
 }
 
 /**
@@ -128,6 +113,14 @@ export function createApp(): express.Express {
       }
     }
   });
+
+  const uiOff = webDisabledReason();
+  if (uiOff === null) {
+    app.use('/', createWebRouter(db));
+    log.info('web UI enabled');
+  } else {
+    log.info(`web UI disabled: ${uiOff}`);
+  }
 
   app.use((_req: Request, res: Response) => {
     res.status(404).type('text/plain').send('Not Found');

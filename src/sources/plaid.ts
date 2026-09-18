@@ -17,7 +17,8 @@ import {
   type Transaction,
 } from 'plaid';
 import type { DB } from '../db.ts';
-import { config, plaidConfigured } from '../config.ts';
+import { config } from '../config.ts';
+import { plaidCreds, plaidReady } from '../credentials.ts';
 import { decryptToken, encryptToken } from '../lib/crypto.ts';
 import { errMessage, log } from '../lib/logger.ts';
 import { ccy, nowISO, num, round2 } from '../lib/money.ts';
@@ -46,21 +47,30 @@ export type PlaidItemRow = {
 };
 
 let client: PlaidApi | null = null;
+let clientKey = '';
 
-export function plaidClient(): PlaidApi {
-  if (client) return client;
-  const basePath = PlaidEnvironments[config.plaid.env] ?? PlaidEnvironments['production'];
+/**
+ * Cached per credential set: rotating the secret in the UI must take effect
+ * immediately, so the cache key is the credentials themselves rather than a
+ * bare "already built" flag.
+ */
+export function plaidClient(db: DB): PlaidApi {
+  const creds = plaidCreds(db);
+  const key = `${creds.env}:${creds.clientId}:${creds.secret.length}:${creds.secret.slice(-4)}`;
+  if (client && clientKey === key) return client;
+  const basePath = PlaidEnvironments[creds.env] ?? PlaidEnvironments['production'];
   client = new PlaidApi(
     new Configuration({
       basePath,
       baseOptions: {
         headers: {
-          'PLAID-CLIENT-ID': config.plaid.clientId,
-          'PLAID-SECRET': config.plaid.secret,
+          'PLAID-CLIENT-ID': creds.clientId,
+          'PLAID-SECRET': creds.secret,
         },
       },
     }),
   );
+  clientKey = key;
   return client;
 }
 
@@ -154,14 +164,14 @@ export function categoryFor(account: AccountBase): string {
 export type PlaidReport = Record<string, unknown> & { skipped?: true; reason?: string };
 
 export async function syncPlaid(db: DB, rates: RateMap): Promise<PlaidReport> {
-  if (!plaidConfigured()) {
+  if (!plaidReady(db)) {
     return { skipped: true, reason: 'PLAID_CLIENT_ID / PLAID_SECRET not set' };
   }
   const items = listItems(db);
   if (items.length === 0) return { items: 0, note: 'no Items linked yet — run `npm run link`' };
 
   const fx = makeConverter(rates);
-  const api = plaidClient();
+  const api = plaidClient(db);
   const perItem: Record<string, unknown> = {};
   const seen: string[] = [];
   let accountCount = 0;
@@ -260,7 +270,7 @@ async function syncItemTransactions(
   token: string,
   fx: { toBase: (amount: number, from: string) => number },
 ): Promise<{ added: number; modified: number; removed: number }> {
-  const api = plaidClient();
+  const api = plaidClient(db);
   let cursor = item.cursor ?? undefined;
   let added = 0;
   let modified = 0;
@@ -319,7 +329,7 @@ export function mapTransaction(
 /** Statement balance / minimum payment / due date for credit cards. */
 async function syncLiabilities(db: DB, token: string, label: string): Promise<number> {
   try {
-    const res = await plaidClient().liabilitiesGet({ access_token: token });
+    const res = await plaidClient(db).liabilitiesGet({ access_token: token });
     const credit = res.data.liabilities?.credit ?? [];
     for (const c of credit) {
       if (!c.account_id) continue;
@@ -344,31 +354,36 @@ async function syncLiabilities(db: DB, token: string, label: string): Promise<nu
 
 // --- Link helpers (used only by link-server.ts, never by the MCP server) ----
 
-export async function createLinkToken(): Promise<string> {
-  const res = await plaidClient().linkTokenCreate({
+export async function createLinkToken(db: DB, redirectUri?: string): Promise<string> {
+  const redirect = redirectUri ?? config.plaid.redirectUri;
+  const res = await plaidClient(db).linkTokenCreate({
     user: { client_user_id: 'household' },
     client_name: 'tally',
     products: plaidProducts(),
     country_codes: plaidCountryCodes(),
     language: 'en',
-    ...(config.plaid.redirectUri ? { redirect_uri: config.plaid.redirectUri } : {}),
+    ...(redirect ? { redirect_uri: redirect } : {}),
   });
   return res.data.link_token;
 }
 
 /** Update-mode token: re-authenticates an existing Item without re-linking. */
-export async function createUpdateLinkToken(db: DB, itemId: string): Promise<string> {
+export async function createUpdateLinkToken(
+  db: DB,
+  itemId: string,
+  redirectUri?: string,
+): Promise<string> {
   const item = db.prepare('SELECT * FROM plaid_items WHERE item_id = ?').get(itemId) as
     | PlaidItemRow
     | undefined;
   if (!item) throw new Error(`unknown Plaid item_id ${itemId}`);
-  const res = await plaidClient().linkTokenCreate({
+  const res = await plaidClient(db).linkTokenCreate({
     user: { client_user_id: 'household' },
     client_name: 'tally',
     country_codes: plaidCountryCodes(),
     language: 'en',
     access_token: accessTokenFor(item),
-    ...(config.plaid.redirectUri ? { redirect_uri: config.plaid.redirectUri } : {}),
+    ...((redirectUri ?? config.plaid.redirectUri) ? { redirect_uri: redirectUri ?? config.plaid.redirectUri } : {}),
   });
   return res.data.link_token;
 }
@@ -377,7 +392,7 @@ export async function exchangePublicToken(
   db: DB,
   publicToken: string,
 ): Promise<{ item_id: string; institution_name: string | null }> {
-  const api = plaidClient();
+  const api = plaidClient(db);
   const ex = await api.itemPublicTokenExchange({ public_token: publicToken });
   const accessToken = ex.data.access_token;
   const itemId = ex.data.item_id;
