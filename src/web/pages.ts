@@ -622,15 +622,12 @@ export function connectionsPage(opts: {
         for this profile)</span></h2>
       ${
         opts.statementsEnabled
-          ? html`<p class="sub-line">Statements are enabled. Plaid fixes an Item's consented
-              products when it is linked, so a bank connected before that returns
-              <code>ADDITIONAL_CONSENT_REQUIRED</code> until you use
-              <strong>Enable statements</strong> on it and complete the bank flow. That is separate
-              from <strong>Repair</strong>, which only re-authenticates a broken login.
-              Statement support is per bank — one marked <em>no statements</em> does not offer
-              them through Plaid at all, and nothing you do here will change that. If the consent
-              flow errors on a bank that should support it, disconnecting and adding it again
-              always works, because a fresh link carries the full product set.</p>`
+          ? html`<p class="sub-line">Statements are requested when a bank is linked, so anything
+              you connect from now on that supports them will serve them. Banks connected earlier
+              will not: Plaid fixes the consented products at link time, and the only way to change
+              that is to disconnect and add the bank again. Support is per institution and thin
+              outside the large US banks, so check <code>list_statements</code> before going to the
+              trouble.</p>`
           : raw('')
       }
       ${
@@ -665,21 +662,7 @@ export function connectionsPage(opts: {
                       <button class="secondary" type="button"
                         title="Re-authenticate this bank's login"
                         data-relink="${String(i['item_id'])}">Repair</button>
-                      ${
-                        // Tri-state: false hides the button because the bank
-                        // cannot do it; null still offers it, since not having
-                        // checked is not the same as a no.
-                        opts.statementsEnabled && i['supports_statements'] !== false
-                          ? html`<button class="secondary" type="button"
-                              title="Ask this bank for consent to fetch statements"
-                              data-consent="${String(i['item_id'])}">Enable statements</button>`
-                          : raw('')
-                      }
-                      ${
-                        opts.statementsEnabled && i['supports_statements'] === false
-                          ? html`<span class="muted sub-line">no statements</span>`
-                          : raw('')
-                      }
+
                       <form method="post" action="/connections/remove" class="inline-form"
                             data-confirm="Disconnect ${String(i['institution'] ?? 'this bank')}? Its access token is revoked at Plaid and its accounts leave your net worth. Transaction history is kept.">
                         ${csrfField(opts.csrf)}
@@ -760,16 +743,14 @@ export function connectionsPage(opts: {
         catch (e) { say('Could not start Plaid Link: ' + e.message); }
         ev.target.disabled = false;
       });
-      for (const btn of document.querySelectorAll('[data-relink],[data-consent]')) {
-        const consent = btn.hasAttribute('data-consent');
-        const id = consent ? btn.dataset.consent : btn.dataset.relink;
+      for (const btn of document.querySelectorAll('[data-relink]')) {
         btn.addEventListener('click', async () => {
-          say(consent ? 'Preparing consent…' : 'Preparing repair…');
-          try { const r = await api('/api/plaid/relink', { item_id: id, consent });
+          say('Preparing repair…');
+          try { const r = await api('/api/plaid/relink', { item_id: btn.dataset.relink });
                 sessionStorage.setItem('tally_lt', r.link_token);
                 sessionStorage.setItem('tally_profile', PROFILE);
                 say(''); open(r.link_token); }
-          catch (e) { say('Could not start: ' + e.message); }
+          catch (e) { say('Could not start repair: ' + e.message); }
         });
       }
       if (location.pathname === '/connections/oauth') {

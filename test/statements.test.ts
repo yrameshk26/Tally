@@ -103,10 +103,13 @@ describe('consent is asked for, without taking Repair down with it', () => {
     expect(fn).not.toContain('statements: statementWindow()');
   });
 
-  it('consent is opt-in per call, so it cannot block a repair', () => {
+  it('a repair asks for no consent either, since every bank refused it', () => {
+    // additional_consented_products is rejected outright by an institution that
+    // does not offer the product, and most do not. Consent is collected at link
+    // time only; an existing Item is disconnected and re-added instead.
     const fn = body('createUpdateLinkToken');
-    expect(fn).toContain('opts.consent');
-    expect(fn).toContain('additional_consented_products');
+    expect(fn).not.toContain('additional_consented_products');
+    expect(fn).not.toContain('opts.consent');
   });
 
   it('statements is consent-only, never an initialised product', () => {

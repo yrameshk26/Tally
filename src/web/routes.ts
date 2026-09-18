@@ -601,18 +601,9 @@ export function createWebRouter(db: DB): express.Router {
 
   router.post('/api/plaid/relink', requireAuth, requireCsrf, async (req: Ctx, res: Response) => {
     try {
-      const body = (req.body ?? {}) as { item_id?: string; consent?: boolean };
-      const itemId = String(body.item_id ?? '');
+      const itemId = String((req.body as { item_id?: string })?.item_id ?? '');
       res.json({
-        link_token: await createUpdateLinkToken(
-          db,
-          itemId,
-          redirectUriFor(req),
-          requiredProfile(req).id,
-          // Repair stays plain; the consent grant is its own button, so a
-          // configuration Plaid rejects cannot block re-authentication.
-          { consent: body.consent === true },
-        ),
+        link_token: await createUpdateLinkToken(db, itemId, redirectUriFor(req), requiredProfile(req).id),
       });
     } catch (e) {
       res.status(400).json({ error: plaidErrorDetail(e) });

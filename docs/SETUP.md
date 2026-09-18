@@ -191,20 +191,16 @@ statements endpoint is actually called.
 nothing for banks you already have — every call returns
 `ADDITIONAL_CONSENT_REQUIRED` until each one is re-consented.
 
-To grant it, use **Connections → Enable statements** on each bank and complete
-the bank flow. That is a separate button from **Repair**, which only
-re-authenticates a broken login — they are kept apart so a consent configuration
-Plaid rejects can never stop you fixing a login.
+There is no way to add it to an existing Item. Update mode with `products` makes
+Link fail outright, and `additional_consented_products` is refused by any
+institution that does not offer the product — which is most of them. **Disconnect
+the bank and add it again**; a fresh link carries the full product set.
 
-**Not every bank offers statements.** Support is per institution — BMO (US),
-for example, does not, and no amount of re-consenting will change that. The
-Connections page marks those *no statements* and hides the button, because the
-attempt can only fail. `list_statements` says the same rather than advising a
-re-consent that cannot work.
-
-If the consent flow errors on a bank that *should* support it, **disconnect it
-and add it again**. A fresh link always carries the full product set, and is the
-reliable path.
+**Not every bank offers statements**, and coverage is thin outside the large US
+banks. Support is per institution, cached on each Item during sync and reported
+by `plaid_status` as `supports_statements`, so check that before disconnecting
+anything. `list_statements` skips a bank that cannot serve them and says so,
+rather than advising a re-consent that could never work.
 
 ### Linking banks
 

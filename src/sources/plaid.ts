@@ -563,20 +563,18 @@ export async function createLinkToken(
 /**
  * Update-mode token: re-authenticates an existing Item without re-linking.
  *
- * With `consent`, it also asks for consent to the products enabled since the
- * Item was linked — Plaid fixes the consented set at link time, so turning on
- * Statements does nothing for banks already connected until each re-consents.
- *
- * The two are deliberately separate calls. Folding consent into every repair
- * meant one rejected configuration took re-authentication down with it, and a
- * bank with a broken login must be fixable whatever else is misconfigured.
+ * It names no products, deliberately. Update mode with `products` made Plaid
+ * Link die with an opaque "internal error", taking re-authentication down with
+ * it — and `additional_consented_products` is refused outright by any
+ * institution that does not offer the product, which turned out to be most of
+ * them. Consent is collected at link time only; an existing Item that needs a
+ * newly enabled product is disconnected and added again.
  */
 export async function createUpdateLinkToken(
   db: DB,
   itemId: string,
   redirectUri?: string,
   profileId = DEFAULT_PROFILE_ID,
-  opts: { consent?: boolean } = {},
 ): Promise<string> {
   const item = db.prepare('SELECT * FROM plaid_items WHERE item_id = ?').get(itemId) as
     | PlaidItemRow
@@ -588,13 +586,6 @@ export async function createUpdateLinkToken(
     country_codes: plaidCountryCodes(),
     language: 'en',
     access_token: accessTokenFor(item),
-    // Only when the caller asked for it. A plain repair must stay plain: naming
-    // products in update mode is what made Link fail with an opaque "internal
-    // error", and a bank whose login is broken has to be fixable regardless of
-    // whether the consent flow works.
-    ...(opts.consent && plaidConsentProducts().length
-      ? { additional_consented_products: plaidConsentProducts() }
-      : {}),
     ...((redirectUri ?? config.plaid.redirectUri) ? { redirect_uri: redirectUri ?? config.plaid.redirectUri } : {}),
   });
   return res.data.link_token;
