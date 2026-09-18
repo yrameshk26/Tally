@@ -34,6 +34,10 @@ export const config = {
   mcpSecret: str('MCP_SECRET'),
   dbPath: str('DB_PATH', 'data/finmcp.db'),
   mcpRateLimit: int('MCP_RATE_LIMIT', 60),
+  // Hops of reverse proxy in front of us. 0 = direct. Behind Traefik/Dokploy
+  // this must be 1, or every request appears to come from the proxy's IP and
+  // the rate limiter degrades into one shared bucket for the whole internet.
+  trustProxy: int('TRUST_PROXY', 0),
   logLevel: str('LOG_LEVEL', 'info'),
 
   baseCurrency: str('BASE_CURRENCY', 'CAD').toUpperCase(),

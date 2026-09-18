@@ -12,6 +12,22 @@ the UI.
 | Wise | Multi-currency balances and jars | read-only API token | free |
 | Bank of Canada Valet | FX rates for CAD reporting | none | free |
 
+## Before you start
+
+Two things gate how far you get:
+
+- **Plaid Production access is the hard part.** Plaid grants it to companies
+  under a signed agreement, and the Trial plan is an evaluation tier capped at
+  10 Items. If you cannot get your own Plaid access, the bank and card half of
+  this will not work for you.
+- **SnapTrade Personal keys are for personal use.** They identify *you*. Do not
+  use them to hold anyone else's data.
+
+The SnapTrade, Wise and Bank of Canada halves work immediately with credentials
+anyone can create. This is self-hosted, single-household software: you run it,
+you hold the tokens, you agree to your own providers' terms. See
+[SECURITY.md](SECURITY.md) before deploying it anywhere.
+
 ## Tools
 
 | Tool | Does |
@@ -97,6 +113,19 @@ See [`DEPLOY.md`](DEPLOY.md) — Docker image, Dokploy application, persistent
 volume at `/data`, HTTPS domain, and adding the server to Claude.ai as a custom
 connector.
 
+## Security
+
+Read [SECURITY.md](SECURITY.md) before deploying. The short version:
+
+- The MCP URL **is** a bearer token. It leaks the way URLs leak — including into
+  reverse-proxy access logs, which are on by default in many setups. Rotate
+  `MCP_SECRET` periodically.
+- Set `TRUST_PROXY` to the number of proxy hops in front of the app, or the
+  per-IP rate limiter degrades into a single shared bucket.
+- Back up `TOKEN_ENC_KEY` somewhere other than the server. Losing it means
+  re-linking every bank.
+- Report vulnerabilities privately via GitHub Security Advisories, not issues.
+
 ## Development
 
 ```bash
@@ -110,3 +139,9 @@ normalisation, token encryption, SnapTrade request signing and holdings
 mapping, fixture-based net-worth aggregation against the real household's
 shape, and the HTTP endpoint end to end (auth, 405 on GET, rate limiting,
 `tools/list`).
+
+## License
+
+MIT — see [LICENSE](LICENSE). Provided as is, with no warranty. You are
+responsible for your own credentials and for complying with the terms of every
+data provider you connect.

@@ -44,9 +44,22 @@ export function createRateLimiter(limit: number, windowMs = 60_000) {
   };
 }
 
+/**
+ * Rate-limit bucket key. With `trust proxy` set correctly this is the real
+ * client address; with no proxy configured it is the socket address. It is
+ * never derived from a header we do not trust.
+ */
+export function clientKey(req: Pick<Request, 'ip'>): string {
+  return req.ip ?? 'unknown';
+}
+
 export function createApp(): express.Express {
   const app = express();
   app.disable('x-powered-by');
+  // Express defaults to not trusting proxies, which would make req.ip the
+  // proxy's address for every request. Only trust as many hops as are
+  // actually deployed — trusting blindly lets a client spoof X-Forwarded-For.
+  app.set('trust proxy', config.trustProxy);
   app.use(express.json({ limit: '4mb' }));
 
   const db = getDb();
@@ -72,7 +85,7 @@ export function createApp(): express.Express {
   });
 
   app.all('/mcp/:secret', async (req: Request, res: Response) => {
-    const ip = req.ip ?? 'unknown';
+    const ip = clientKey(req);
     if (!allow(ip)) {
       res.status(429).json({
         jsonrpc: '2.0',

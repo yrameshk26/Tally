@@ -104,3 +104,32 @@ scripts, while `tsc` emits `dist/` for the Docker image. That needs
 imports say `./db.ts` and the build rewrites them to `./db.js`.
 `erasableSyntaxOnly` is on so nothing that type stripping cannot handle (enums,
 parameter properties) can creep in.
+
+## 2026-09-18 — The MCP secret leaks into reverse-proxy access logs
+
+Found on the live deployment, not in review: Dokploy ships Traefik with request
+logging enabled (`settings.haveActivateRequests` returns `true`), so every call
+writes `/mcp/<secret>` to disk. The secret in the URL path is the whole auth
+model, which means the access log is a list of working credentials.
+
+Mitigated for now by rotating `MCP_SECRET` and relying on Dokploy's daily log
+cleanup (02:00) to age the old one out. Documented in SECURITY.md as a
+deployment hazard rather than silently fixed, because it is a property of
+putting a secret in a URL, not of this server.
+
+This moves the case for OAuth on the MCP endpoint up the list. Earlier reasoning
+assumed access logging could simply be turned off; on a shared Dokploy instance
+it is a global setting that other applications legitimately want. Until then:
+rotate periodically, and treat the connector URL as a credential.
+
+## 2026-09-18 — `trust proxy` must be configured, or the rate limiter is a lie
+
+`req.ip` in Express is the socket address unless `trust proxy` is set. Behind
+Traefik that is the proxy's container IP for *every* request, so the "60 requests
+per minute per IP" limiter was really one global bucket — and an attacker could
+exhaust it to lock out the legitimate user.
+
+Now configurable via `TRUST_PROXY` (hop count, default 0). It is deliberately
+not defaulted to a trusting value: with `trust proxy` enabled, `X-Forwarded-For`
+is attacker-controlled unless a proxy you actually run is rewriting it, so the
+safe default is to trust nothing and make the operator opt in.

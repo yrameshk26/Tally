@@ -15,8 +15,9 @@ process.env['MCP_SECRET'] = SECRET;
 process.env['DB_PATH'] = join(mkdtempSync(join(tmpdir(), 'tally-')), 'test.db');
 process.env['MCP_RATE_LIMIT'] = '60';
 process.env['CRON_ENABLED'] = 'false';
+process.env['TRUST_PROXY'] = '1';
 
-const { createApp, createRateLimiter, secretMatches } = await import('../src/index.ts');
+const { clientKey, createApp, createRateLimiter, secretMatches } = await import('../src/index.ts');
 
 let server: Server;
 let base: string;
@@ -167,5 +168,21 @@ describe('rate limiter', () => {
     expect(allow('a', t)).toBe(true);
     expect(allow('b', t)).toBe(true);
     expect(allow('a', t)).toBe(false);
+  });
+});
+
+describe('proxy awareness', () => {
+  it('applies the configured proxy-hop count to the app', () => {
+    // Without this, req.ip is the reverse proxy's address for every request and
+    // the per-IP limiter collapses into one bucket shared by the whole internet.
+    expect(createApp().get('trust proxy')).toBe(1);
+  });
+
+  it('keys the limiter on the resolved client address', () => {
+    expect(clientKey({ ip: '203.0.113.7' })).toBe('203.0.113.7');
+  });
+
+  it('falls back to a constant rather than throwing when there is no address', () => {
+    expect(clientKey({ ip: undefined })).toBe('unknown');
   });
 });
