@@ -9,11 +9,17 @@ import type { AccountView, HoldingsResult } from '../queries.ts';
 import type { NetWorthTotals } from '../snapshots.ts';
 import type { ManagedKey } from '../settings.ts';
 import type { Profile } from '../profiles.ts';
+import { logoSvg } from './logo.ts';
 
 const sign = (n: number): SafeHtml =>
   html`<span class="${n < 0 ? 'neg' : n > 0 ? 'pos' : 'muted'}">${money(n)}</span>`;
 
-export function verifyPage(opts: { csrf: string; username: string; error?: string }): SafeHtml {
+export function verifyPage(opts: {
+  csrf: string;
+  username: string;
+  error?: string;
+  next?: string | null;
+}): SafeHtml {
   return html`<div class="login">
     <h1>Two-factor</h1>
     <p class="sub">Enter the current code for <strong>${opts.username}</strong> from your
@@ -22,6 +28,7 @@ export function verifyPage(opts: { csrf: string; username: string; error?: strin
     <section>
       <form method="post" action="/login/verify">
         ${csrfField(opts.csrf)}
+        ${opts.next ? html`<input type="hidden" name="next" value="${opts.next}">` : raw('')}
         <div class="field">
           <label for="code">Authenticator code</label>
           <input id="code" name="code" inputmode="numeric" autocomplete="one-time-code"
@@ -43,14 +50,17 @@ export function loginPage(opts: {
   totpEnabled: boolean;
   error?: string;
   username?: string;
+  next?: string | null;
 }): SafeHtml {
   return html`<div class="login">
+    ${raw(logoSvg(56, 'mark'))}
     <h1>tally</h1>
     <p class="sub">Sign in to manage connections and view your summary.</p>
     ${opts.error ? notice('err', opts.error) : raw('')}
     <section>
       <form method="post" action="/login">
         ${csrfField(opts.csrf)}
+        ${opts.next ? html`<input type="hidden" name="next" value="${opts.next}">` : raw('')}
         <div class="field">
           <label for="u">Username</label>
           <input id="u" name="username" autocomplete="username" required value="${opts.username ?? ''}">
@@ -572,15 +582,6 @@ export function connectionsPage(opts: {
       }
     </section>
 
-    <script nonce="${opts.nonce}">
-      // Destructive actions confirm first. Revoking a token means re-linking
-      // the bank by hand, so a stray click should not be enough.
-      for (const f of document.querySelectorAll('form[data-confirm]')) {
-        f.addEventListener('submit', (e) => {
-          if (!window.confirm(f.dataset.confirm)) e.preventDefault();
-        });
-      }
-    </script>
     ${
       opts.plaidReady
         ? html`<script src="https://cdn.plaid.com/link/v2/stable/link-initialize.js" nonce="${opts.nonce}"></script>
@@ -655,7 +656,16 @@ export function connectionsPage(opts: {
 
 export function securityPage(opts: {
   username: string;
+  mcpUrl: string;
+  legacyEnabled: boolean;
   connectorUrl: string | null;
+  clients: Array<{
+    client_id: string;
+    client_name: string | null;
+    created_at: string;
+    last_used_at: string | null;
+    tokens: number;
+  }>;
   totpEnabled: boolean;
   sessions: Array<{ id: string; created_at: string; last_seen_at: string; ip: string | null }>;
   currentSessionId: string;
@@ -715,26 +725,69 @@ export function securityPage(opts: {
       <p class="hint mb-sm">Add this server to Claude as a custom connector and it can answer
         questions about your money directly — “what's my net worth”, “show holdings
         concentration”, “how much RRSP room is left”.</p>
+      <ol class="steps">
+        <li>In Claude, open <strong>Settings → Connectors → Add custom connector</strong>.</li>
+        <li>Name it <strong>tally</strong> and paste this URL — it contains no secret:</li>
+      </ol>
+      <div class="code-block mt-xs">${opts.mcpUrl}</div>
+      <ol class="steps mt-sm" start="3">
+        <li>Claude will send you here to sign in with your password and authenticator code, then
+          ask you to allow access. That's it.</li>
+      </ol>
+      <p class="hint">Nothing to copy, nothing to rotate. Access is granted per app below and can be
+        revoked at any time without touching the server.</p>
+    </section>
+
+    <section>
+      <h2>Authorized apps</h2>
       ${
-        opts.connectorUrl
-          ? html`
-            <ol class="steps">
-              <li>In Claude, open <strong>Settings → Connectors → Add custom connector</strong>.</li>
-              <li>Name it <strong>tally</strong> and paste this URL:</li>
-            </ol>
-            <div class="code-block mt-xs">${opts.connectorUrl}</div>
-            ${notice('warn', 'Treat this whole URL as a password — the secret in the path is the only thing protecting your financial data. Do not paste it into a screenshot or a shared document.')}
-            <p class="hint">To revoke it, change <code>MCP_SECRET</code> in the server environment and
-              restart; the old URL stops working immediately and you re-add the connector.</p>`
-          : html`
-            <form method="post" action="/security/connector">
-              ${csrfField(opts.csrf)}
-              <button class="secondary" type="submit">Show connector URL</button>
-            </form>
-            <p class="hint">Hidden until you ask, so it is not sitting on screen or in the page
-              source.</p>`
+        opts.clients.length === 0
+          ? html`<p class="empty">No app has been authorized yet. Add the connector above and one
+              will appear here after you approve it.</p>`
+          : html`<div class="table-wrap"><table>
+              <thead><tr><th>App</th><th>Authorized</th><th>Last used</th><th class="num">Tokens</th><th></th></tr></thead>
+              <tbody>${join(
+                opts.clients.map(
+                  (c) => html`<tr>
+                    <td><strong>${c.client_name ?? 'Unnamed app'}</strong>
+                      <div class="sub-line mono">${c.client_id.slice(0, 12)}…</div></td>
+                    <td class="muted">${c.created_at.slice(0, 16).replace('T', ' ')}</td>
+                    <td class="muted">${c.last_used_at ? c.last_used_at.slice(0, 16).replace('T', ' ') : '—'}</td>
+                    <td class="num">${String(c.tokens)}</td>
+                    <td class="num">
+                      <form method="post" action="/security/apps/revoke" class="inline-form"
+                            data-confirm="Revoke access for ${c.client_name ?? 'this app'}? It will have to be authorized again.">
+                        ${csrfField(opts.csrf)}
+                        <input type="hidden" name="client_id" value="${c.client_id}">
+                        <button class="danger" type="submit">Revoke</button>
+                      </form>
+                    </td>
+                  </tr>`,
+                ),
+              )}</tbody>
+            </table></div>`
       }
     </section>
+
+    ${
+      opts.legacyEnabled
+        ? html`<section>
+            <h2>Legacy secret URL</h2>
+            ${notice(
+              'warn',
+              'The old /mcp/<secret> route is still enabled. A secret in a URL path is written to reverse-proxy access logs on every request. Once your connector is re-added using the URL above, set MCP_ALLOW_PATH_SECRET=false on the server and restart to close it.',
+            )}
+            ${
+              opts.connectorUrl
+                ? html`<div class="code-block">${opts.connectorUrl}</div>`
+                : html`<form method="post" action="/security/connector">
+                    ${csrfField(opts.csrf)}
+                    <button class="secondary" type="submit">Show legacy URL</button>
+                  </form>`
+            }
+          </section>`
+        : raw('')
+    }
 
     <section>
       <h2>Active sessions</h2>

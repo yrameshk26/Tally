@@ -4,6 +4,7 @@
  * needs it. Everything inline is nonce-allowed so the CSP can stay strict.
  */
 import { html, raw, type SafeHtml } from '../lib/html.ts';
+import { logoSvg } from './logo.ts';
 
 export type Nav = { href: string; label: string };
 
@@ -109,9 +110,8 @@ header{
   display:inline-flex;align-items:center;gap:.5rem;font-weight:660;font-size:var(--step-1);
   letter-spacing:-.022em;text-decoration:none;color:inherit;
 }
-.brand .dot{width:.66rem;height:.66rem;border-radius:50%;
-  background:linear-gradient(140deg,var(--accent),color-mix(in oklch,var(--accent) 45%,var(--warn)));
-  box-shadow:0 0 0 3px color-mix(in oklch,var(--accent) 16%,transparent)}
+.brand .mark{color:var(--accent);flex:0 0 auto}
+.login .mark{color:var(--accent);display:block;margin:0 auto .6rem}
 nav{display:flex;gap:.15rem;flex:1;flex-wrap:wrap}
 nav a{
   padding:.38rem .72rem;border-radius:var(--radius-sm);text-decoration:none;
@@ -297,7 +297,7 @@ export function page(opts: {
   const { title, nonce, current, chrome = true, body } = opts;
   const nav = chrome
     ? html`<header><div class="bar">
-        <a class="brand" href="/"><span class="dot"></span>tally</a>
+        <a class="brand" href="/">${raw(logoSvg(22, 'mark'))}tally</a>
         <nav>${raw(
           NAV.map(
             (n) =>
@@ -327,15 +327,24 @@ export function page(opts: {
       })}</scr` + `ipt>`
     : '';
 
+  // Destructive forms confirm first. One handler in the shell rather than one
+  // per page, and nonced — a nonce CSP blocks inline on*= handlers outright.
+  const confirmScript = chrome
+    ? `<script nonce="${nonce}">for(const f of document.querySelectorAll('form[data-confirm]'))` +
+      `f.addEventListener('submit',e=>{if(!window.confirm(f.dataset.confirm))e.preventDefault()});` +
+      `</scr` + `ipt>`
+    : '';
+
   return `<!doctype html>
 <html lang="en"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="robots" content="noindex,nofollow">
 <meta name="color-scheme" content="light dark">
+<link rel="icon" type="image/svg+xml" href="/favicon.svg">
 <title>${title} · tally</title>
 <style nonce="${nonce}">${CSS}</style>
 ${speculation}
-</head><body>${nav.value}<main>${body.value}</main></body></html>`;
+</head><body>${nav.value}<main>${body.value}</main>${confirmScript}</body></html>`;
 }
 
 const NOTICE_ICON: Record<string, string> = {

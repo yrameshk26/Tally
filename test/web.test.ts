@@ -443,35 +443,24 @@ describe('disconnecting a bank', () => {
 });
 
 describe('connector URL', () => {
-  it('is absent from the page until explicitly requested', async () => {
+  it('shows a secret-free MCP URL and OAuth instructions', async () => {
     const { cookie } = await login();
     const body = await (await fetch(`${base}/security`, { headers: { cookie } })).text();
-    expect(body).toContain('Show connector URL');
-    // The secret must not be sitting in the source of a page nobody asked.
+    expect(body).toContain('/mcp</div>');
+    expect(body).toContain('it contains no secret');
+    expect(body).toContain('Authorized apps');
+    // The secret must never sit in the source of a page nobody asked for it on.
     expect(body).not.toContain('e'.repeat(64));
   });
 
-  it('reveals it on demand, with the warning that it is a credential', async () => {
+  it('still reveals the legacy URL only on an explicit POST while the route is enabled', async () => {
     const { cookie, csrf } = await login();
     const res = await fetch(`${base}/security/connector`, {
       method: 'POST',
       headers: { cookie, 'content-type': 'application/x-www-form-urlencoded' },
       body: new URLSearchParams({ _csrf: csrf }),
     });
-    const body = await res.text();
-    expect(body).toContain(`/mcp/${'e'.repeat(64)}`);
-    expect(body).toContain('Add custom connector');
-    expect(body).toContain('Treat this whole URL as a password');
-  });
-
-  it('will not reveal it without a CSRF token', async () => {
-    const { cookie } = await login();
-    const res = await fetch(`${base}/security/connector`, {
-      method: 'POST',
-      headers: { cookie, 'content-type': 'application/x-www-form-urlencoded' },
-      body: new URLSearchParams({}),
-    });
-    expect(res.status).toBe(403);
+    expect(await res.text()).toContain(`/mcp/${'e'.repeat(64)}`);
   });
 });
 

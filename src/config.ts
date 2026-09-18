@@ -34,6 +34,13 @@ export const config = {
   mcpSecret: str('MCP_SECRET'),
   dbPath: str('DB_PATH', 'data/finmcp.db'),
   mcpRateLimit: int('MCP_RATE_LIMIT', 60),
+  /**
+   * Keep the legacy /mcp/<secret> route alive. On by default so an existing
+   * connector keeps working through the migration to OAuth; turn it off once
+   * the connector has been re-added, because a secret in a URL path ends up in
+   * reverse-proxy access logs.
+   */
+  mcpAllowPathSecret: bool('MCP_ALLOW_PATH_SECRET', true),
   // Hops of reverse proxy in front of us. 0 = direct. Behind Traefik/Dokploy
   // this must be 1, or every request appears to come from the proxy's IP and
   // the rate limiter degrades into one shared bucket for the whole internet.

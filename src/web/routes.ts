@@ -82,6 +82,8 @@ import {
 import { runSync } from '../sync.ts';
 import { loadRates } from '../fx.ts';
 import { createFailureLimiter } from '../ratelimit.ts';
+import { safeNext } from './oauth.ts';
+import { listClients, revokeClient } from '../oauth.ts';
 
 type Ctx = Request & { session?: Session; nonce?: string };
 
@@ -208,7 +210,14 @@ export function createWebRouter(db: DB): express.Router {
     // A pre-session CSRF token would need its own store; instead the login form
     // is protected by SameSite plus the rate limiter, and issues a real token
     // on success.
-    render(req, res, 'Sign in', loginPage({ csrf: '', totpEnabled: totpEnabled(db) }), undefined, false);
+    render(
+      req,
+      res,
+      'Sign in',
+      loginPage({ csrf: '', totpEnabled: totpEnabled(db), next: safeNext(req.query['next']) }),
+      undefined,
+      false,
+    );
   });
 
   router.post('/login', async (req: Ctx, res: Response) => {
@@ -217,12 +226,13 @@ export function createWebRouter(db: DB): express.Router {
     const password = String(body['password'] ?? '');
     const ip = req.ip ?? 'unknown';
 
+    const next = safeNext(body['next']);
     const fail = (message: string): void => {
       render(
         req,
         res,
         'Sign in',
-        loginPage({ csrf: '', totpEnabled: totpEnabled(db), error: message, username }),
+        loginPage({ csrf: '', totpEnabled: totpEnabled(db), error: message, username, next }),
         undefined,
         false,
       );
@@ -261,7 +271,7 @@ export function createWebRouter(db: DB): express.Router {
           secure: config.cookieSecure,
         }),
       );
-      res.redirect(303, '/login/verify');
+      res.redirect(303, next ? `/login/verify?next=${encodeURIComponent(next)}` : '/login/verify');
       return;
     }
 
@@ -274,7 +284,7 @@ export function createWebRouter(db: DB): express.Router {
         secure: config.cookieSecure,
       }),
     );
-    res.redirect(303, '/');
+    res.redirect(303, next ?? '/');
   });
 
   /** The half-authenticated session backing step two, or null. */
@@ -293,7 +303,7 @@ export function createWebRouter(db: DB): express.Router {
       req,
       res,
       'Two-factor',
-      verifyPage({ csrf: pending.csrf, username: pending.username }),
+      verifyPage({ csrf: pending.csrf, username: pending.username, next: safeNext(req.query['next']) }),
       undefined,
       false,
     );
@@ -362,7 +372,7 @@ export function createWebRouter(db: DB): express.Router {
         secure: config.cookieSecure,
       }),
     );
-    res.redirect(303, '/');
+    res.redirect(303, safeNext(body['next']) ?? '/');
   });
 
   /** Abandon a half-finished sign-in and start over. */
@@ -671,7 +681,10 @@ export function createWebRouter(db: DB): express.Router {
       'Security',
       securityPage({
         username: req.session!.username,
+        mcpUrl: `${(req.headers['x-forwarded-proto'] as string) ?? req.protocol}://${req.get('host')}/mcp`,
+        legacyEnabled: config.mcpAllowPathSecret,
         connectorUrl: showConnector ? connectorUrl(req) : null,
+        clients: listClients(db),
         totpEnabled: totpEnabled(db),
         sessions: listSessions(db),
         currentSessionId: req.session!.id,
@@ -719,6 +732,17 @@ export function createWebRouter(db: DB): express.Router {
     }
     clearTotpSecret(db);
     res.redirect(303, `/security?ok=${encodeURIComponent('Two-factor authentication is off.')}`);
+  });
+
+  router.post('/security/apps/revoke', requireAuth, requireCsrf, (req: Ctx, res: Response) => {
+    const id = String((req.body as Record<string, unknown>)['client_id'] ?? '');
+    const removed = revokeClient(db, id);
+    res.redirect(
+      303,
+      removed
+        ? `/security?ok=${encodeURIComponent('Access revoked. That app must be authorized again to reconnect.')}`
+        : `/security?err=${encodeURIComponent('No such app.')}`,
+    );
   });
 
   router.post('/security/sessions/revoke', requireAuth, requireCsrf, (_req: Ctx, res: Response) => {

@@ -159,13 +159,24 @@ See [`DEPLOY.md`](DEPLOY.md) — Docker image, Dokploy application, persistent
 volume at `/data`, HTTPS domain, and adding the server to Claude.ai as a custom
 connector.
 
+## Connecting Claude
+
+With the web UI on, the MCP endpoint is `https://<host>/mcp` — **no secret in
+the URL**. Add it as a custom connector; Claude sends you to sign in (password
+plus authenticator code) and asks you to allow access. Authorized apps are
+listed on the Security page and can be revoked there.
+
+Under the hood it is OAuth 2.1 with dynamic client registration and mandatory
+PKCE; tokens are stored only as hashes. The legacy `/mcp/<MCP_SECRET>` route
+stays on until you set `MCP_ALLOW_PATH_SECRET=false`.
+
 ## Security
 
 Read [SECURITY.md](SECURITY.md) before deploying. The short version:
 
-- The MCP URL **is** a bearer token. It leaks the way URLs leak — including into
-  reverse-proxy access logs, which are on by default in many setups. Rotate
-  `MCP_SECRET` periodically.
+- Prefer the OAuth endpoint. The legacy secret-in-URL route leaks the way URLs
+  leak — including into reverse-proxy access logs — so turn it off once the
+  connector has been re-added.
 - Set `TRUST_PROXY` to the number of proxy hops in front of the app, or the
   per-IP rate limiter degrades into a single shared bucket.
 - Back up `TOKEN_ENC_KEY` somewhere other than the server. Losing it means

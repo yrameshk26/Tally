@@ -18,6 +18,9 @@ import { buildServer } from './mcp.ts';
 import { startScheduler } from './scheduler.ts';
 import { createRateLimiter } from './ratelimit.ts';
 import { createWebRouter, webDisabledReason } from './web/routes.ts';
+import { createOAuthRouter } from './web/oauth.ts';
+import { verifyAccessToken } from './oauth.ts';
+import { faviconSvg } from './web/logo.ts';
 
 export { createRateLimiter };
 
@@ -50,6 +53,10 @@ export function createApp(): express.Express {
   const db = getDb();
   const allow = createRateLimiter(config.mcpRateLimit);
 
+  app.get('/favicon.svg', (_req: Request, res: Response) => {
+    res.type('image/svg+xml').set('Cache-Control', 'public, max-age=86400').send(faviconSvg());
+  });
+
   app.get('/health', (_req: Request, res: Response) => {
     try {
       const accounts = db.prepare('SELECT COUNT(*) AS n FROM accounts WHERE active = 1').get() as {
@@ -69,20 +76,8 @@ export function createApp(): express.Express {
     }
   });
 
-  app.all('/mcp/:secret', async (req: Request, res: Response) => {
-    const ip = clientKey(req);
-    if (!allow(ip)) {
-      res.status(429).json({
-        jsonrpc: '2.0',
-        error: { code: -32000, message: 'Too many requests' },
-        id: null,
-      });
-      return;
-    }
-    if (!secretMatches(String(req.params['secret'] ?? ''), config.mcpSecret)) {
-      res.status(404).type('text/plain').send('Not Found');
-      return;
-    }
+  /** Shared MCP handler; auth is decided by whichever route reached it. */
+  const serveMcp = async (req: Request, res: Response): Promise<void> => {
     if (req.method !== 'POST') {
       // Stateless: no server-initiated stream to GET, nothing to DELETE.
       res.status(405).json({
@@ -92,7 +87,6 @@ export function createApp(): express.Express {
       });
       return;
     }
-
     const server = buildServer(db);
     const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
     res.on('close', () => {
@@ -112,12 +106,69 @@ export function createApp(): express.Express {
         });
       }
     }
+  };
+
+  const tooMany = (res: Response): void => {
+    res.status(429).json({
+      jsonrpc: '2.0',
+      error: { code: -32000, message: 'Too many requests' },
+      id: null,
+    });
+  };
+
+  /**
+   * The login-authenticated endpoint. A missing or bad bearer token gets a
+   * 401 whose WWW-Authenticate header tells the client where to discover the
+   * authorization server — that header is what starts the OAuth flow.
+   */
+  app.all('/mcp', async (req: Request, res: Response) => {
+    if (!allow(clientKey(req))) {
+      tooMany(res);
+      return;
+    }
+    const proto = (req.headers['x-forwarded-proto'] as string) ?? req.protocol;
+    const metadata = `${proto}://${req.get('host')}/.well-known/oauth-protected-resource`;
+    const header = String(req.headers.authorization ?? '');
+    const token = header.startsWith('Bearer ') ? header.slice(7).trim() : '';
+    const identity = token ? verifyAccessToken(db, token) : null;
+    if (!identity) {
+      res
+        .status(401)
+        .set(
+          'WWW-Authenticate',
+          `Bearer realm="tally", resource_metadata="${metadata}"` +
+            (token ? ', error="invalid_token"' : ''),
+        )
+        .json({ error: 'unauthorized', resource_metadata: metadata });
+      return;
+    }
+    await serveMcp(req, res);
+  });
+
+  app.all('/mcp/:secret', async (req: Request, res: Response) => {
+    if (!allow(clientKey(req))) {
+      tooMany(res);
+      return;
+    }
+    // Legacy: secret in the path. Kept only for the migration window, and only
+    // while MCP_ALLOW_PATH_SECRET is on — the path is written to reverse-proxy
+    // logs on every request.
+    if (
+      !config.mcpAllowPathSecret ||
+      !secretMatches(String(req.params['secret'] ?? ''), config.mcpSecret)
+    ) {
+      res.status(404).type('text/plain').send('Not Found');
+      return;
+    }
+    await serveMcp(req, res);
   });
 
   const uiOff = webDisabledReason();
   if (uiOff === null) {
+    // OAuth needs somewhere for a person to sign in, so it rides on the UI.
+    app.use('/', createOAuthRouter(db));
     app.use('/', createWebRouter(db));
-    log.info('web UI enabled');
+    log.info('web UI enabled (OAuth sign-in for /mcp available)');
   } else {
     log.info(`web UI disabled: ${uiOff}`);
   }

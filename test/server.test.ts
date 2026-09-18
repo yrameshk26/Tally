@@ -70,9 +70,11 @@ describe('auth', () => {
     expect(await res.text()).toBe('Not Found');
   });
 
-  it('404s an empty secret', async () => {
+  it('treats an empty secret as the OAuth endpoint and challenges for a token', async () => {
+    // /mcp/ resolves to /mcp, which authenticates by bearer token now.
     const res = await fetch(`${base}/mcp/`, { method: 'POST' });
-    expect(res.status).toBe(404);
+    expect(res.status).toBe(401);
+    expect(res.headers.get('www-authenticate')).toContain('resource_metadata');
   });
 
   it('405s a GET on the right secret — the transport is stateless', async () => {
