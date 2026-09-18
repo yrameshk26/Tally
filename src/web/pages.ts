@@ -6,6 +6,7 @@
 import { esc, html, join, money, raw, type SafeHtml } from '../lib/html.ts';
 import { csrfField, notice } from './layout.ts';
 import { isLiabilityAccount, type AccountView, type HoldingsResult } from '../queries.ts';
+import { PLAID_ITEM_CAP } from '../sources/plaid.ts';
 import type { NetWorthTotals } from '../snapshots.ts';
 import type { ManagedKey } from '../settings.ts';
 import type { Profile } from '../profiles.ts';
@@ -580,7 +581,9 @@ export function connectionsPage(opts: {
     </section>
 
     <section>
-      <h2>Banks and cards <span class="muted">(${String(opts.items.length)} of 10 Plaid Items)</span></h2>
+      <h2>Banks and cards
+        <span class="muted">(${String(opts.items.length)} of ${String(PLAID_ITEM_CAP)} Plaid Items
+        for this profile)</span></h2>
       ${
         opts.unsynced > 0
           ? notice(
@@ -632,7 +635,9 @@ export function connectionsPage(opts: {
               <span id="status" class="muted"></span>
             </div>`
           : opts.items.length >= 10
-            ? html`<p class="hint">All 10 Plaid Items are in use. Remove one before adding another.</p>`
+            ? html`<p class="hint">All ${String(PLAID_ITEM_CAP)} Plaid Items are in use for this
+                profile. Every profile has its own allowance, so you can add another profile
+                instead of removing a connection here.</p>`
             : raw('')
       }
     </section>

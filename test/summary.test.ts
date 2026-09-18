@@ -23,6 +23,7 @@ import {
 } from '../src/store.ts';
 import type { RegisteredType } from '../src/lib/registered.ts';
 import { createProfile } from '../src/profiles.ts';
+import { PLAID_ITEM_CAP, plaidUsage } from '../src/sources/plaid.ts';
 
 function acct(over: Partial<AccountRow> & { id: string }): AccountRow {
   return {
@@ -292,6 +293,49 @@ describe('credit limits', () => {
     const [card] = listAccounts(old, {});
     expect(card?.credit_limit).toBeNull();
     expect(card?.utilization_pct).toBeNull();
+  });
+});
+
+describe('Plaid Item allowance', () => {
+  const link = (itemId: string, profileId: string, institution: string, status = 'ok'): void => {
+    const ts = '2026-09-18T00:00:00.000Z';
+    db.prepare(
+      `INSERT INTO plaid_items (item_id, access_token, institution_id, institution_name,
+         profile_id, status, error_code, last_synced_at, created_at, updated_at)
+       VALUES (?, 'enc:v1:x', ?, ?, ?, ?, NULL, ?, ?, ?)`,
+    ).run(itemId, institution.toLowerCase(), institution, profileId, status, ts, ts, ts);
+  };
+
+  it('counts the cap per profile, so the same bank under two profiles is not a duplicate', () => {
+    // Exactly the shape of the real household: each profile holds its own Amex
+    // and Chase connection, because each profile is its own Plaid team.
+    link('it:me:amex', 'me', 'American Express');
+    link('it:me:chase', 'me', 'Chase');
+    link('it:me:td', 'me', 'TD Canada Trust');
+    link('it:sp:amex', 'spouse', 'American Express');
+    link('it:sp:chase', 'spouse', 'Chase');
+
+    expect(plaidUsage(db, undefined)).toEqual([
+      { profile: 'me', items: 3, cap: PLAID_ITEM_CAP, remaining: 7, needs_attention: 0 },
+      { profile: 'spouse', items: 2, cap: PLAID_ITEM_CAP, remaining: 8, needs_attention: 0 },
+    ]);
+  });
+
+  it('counts a broken Item against the allowance but flags it', () => {
+    link('it:me:bmo', 'me', 'BMO (US)', 'login_required');
+    link('it:me:boa', 'me', 'Bank of America');
+    const [me] = plaidUsage(db, 'me');
+    expect(me).toEqual({ profile: 'me', items: 2, cap: PLAID_ITEM_CAP, remaining: 8, needs_attention: 1 });
+  });
+
+  it('says in the summary that the cap is per profile', () => {
+    link('it:me:amex', 'me', 'American Express');
+    link('it:sp:amex', 'spouse', 'American Express');
+    const s = buildSummary(db, { sections: ['connections'] });
+    const plaid = (s['connections'] as { plaid: Record<string, unknown> }).plaid;
+    expect(plaid['cap_is_per_profile']).toBe(true);
+    expect(plaid['count']).toBe(2);
+    expect(plaid['by_profile']).toHaveLength(2);
   });
 });
 

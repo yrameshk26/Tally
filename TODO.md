@@ -90,8 +90,10 @@ dashboard action only the owner can do.
       2.1; set `MCP_ALLOW_PATH_SECRET=false` to close the legacy route.
 - [ ] Merchant names arrive unnormalised — "Primmum Insurance Co" and "Primmum
       Insurance Comp" are one merchant split across two rows in `top_merchants`.
-- [ ] Plaid Trial caps Items at 10 per team; `me` is at 9 with two Items needing
-      repair (BMO US, Tangerine) and duplicate Amex/Chase links to prune.
+- [ ] Two Items need re-auth: BMO (US) and Amex Canada under `spouse` are
+      `login_required`, Tangerine is `INSTITUTION_NOT_RESPONDING`. `me` is at
+      9 of its own 10; `spouse` at 3 of its own 10. The same institution under
+      two profiles is two teams, not a duplicate — `plaid_status` now says so.
 - [ ] Wise `/v2/profiles` response shape is assumed from the docs — confirm the
       `type` field really is `personal`/`business` on a live token.
 - [ ] SnapTrade `/accounts/{id}/activities` pagination is assumed to be

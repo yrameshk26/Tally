@@ -73,6 +73,7 @@ import {
 } from '../queries.ts';
 import {
   createLinkToken,
+  PLAID_ITEM_CAP,
   createUpdateLinkToken,
   exchangePublicToken,
   listItems,
@@ -560,8 +561,11 @@ export function createWebRouter(db: DB): express.Router {
   router.post('/api/plaid/link-token', requireAuth, requireCsrf, async (req: Ctx, res: Response) => {
     try {
       const profile = requiredProfile(req);
-      if (listItems(db, profile.id).length >= 10) {
-        throw new Error(`All 10 Plaid Items are already in use for profile "${profile.name}"`);
+      if (listItems(db, profile.id).length >= PLAID_ITEM_CAP) {
+        throw new Error(
+          `All ${PLAID_ITEM_CAP} Plaid Items are already in use for profile "${profile.name}". ` +
+            'Each profile has its own allowance — add another profile, or remove a connection here.',
+        );
       }
       res.json({ link_token: await createLinkToken(db, redirectUriFor(req), profile.id) });
     } catch (e) {

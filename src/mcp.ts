@@ -35,7 +35,7 @@ import {
   profileUsage,
   renameProfile,
 } from './profiles.ts';
-import { createUpdateLinkToken, plaidStatus } from './sources/plaid.ts';
+import { createUpdateLinkToken, plaidStatus, plaidUsage } from './sources/plaid.ts';
 import { lastSyncReport, runSync } from './sync.ts';
 import { pruneBackups, writeBackup } from './backup.ts';
 
@@ -487,16 +487,22 @@ export function buildServer(db: DB = getDb()): McpServer {
     {
       title: 'Plaid item status',
       description:
-        'One row per linked bank/card Item with its health. A status of "login_required" means ' +
-        'the bank needs re-authentication — use plaid_relink_url next.',
+        'One row per linked bank/card Item with its health, plus how many Items each profile has ' +
+        'used of its own allowance. The Plaid Trial cap is per profile, not per household — each ' +
+        'profile has its own client_id and secret — so the same institution appearing under two ' +
+        'profiles is two separate connections, never a duplicate. A status of "login_required" ' +
+        'means the bank needs re-authentication; use plaid_relink_url next.',
+      inputSchema: { profile: PROFILE.optional() },
       annotations: READ_ONLY,
     },
-    () => {
+    ({ profile }) => {
       try {
-        const items = plaidStatus(db);
+        const items = plaidStatus(db, profile);
         return ok({
           count: items.length,
           needs_attention: items.filter((i) => i['status'] !== 'ok').length,
+          cap_is_per_profile: true,
+          by_profile: plaidUsage(db, profile),
           items,
         });
       } catch (e) {

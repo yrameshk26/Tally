@@ -25,7 +25,7 @@ import {
   listAccounts,
 } from './queries.ts';
 import { MAX_PROFILES, listProfiles, profileUsage } from './profiles.ts';
-import { plaidStatus } from './sources/plaid.ts';
+import { plaidStatus, plaidUsage } from './sources/plaid.ts';
 import { lastSyncReport } from './sync.ts';
 
 /**
@@ -220,11 +220,14 @@ export function buildSummary(db: DB, opts: SummaryOptions = {}): Summary {
   }
 
   if (want('connections')) {
-    const items = plaidStatus(db);
+    const items = plaidStatus(db, profile ?? undefined);
     out['connections'] = {
       plaid: {
         count: items.length,
         needs_attention: items.filter((i) => i['status'] !== 'ok').length,
+        // The Trial cap is per profile — each has its own client_id and secret.
+        cap_is_per_profile: true,
+        by_profile: plaidUsage(db, profile ?? undefined),
         items,
       },
       sources_with_accounts: [...new Set(listAccounts(db, {}).map((a) => a.source))].sort(),

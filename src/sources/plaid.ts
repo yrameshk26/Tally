@@ -99,6 +99,14 @@ export function plaidCountryCodes(): CountryCode[] {
   });
 }
 
+/**
+ * Plaid's Trial plan caps linked Items **per team**, and a profile is its own
+ * team — its own client_id and secret. So the budget is per profile, never a
+ * household pool: two profiles each holding an Amex connection are two teams
+ * with one Item each, not a duplicate.
+ */
+export const PLAID_ITEM_CAP = 10;
+
 export function listItems(db: DB, profileId?: string): PlaidItemRow[] {
   return (
     profileId === undefined
@@ -604,6 +612,30 @@ export async function syncUnsyncedItems(
     log.info(`catch-up sync: ${recovered}/${pending.length} previously unread Item(s)`);
   }
   return { attempted: pending.length, recovered };
+}
+
+/** Items used against the per-profile cap, so "9 of 10" is never read as "12 of 10". */
+export function plaidUsage(
+  db: DB,
+  profileId?: string,
+): Array<{ profile: string; items: number; cap: number; remaining: number; needs_attention: number }> {
+  const rows = listItems(db, profileId);
+  const byProfile = new Map<string, { items: number; needs_attention: number }>();
+  for (const i of rows) {
+    const v = byProfile.get(i.profile_id) ?? { items: 0, needs_attention: 0 };
+    v.items += 1;
+    if (i.status !== 'ok') v.needs_attention += 1;
+    byProfile.set(i.profile_id, v);
+  }
+  return [...byProfile.entries()]
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([profile, v]) => ({
+      profile,
+      items: v.items,
+      cap: PLAID_ITEM_CAP,
+      remaining: Math.max(0, PLAID_ITEM_CAP - v.items),
+      needs_attention: v.needs_attention,
+    }));
 }
 
 export function plaidStatus(db: DB, profileId?: string): Array<Record<string, unknown>> {
