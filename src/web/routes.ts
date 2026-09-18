@@ -20,6 +20,7 @@ import { notice, page } from './layout.ts';
 import {
   connectionsPage,
   loginPage,
+  verifyPage,
   overviewPage,
   profilesPage,
   securityPage,
@@ -49,8 +50,10 @@ import {
 } from '../auth/admin.ts';
 import {
   COOKIE_NAME,
+  PENDING_TTL_MS,
   SESSION_TTL_MS,
   createSession,
+  promoteSession,
   destroyAllSessions,
   destroySession,
   getSession,
@@ -70,6 +73,7 @@ import {
   plaidCountryCodes,
   plaidErrorDetail,
   plaidOptionalProducts,
+  removeItem,
   plaidProducts,
   plaidStatus,
 } from '../sources/plaid.ts';
@@ -129,6 +133,23 @@ export function createWebRouter(db: DB): express.Router {
     );
   };
 
+  /**
+   * Like activeProfile(), but refuses to guess.
+   *
+   * Linking a bank is the one operation where falling back to the default is
+   * actively harmful: it consumes the wrong profile's Plaid Item allowance and
+   * attributes the accounts to the wrong person, silently. Callers that change
+   * state must name the profile.
+   */
+  const requiredProfile = (req: Ctx): Profile => {
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    const id = String(body['profile'] ?? req.query['profile'] ?? '');
+    if (!id) throw new Error('profile is required');
+    const profile = getProfile(db, id);
+    if (!profile) throw new Error(`no such profile ${id}`);
+    return profile;
+  };
+
   const render = (req: Ctx, res: Response, title: string, body: ReturnType<typeof html>, current?: string, chrome = true): void => {
     res.type('html').send(page({ title, nonce: req.nonce ?? '', current, chrome, body }));
   };
@@ -141,6 +162,12 @@ export function createWebRouter(db: DB): express.Router {
     const session = sessionOf(req);
     if (!session) {
       res.redirect(303, '/login');
+      return;
+    }
+    // A pending session proves the password only. It grants nothing until the
+    // second factor is in.
+    if (session.pending) {
+      res.redirect(303, '/login/verify');
       return;
     }
     req.session = session;
@@ -185,7 +212,6 @@ export function createWebRouter(db: DB): express.Router {
     const body = (req.body ?? {}) as Record<string, unknown>;
     const username = String(body['username'] ?? '');
     const password = String(body['password'] ?? '');
-    const code = String(body['code'] ?? '');
     const ip = req.ip ?? 'unknown';
 
     const fail = (message: string): void => {
@@ -219,19 +245,25 @@ export function createWebRouter(db: DB): express.Router {
       return;
     }
 
+    const meta = { userAgent: req.get('user-agent'), ip };
+
+    // Two steps when a second factor is enrolled: the password buys only a
+    // short-lived pending session, which can reach nothing but /login/verify.
     if (totpEnabled(db)) {
-      const secret = getTotpSecret(db);
-      if (!secret || !verifyTotp(code, secret)) {
-        loginLimiter.fail(ip);
-        log.warn('failed second factor', { ip });
-        res.status(401);
-        fail('That authenticator code is not valid.');
-        return;
-      }
+      const pending = createSession(db, username, meta, { pending: true });
+      res.setHeader(
+        'Set-Cookie',
+        serializeCookie(COOKIE_NAME, pending.id, {
+          maxAge: PENDING_TTL_MS,
+          secure: config.cookieSecure,
+        }),
+      );
+      res.redirect(303, '/login/verify');
+      return;
     }
 
     loginLimiter.reset(ip);
-    const session = createSession(db, username, { userAgent: req.get('user-agent'), ip });
+    const session = createSession(db, username, meta);
     res.setHeader(
       'Set-Cookie',
       serializeCookie(COOKIE_NAME, session.id, {
@@ -240,6 +272,105 @@ export function createWebRouter(db: DB): express.Router {
       }),
     );
     res.redirect(303, '/');
+  });
+
+  /** The half-authenticated session backing step two, or null. */
+  const pendingSession = (req: Ctx): Session | null => {
+    const s = sessionOf(req);
+    return s && s.pending ? s : null;
+  };
+
+  router.get('/login/verify', (req: Ctx, res: Response) => {
+    const pending = pendingSession(req);
+    if (!pending) {
+      res.redirect(303, sessionOf(req) ? '/' : '/login');
+      return;
+    }
+    render(
+      req,
+      res,
+      'Two-factor',
+      verifyPage({ csrf: pending.csrf, username: pending.username }),
+      undefined,
+      false,
+    );
+  });
+
+  router.post('/login/verify', (req: Ctx, res: Response) => {
+    const pending = pendingSession(req);
+    if (!pending) {
+      res.redirect(303, '/login');
+      return;
+    }
+    const ip = req.ip ?? 'unknown';
+    if (loginLimiter.blocked(ip)) {
+      res.status(429);
+      render(
+        req,
+        res,
+        'Two-factor',
+        verifyPage({
+          csrf: pending.csrf,
+          username: pending.username,
+          error: 'Too many failed attempts. Wait a few minutes and try again.',
+        }),
+        undefined,
+        false,
+      );
+      return;
+    }
+
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    if (!safeEqual(String(body['_csrf'] ?? ''), pending.csrf)) {
+      res.status(403).type('text/plain').send('Bad or missing CSRF token. Reload and try again.');
+      return;
+    }
+
+    const secret = getTotpSecret(db);
+    if (!secret || !verifyTotp(String(body['code'] ?? ''), secret)) {
+      loginLimiter.fail(ip);
+      log.warn('failed second factor', { ip });
+      res.status(401);
+      render(
+        req,
+        res,
+        'Two-factor',
+        verifyPage({
+          csrf: pending.csrf,
+          username: pending.username,
+          error: 'That authenticator code is not valid.',
+        }),
+        undefined,
+        false,
+      );
+      return;
+    }
+
+    const full = promoteSession(db, pending.id);
+    if (!full) {
+      res.redirect(303, '/login');
+      return;
+    }
+    loginLimiter.reset(ip);
+    res.setHeader(
+      'Set-Cookie',
+      serializeCookie(COOKIE_NAME, full.id, {
+        maxAge: SESSION_TTL_MS,
+        secure: config.cookieSecure,
+      }),
+    );
+    res.redirect(303, '/');
+  });
+
+  /** Abandon a half-finished sign-in and start over. */
+  router.get('/login/cancel', (req: Ctx, res: Response) => {
+    const pending = pendingSession(req);
+    if (pending) destroySession(db, pending.id);
+    res.setHeader(
+      'Set-Cookie',
+      serializeCookie(COOKIE_NAME, '', { expires: new Date(0), secure: config.cookieSecure }),
+    );
+    res.redirect(303, '/login');
   });
 
   router.post('/logout', (req: Ctx, res: Response) => {
@@ -392,7 +523,7 @@ export function createWebRouter(db: DB): express.Router {
 
   router.post('/api/plaid/link-token', requireAuth, requireCsrf, async (req: Ctx, res: Response) => {
     try {
-      const profile = activeProfile(req);
+      const profile = requiredProfile(req);
       if (listItems(db, profile.id).length >= 10) {
         throw new Error(`All 10 Plaid Items are already in use for profile "${profile.name}"`);
       }
@@ -407,7 +538,7 @@ export function createWebRouter(db: DB): express.Router {
     try {
       const itemId = String((req.body as { item_id?: string })?.item_id ?? '');
       res.json({
-        link_token: await createUpdateLinkToken(db, itemId, redirectUriFor(req), activeProfile(req).id),
+        link_token: await createUpdateLinkToken(db, itemId, redirectUriFor(req), requiredProfile(req).id),
       });
     } catch (e) {
       res.status(400).json({ error: plaidErrorDetail(e) });
@@ -418,11 +549,30 @@ export function createWebRouter(db: DB): express.Router {
     try {
       const publicToken = String((req.body as { public_token?: string })?.public_token ?? '');
       if (!publicToken) throw new Error('public_token is required');
-      const saved = await exchangePublicToken(db, publicToken, activeProfile(req).id);
-      log.info(`linked ${saved.institution_name ?? saved.item_id}`);
-      res.json({ ok: true, ...saved });
+      const profile = requiredProfile(req);
+      const saved = await exchangePublicToken(db, publicToken, profile.id);
+      log.info(`linked ${saved.institution_name ?? saved.item_id} to profile ${profile.id}`);
+      res.json({ ok: true, profile: profile.id, ...saved });
     } catch (e) {
       res.status(400).json({ error: plaidErrorDetail(e) });
+    }
+  });
+
+  router.post('/connections/remove', requireAuth, requireCsrf, async (req: Ctx, res: Response) => {
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    const itemId = String(body['item_id'] ?? '');
+    const purge = String(body['purge'] ?? '') === 'yes';
+    const back = `/connections?profile=${encodeURIComponent(activeProfile(req).id)}`;
+    try {
+      const r = await removeItem(db, itemId, { purge });
+      res.redirect(
+        303,
+        `${back}&ok=${encodeURIComponent(
+          `Disconnected — ${r.plaid}; ${r.accounts} account(s) ${purge ? 'deleted' : 'deactivated'}.`,
+        )}`,
+      );
+    } catch (e) {
+      res.redirect(303, `${back}&err=${encodeURIComponent(errMessage(e))}`);
     }
   });
 
@@ -490,13 +640,25 @@ export function createWebRouter(db: DB): express.Router {
 
   // --- security ------------------------------------------------------------
 
-  const security = (req: Ctx, res: Response, enrolling: { secret: string; uri: string } | null): void => {
+  /** The full connector URL, including the secret. Built from the host in use. */
+  const connectorUrl = (req: Ctx): string => {
+    const proto = (req.headers['x-forwarded-proto'] as string) ?? req.protocol;
+    return `${proto}://${req.get('host')}/mcp/${config.mcpSecret}`;
+  };
+
+  const security = (
+    req: Ctx,
+    res: Response,
+    enrolling: { secret: string; uri: string } | null,
+    showConnector = false,
+  ): void => {
     render(
       req,
       res,
       'Security',
       securityPage({
         username: req.session!.username,
+        connectorUrl: showConnector ? connectorUrl(req) : null,
         totpEnabled: totpEnabled(db),
         sessions: listSessions(db),
         currentSessionId: req.session!.id,
@@ -509,6 +671,12 @@ export function createWebRouter(db: DB): express.Router {
   };
 
   router.get('/security', requireAuth, (req: Ctx, res: Response) => security(req, res, null));
+
+  // Revealed only on an explicit POST, so the secret never appears in the page
+  // source — or in a screenshot — until it is asked for.
+  router.post('/security/connector', requireAuth, requireCsrf, (req: Ctx, res: Response) =>
+    security(req, res, null, true),
+  );
 
   router.post('/security/totp/start', requireAuth, requireCsrf, (req: Ctx, res: Response) => {
     const secret = generateSecret();

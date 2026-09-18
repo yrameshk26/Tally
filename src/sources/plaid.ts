@@ -532,3 +532,69 @@ export function plaidStatus(db: DB, profileId?: string): Array<Record<string, un
     ),
   }));
 }
+
+/**
+ * Disconnect a bank.
+ *
+ * `/item/remove` at Plaid is the part that matters: it invalidates the access
+ * token and ends the billing subscription for that Item. Deleting only our own
+ * row would leave a live, billed connection at Plaid that we can no longer see.
+ *
+ * Accounts are deactivated rather than deleted, matching how a closed account
+ * is handled everywhere else — they leave net worth but their transaction
+ * history survives. `purge` deletes the rows outright for a connection linked
+ * by mistake.
+ */
+export async function removeItem(
+  db: DB,
+  itemId: string,
+  opts: { purge?: boolean } = {},
+): Promise<{ removed: boolean; accounts: number; plaid: string }> {
+  const item = db.prepare('SELECT * FROM plaid_items WHERE item_id = ?').get(itemId) as
+    | PlaidItemRow
+    | undefined;
+  if (!item) throw new Error(`unknown Plaid item_id ${itemId}`);
+
+  let plaidResult = 'removed at Plaid';
+  try {
+    await plaidClient(db, item.profile_id).itemRemove({ access_token: accessTokenFor(item) });
+  } catch (e) {
+    const code = plaidErrorCode(e);
+    // Already gone at Plaid — nothing to bill, safe to clean up locally.
+    if (code === 'ITEM_NOT_FOUND' || code === 'INVALID_ACCESS_TOKEN') {
+      plaidResult = `already absent at Plaid (${code})`;
+    } else {
+      // Anything else and we stop: deleting our row would orphan a live,
+      // billed Item that we could no longer reach.
+      throw new Error(
+        `Plaid refused to remove this Item, so it was left in place: ${plaidErrorDetail(e)}`,
+      );
+    }
+  }
+
+  const ids = (
+    db.prepare('SELECT id FROM accounts WHERE item_id = ?').all(itemId) as Array<{ id: string }>
+  ).map((r) => r.id);
+
+  db.transaction(() => {
+    if (opts.purge) {
+      const delTx = db.prepare('DELETE FROM transactions WHERE account_id = ?');
+      const delAcct = db.prepare('DELETE FROM accounts WHERE id = ?');
+      const delCard = db.prepare('DELETE FROM card_details WHERE account_id = ?');
+      for (const id of ids) {
+        delTx.run(id);
+        delCard.run(id);
+        delAcct.run(id);
+      }
+    } else {
+      const deactivate = db.prepare(
+        "UPDATE accounts SET active = 0, status = 'removed', updated_at = ? WHERE id = ?",
+      );
+      for (const id of ids) deactivate.run(nowISO(), id);
+    }
+    db.prepare('DELETE FROM plaid_items WHERE item_id = ?').run(itemId);
+  })();
+
+  log.info(`removed Plaid item ${item.institution_name ?? itemId}`, { accounts: ids.length });
+  return { removed: true, accounts: ids.length, plaid: plaidResult };
+}

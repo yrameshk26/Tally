@@ -13,6 +13,31 @@ import type { Profile } from '../profiles.ts';
 const sign = (n: number): SafeHtml =>
   html`<span class="${n < 0 ? 'neg' : n > 0 ? 'pos' : 'muted'}">${money(n)}</span>`;
 
+export function verifyPage(opts: { csrf: string; username: string; error?: string }): SafeHtml {
+  return html`<div class="login">
+    <h1>Two-factor</h1>
+    <p class="sub">Enter the current code for <strong>${opts.username}</strong> from your
+      authenticator app.</p>
+    ${opts.error ? notice('err', opts.error) : raw('')}
+    <section>
+      <form method="post" action="/login/verify">
+        ${csrfField(opts.csrf)}
+        <div class="field">
+          <label for="code">Authenticator code</label>
+          <input id="code" name="code" inputmode="numeric" autocomplete="one-time-code"
+                 pattern="[0-9]*" maxlength="6" required autofocus
+                 aria-describedby="codehelp" class="otp">
+          <div class="hint" id="codehelp">Six digits, refreshed every 30 seconds.</div>
+        </div>
+        <button type="submit">Verify</button>
+      </form>
+    </section>
+    <p class="hint mt-sm">
+      <a href="/login/cancel">Sign in as someone else</a>
+    </p>
+  </div>`;
+}
+
 export function loginPage(opts: {
   csrf: string;
   totpEnabled: boolean;
@@ -34,16 +59,12 @@ export function loginPage(opts: {
           <label for="p">Password</label>
           <input id="p" name="password" type="password" autocomplete="current-password" required>
         </div>
+        <button type="submit">Continue</button>
         ${
           opts.totpEnabled
-            ? html`<div class="field">
-                <label for="c">Authenticator code</label>
-                <input id="c" name="code" inputmode="numeric" autocomplete="one-time-code"
-                       pattern="[0-9]*" maxlength="6" required>
-              </div>`
+            ? html`<p class="hint mt-sm">You will be asked for your authenticator code next.</p>`
             : raw('')
         }
-        <button type="submit">Sign in</button>
       </form>
     </section>
   </div>`;
@@ -63,16 +84,23 @@ export function overviewPage(opts: {
   const cards = accounts.filter((a) => a.category === 'LOC' || a.category === 'LOAN');
   const assets = accounts.filter((a) => a.balance_cad >= 0);
 
-  const bucket = (label: string, rec: Record<string, number>): SafeHtml =>
+  const profileName = (id: string): string => opts.profiles.find((p) => p.id === id)?.name ?? id;
+  const bucket = (
+    label: string,
+    rec: Record<string, number>,
+    labelFor: (k: string) => string = (k) => k,
+  ): SafeHtml =>
     Object.keys(rec).length === 0
       ? raw('')
       : html`<section>
           <h2>${label}</h2>
-          <table><tbody>${join(
+          <div class="table-wrap"><table class="kv"><tbody>${join(
             Object.entries(rec)
               .sort((a, b) => b[1] - a[1])
-              .map(([k, v]) => html`<tr><td>${k}</td><td class="num">${sign(v)}</td></tr>`),
-          )}</tbody></table>
+              .map(
+                ([k, v]) => html`<tr><td>${labelFor(k)}</td><td class="num">${sign(v)}</td></tr>`,
+              ),
+          )}</tbody></table></div>
         </section>`;
 
   const staleness =
@@ -99,19 +127,21 @@ export function overviewPage(opts: {
       <div class="kpi"><div class="label">Invested</div><div class="value">${money(holdings.total_invested_cad)}</div></div>
     </div>
 
-    <div class="row" style="margin-bottom:1.1rem">
+    <div class="row mb">
       <form method="post" action="/sync">${csrfField(opts.csrf)}<button type="submit">Refresh now</button></form>
       <span class="muted">Pulls fresh balances, holdings and transactions. Read-only.</span>
     </div>
 
-    ${bucket('By registered type', totals.by_registered_type)}
-    ${bucket('By profile', totals.by_profile)}
+    <div class="split">
+      ${bucket('By registered type', totals.by_registered_type)}
+      ${bucket('By profile', totals.by_profile, profileName)}
+    </div>
 
     ${
       cards.length
         ? html`<section>
             <h2>Cards and loans</h2>
-            <table>
+            <div class="table-wrap"><table>
               <thead><tr><th>Account</th><th>Institution</th><th class="num">Balance</th><th class="num">Statement</th><th class="num">Minimum</th><th>Due</th></tr></thead>
               <tbody>${join(
                 cards.map(
@@ -125,7 +155,7 @@ export function overviewPage(opts: {
                   </tr>`,
                 ),
               )}</tbody>
-            </table>
+            </table></div>
           </section>`
         : raw('')
     }
@@ -137,8 +167,8 @@ export function overviewPage(opts: {
           ? html`<p class="muted">No accounts yet. Add provider credentials under
               <a href="/settings">Settings</a>, then link institutions under
               <a href="/connections">Connections</a>.</p>`
-          : html`<table>
-              <thead><tr><th>Account</th><th>Institution</th><th>Type</th><th>Owner</th><th class="num">Balance</th></tr></thead>
+          : html`<div class="table-wrap"><table>
+              <thead><tr><th>Account</th><th>Institution</th><th>Type</th><th>Profile</th><th class="num">Balance</th></tr></thead>
               <tbody>${join(
                 assets.map(
                   (a) => html`<tr>
@@ -147,7 +177,7 @@ export function overviewPage(opts: {
                     <td><span class="pill">${a.registered_type}</span></td>
                     <td>${
                       opts.profiles.length > 1
-                        ? html`<form method="post" action="/accounts/move" class="row" style="gap:.3rem">
+                        ? html`<form method="post" action="/accounts/move" class="row tight">
                             ${csrfField(opts.csrf)}
                             <input type="hidden" name="account_id" value="${a.id}">
                             <select name="profile" onchange="this.form.submit()">
@@ -161,11 +191,11 @@ export function overviewPage(opts: {
                           </form>`
                         : html`<span class="muted">${a.profile}</span>`
                     }</td>
-                    <td class="num">${sign(a.balance_cad)}${a.currency !== 'CAD' ? html`<div class="muted" style="font-size:.78rem">${a.balance.toLocaleString()} ${a.currency}</div>` : raw('')}</td>
+                    <td class="num">${sign(a.balance_cad)}${a.currency !== 'CAD' ? html`<div class="sub-line">${a.balance.toLocaleString()} ${a.currency}</div>` : raw('')}</td>
                   </tr>`,
                 ),
               )}</tbody>
-            </table>`
+            </table></div>`
       }
     </section>
 
@@ -173,7 +203,7 @@ export function overviewPage(opts: {
       holdings.positions.length
         ? html`<section>
             <h2>Holdings</h2>
-            <table>
+            <div class="table-wrap"><table>
               <thead><tr><th>Symbol</th><th>Description</th><th class="num">Units</th><th class="num">Value</th><th class="num">Weight</th><th class="num">Unrealized</th></tr></thead>
               <tbody>${join(
                 holdings.positions.slice(0, 25).map(
@@ -187,7 +217,7 @@ export function overviewPage(opts: {
                   </tr>`,
                 ),
               )}</tbody>
-            </table>
+            </table></div>
           </section>`
         : raw('')
     }`;
@@ -284,13 +314,13 @@ export function settingsPage(opts: {
         <span class="muted">Secrets are encrypted at rest and never displayed again.</span></div>
     </form>
 
-    <section style="margin-top:1.1rem">
+    <section class="mt">
       <h2>Check credentials</h2>
-      <p class="hint" style="margin-bottom:.9rem">Runs one cheap read-only call per provider, so a
+      <p class="hint mb-sm">Runs one cheap read-only call per provider, so a
         wrong key is found here rather than halfway through a bank login.</p>
       ${
         opts.checks && opts.checks.length
-          ? html`<table>
+          ? html`<div class="table-wrap"><table>
               <thead><tr><th>Provider</th><th>Result</th></tr></thead>
               <tbody>${join(
                 opts.checks.map(
@@ -306,10 +336,10 @@ export function settingsPage(opts: {
                   </tr>`,
                 ),
               )}</tbody>
-            </table>`
+            </table></div>`
           : raw('')
       }
-      <form method="post" action="/settings/test" style="margin-top:.9rem">
+      <form method="post" action="/settings/test" class="mt-sm">
         ${csrfField(opts.csrf)}
         <input type="hidden" name="profile" value="${opts.activeProfile.id}">
         <button class="secondary" type="submit">Test all providers</button>
@@ -320,7 +350,7 @@ export function settingsPage(opts: {
 /** Profile switcher shared by the pages that are scoped to one. */
 export function profileTabs(profiles: Profile[], activeId: string, basePath: string): SafeHtml {
   if (profiles.length <= 1) return raw('');
-  return html`<div class="row" style="margin-bottom:1.1rem">${join(
+  return html`<div class="row mb">${join(
     profiles.map(
       (p) =>
         html`<a class="btn ${p.id === activeId ? '' : 'secondary'}"
@@ -344,16 +374,16 @@ export function profilesPage(opts: {
 
     <section>
       <h2>Your profiles <span class="muted">(${String(opts.profiles.length)} of ${String(opts.max)})</span></h2>
-      <table>
+      <div class="table-wrap"><table>
         <thead><tr><th>Name</th><th>Id</th><th class="num">Accounts</th><th class="num">Banks</th><th class="num">Credentials</th><th></th></tr></thead>
         <tbody>${join(
           opts.profiles.map(
             (p) => html`<tr>
               <td>
-                <form method="post" action="/profiles/rename" class="row" style="gap:.35rem">
+                <form method="post" action="/profiles/rename" class="row tight">
                   ${csrfField(opts.csrf)}
                   <input type="hidden" name="profile" value="${p.id}">
-                  <input name="name" value="${p.name}" style="max-width:11rem">
+                  <input name="name" value="${p.name}" class="w-sm">
                   <button class="secondary" type="submit">Rename</button>
                 </form>
               </td>
@@ -366,7 +396,7 @@ export function profilesPage(opts: {
                 ${
                   p.id === 'me'
                     ? raw('')
-                    : html` <form method="post" action="/profiles/delete" style="display:inline">
+                    : html` <form method="post" action="/profiles/delete" class="inline-form">
                         ${csrfField(opts.csrf)}
                         <input type="hidden" name="profile" value="${p.id}">
                         <button class="danger" type="submit">Delete</button>
@@ -376,7 +406,7 @@ export function profilesPage(opts: {
             </tr>`,
           ),
         )}</tbody>
-      </table>
+      </table></div>
     </section>
 
     ${
@@ -385,10 +415,10 @@ export function profilesPage(opts: {
             <h2>Add a profile</h2>
             <form method="post" action="/profiles" class="row">
               ${csrfField(opts.csrf)}
-              <input name="name" placeholder="e.g. Spouse, or Business" required style="max-width:18rem">
+              <input name="name" placeholder="e.g. Spouse, or Business" required class="w-lg">
               <button type="submit">Create</button>
             </form>
-            <p class="hint" style="margin-top:.6rem">Then add its Plaid and SnapTrade keys under
+            <p class="hint mt-xs">Then add its Plaid and SnapTrade keys under
               Credentials, and link banks from Connections with that profile selected.</p>
           </section>`
         : html`<p class="hint">All ${String(opts.max)} profiles are in use.</p>`
@@ -424,32 +454,32 @@ export function connectionsPage(opts: {
 
     <section>
       <h2>Providers</h2>
-      <table><tbody>
+      <div class="table-wrap"><table class="kv"><tbody>
         <tr><td>SnapTrade <span class="muted">— Wealthsimple, Questrade, Coinbase</span></td>
             <td class="num">${statusPill(opts.snaptradeReady)}</td></tr>
         <tr><td>Plaid <span class="muted">— banks and cards</span></td>
             <td class="num">${statusPill(opts.plaidReady)}</td></tr>
         <tr><td>Wise <span class="muted">— multi-currency balances</span></td>
             <td class="num">${statusPill(opts.wiseReady)}</td></tr>
-      </tbody></table>
+      </tbody></table></div>
       ${opts.plaidReady ? raw('') : html`<p class="hint">Add Plaid credentials under <a href="/settings">Settings</a> to link a bank.</p>`}
     </section>
 
     <section>
       <h2>Plaid dashboard setup</h2>
-      <p class="hint" style="margin-bottom:.9rem">Everything below must match your Plaid dashboard
+      <p class="hint mb-sm">Everything below must match your Plaid dashboard
         before Link will start. These are the exact values this server sends.</p>
-      <table><tbody>
+      <div class="table-wrap"><table class="kv"><tbody>
         <tr>
-          <td>Allowed redirect URI<div class="muted" style="font-size:.8rem">Team Settings → API (or Developers → API). Required for OAuth banks — Chase, Amex, Bank of America.</div></td>
+          <td>Allowed redirect URI<div class="sub-line">Team Settings → API (or Developers → API). Required for OAuth banks — Chase, Amex, Bank of America.</div></td>
           <td><div class="code-block">${opts.redirectUri}</div></td>
         </tr>
         <tr>
-          <td>Environment<div class="muted" style="font-size:.8rem">The secret must be the one for this environment.</div></td>
+          <td>Environment<div class="sub-line">The secret must be the one for this environment.</div></td>
           <td><span class="pill">${opts.plaidEnv}</span></td>
         </tr>
         <tr>
-          <td>Products requested<div class="muted" style="font-size:.8rem">Optional products never block linking.</div></td>
+          <td>Products requested<div class="sub-line">Optional products never block linking.</div></td>
           <td><span class="pill">${opts.products.join(', ')}</span>
             ${opts.optionalProducts.length ? html` <span class="pill warn">optional: ${opts.optionalProducts.join(', ')}</span>` : raw('')}</td>
         </tr>
@@ -457,8 +487,8 @@ export function connectionsPage(opts: {
           <td>Country codes</td>
           <td><span class="pill">${opts.countryCodes.join(', ')}</span></td>
         </tr>
-      </tbody></table>
-      <p class="hint" style="margin-top:.9rem">Check the key pair itself under
+      </tbody></table></div>
+      <p class="hint mt-sm">Check the key pair itself under
         <a href="/settings">Settings → Test all providers</a>.</p>
     </section>
 
@@ -467,7 +497,7 @@ export function connectionsPage(opts: {
       ${
         opts.items.length === 0
           ? html`<p class="muted">Nothing linked yet.</p>`
-          : html`<table>
+          : html`<div class="table-wrap"><table>
               <thead><tr><th>Institution</th><th>Status</th><th class="num">Accounts</th><th class="num">Balance</th><th>Last sync</th><th></th></tr></thead>
               <tbody>${join(
                 opts.items.map((i) => {
@@ -478,16 +508,25 @@ export function connectionsPage(opts: {
                     <td class="num">${String(i['accounts'] ?? 0)}</td>
                     <td class="num">${money(Number(i['balance_cad'] ?? 0))}</td>
                     <td class="muted">${i['last_synced_at'] ? String(i['last_synced_at']).slice(0, 16).replace('T', ' ') : '—'}</td>
-                    <td class="num"><button class="secondary" type="button"
-                        data-relink="${String(i['item_id'])}">Repair</button></td>
+                    <td class="num"><div class="row tight">
+                      <button class="secondary" type="button"
+                        data-relink="${String(i['item_id'])}">Repair</button>
+                      <form method="post" action="/connections/remove" class="inline-form"
+                            data-confirm="Disconnect ${String(i['institution'] ?? 'this bank')}? Its access token is revoked at Plaid and its accounts leave your net worth. Transaction history is kept.">
+                        ${csrfField(opts.csrf)}
+                        <input type="hidden" name="item_id" value="${String(i['item_id'])}">
+                        <input type="hidden" name="profile" value="${opts.activeProfile.id}">
+                        <button class="danger" type="submit">Disconnect</button>
+                      </form>
+                    </div></td>
                   </tr>`;
                 }),
               )}</tbody>
-            </table>`
+            </table></div>`
       }
       ${
         opts.plaidReady && opts.items.length < 10
-          ? html`<div class="row" style="margin-top:1rem">
+          ? html`<div class="row mt">
               <button id="connect" type="button">Link a bank or card</button>
               <span id="status" class="muted"></span>
             </div>`
@@ -497,21 +536,43 @@ export function connectionsPage(opts: {
       }
     </section>
 
+    <script nonce="${opts.nonce}">
+      // Destructive actions confirm first. Revoking a token means re-linking
+      // the bank by hand, so a stray click should not be enough.
+      for (const f of document.querySelectorAll('form[data-confirm]')) {
+        f.addEventListener('submit', (e) => {
+          if (!window.confirm(f.dataset.confirm)) e.preventDefault();
+        });
+      }
+    </script>
     ${
       opts.plaidReady
         ? html`<script src="https://cdn.plaid.com/link/v2/stable/link-initialize.js" nonce="${opts.nonce}"></script>
     <script nonce="${opts.nonce}">
       const csrf = ${raw(JSON.stringify(opts.csrf))};
+      const PROFILE = ${raw(JSON.stringify(opts.activeProfile.id))};
       const statusEl = document.getElementById('status');
       const say = (m) => { if (statusEl) statusEl.textContent = m; };
+      // Every call carries the profile explicitly. The switcher changes the
+      // page URL, but these are POSTs to a fixed path — without this the
+      // server falls back to the default profile and the bank ends up linked
+      // under the wrong Plaid team.
       async function api(path, body) {
         const res = await fetch(path, {
           method: 'POST', headers: { 'content-type': 'application/json', 'x-csrf-token': csrf },
-          body: JSON.stringify(body || {}),
+          body: JSON.stringify({ profile: resumeProfile(), ...(body || {}) }),
         });
         const data = await res.json();
         if (!res.ok) throw new Error(data.error || res.statusText);
         return data;
+      }
+      // Plaid's OAuth redirect comes back to a bare /connections/oauth with no
+      // query string, so the profile has to survive the round trip.
+      function resumeProfile() {
+        if (location.pathname === '/connections/oauth') {
+          return sessionStorage.getItem('tally_profile') || PROFILE;
+        }
+        return PROFILE;
       }
       function open(token) {
         Plaid.create({
@@ -520,7 +581,9 @@ export function connectionsPage(opts: {
           onSuccess: async (publicToken) => {
             try { const r = await api('/api/plaid/exchange', { public_token: publicToken });
                   say('Linked ' + (r.institution_name || r.item_id) + ' — reloading…');
-                  sessionStorage.removeItem('tally_lt'); location.reload(); }
+                  sessionStorage.removeItem('tally_lt');
+                  sessionStorage.removeItem('tally_profile');
+                  location.href = '/connections?profile=' + encodeURIComponent(resumeProfile()); }
             catch (e) { say('Could not save the connection: ' + e.message); }
           },
           onExit: (err) => { if (err) say('Exited: ' + (err.error_code || '') + ' ' + (err.error_message || '')); },
@@ -529,7 +592,9 @@ export function connectionsPage(opts: {
       document.getElementById('connect')?.addEventListener('click', async (ev) => {
         ev.target.disabled = true; say('Preparing…');
         try { const r = await api('/api/plaid/link-token');
-              sessionStorage.setItem('tally_lt', r.link_token); say(''); open(r.link_token); }
+              sessionStorage.setItem('tally_lt', r.link_token);
+              sessionStorage.setItem('tally_profile', PROFILE);
+              say(''); open(r.link_token); }
         catch (e) { say('Could not start Plaid Link: ' + e.message); }
         ev.target.disabled = false;
       });
@@ -537,7 +602,9 @@ export function connectionsPage(opts: {
         btn.addEventListener('click', async () => {
           say('Preparing repair…');
           try { const r = await api('/api/plaid/relink', { item_id: btn.dataset.relink });
-                sessionStorage.setItem('tally_lt', r.link_token); say(''); open(r.link_token); }
+                sessionStorage.setItem('tally_lt', r.link_token);
+                sessionStorage.setItem('tally_profile', PROFILE);
+                say(''); open(r.link_token); }
           catch (e) { say('Could not start repair: ' + e.message); }
         });
       }
@@ -552,6 +619,7 @@ export function connectionsPage(opts: {
 
 export function securityPage(opts: {
   username: string;
+  connectorUrl: string | null;
   totpEnabled: boolean;
   sessions: Array<{ id: string; created_at: string; last_seen_at: string; ip: string | null }>;
   currentSessionId: string;
@@ -581,7 +649,7 @@ export function securityPage(opts: {
             <form method="post" action="/security/totp/confirm">
               ${csrfField(opts.csrf)}
               <input type="hidden" name="secret" value="${opts.enrolling.secret}">
-              <div class="field" style="max-width:12rem">
+              <div class="field" class="w-sm">
                 <label for="code">Code from your app</label>
                 <input id="code" name="code" inputmode="numeric" pattern="[0-9]*" maxlength="6" required autofocus>
               </div>
@@ -591,7 +659,7 @@ export function securityPage(opts: {
             ? html`<p><span class="pill ok">enabled</span> A code from your authenticator is required at sign-in.</p>
               <form method="post" action="/security/totp/disable">
                 ${csrfField(opts.csrf)}
-                <div class="field" style="max-width:12rem">
+                <div class="field" class="w-sm">
                   <label for="dcode">Confirm with a current code</label>
                   <input id="dcode" name="code" inputmode="numeric" pattern="[0-9]*" maxlength="6" required>
                 </div>
@@ -607,8 +675,34 @@ export function securityPage(opts: {
     </section>
 
     <section>
+      <h2>Connect to Claude</h2>
+      <p class="hint mb-sm">Add this server to Claude as a custom connector and it can answer
+        questions about your money directly — “what's my net worth”, “show holdings
+        concentration”, “how much RRSP room is left”.</p>
+      ${
+        opts.connectorUrl
+          ? html`
+            <ol class="steps">
+              <li>In Claude, open <strong>Settings → Connectors → Add custom connector</strong>.</li>
+              <li>Name it <strong>tally</strong> and paste this URL:</li>
+            </ol>
+            <div class="code-block mt-xs">${opts.connectorUrl}</div>
+            ${notice('warn', 'Treat this whole URL as a password — the secret in the path is the only thing protecting your financial data. Do not paste it into a screenshot or a shared document.')}
+            <p class="hint">To revoke it, change <code>MCP_SECRET</code> in the server environment and
+              restart; the old URL stops working immediately and you re-add the connector.</p>`
+          : html`
+            <form method="post" action="/security/connector">
+              ${csrfField(opts.csrf)}
+              <button class="secondary" type="submit">Show connector URL</button>
+            </form>
+            <p class="hint">Hidden until you ask, so it is not sitting on screen or in the page
+              source.</p>`
+      }
+    </section>
+
+    <section>
       <h2>Active sessions</h2>
-      <table>
+      <div class="table-wrap"><table>
         <thead><tr><th>Started</th><th>Last seen</th><th>Address</th><th></th></tr></thead>
         <tbody>${join(
           opts.sessions.map(
@@ -620,8 +714,8 @@ export function securityPage(opts: {
             </tr>`,
           ),
         )}</tbody>
-      </table>
-      <form method="post" action="/security/sessions/revoke" style="margin-top:1rem">
+      </table></div>
+      <form method="post" action="/security/sessions/revoke" class="mt">
         ${csrfField(opts.csrf)}
         <button class="danger" type="submit">Sign out everywhere</button>
       </form>

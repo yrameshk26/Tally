@@ -282,23 +282,57 @@ describe('two-factor enrolment', () => {
     const afterGood = await (await fetch(`${base}/security`, { headers: { cookie } })).text();
     expect(afterGood).toContain('pill ok">enabled');
 
-    // 4. Sign-in now demands the second factor.
-    const noCode = await fetch(`${base}/login`, {
+    // 4. Sign-in is now two steps: the password buys only a pending session.
+    const step1 = await fetch(`${base}/login`, {
       method: 'POST',
       headers: { 'content-type': 'application/x-www-form-urlencoded' },
       body: new URLSearchParams({ username: USER, password: PASSWORD }),
       redirect: 'manual',
     });
-    expect(noCode.status).toBe(401);
-    expect(await noCode.text()).toContain('authenticator code is not valid');
+    expect(step1.status).toBe(303);
+    expect(step1.headers.get('location')).toBe('/login/verify');
+    const pendingCookie = (step1.headers.get('set-cookie') ?? '').split(';')[0] ?? '';
 
-    const withCode = await fetch(`${base}/login`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/x-www-form-urlencoded' },
-      body: new URLSearchParams({ username: USER, password: PASSWORD, code: totp(secret) }),
+    // That pending cookie must grant nothing.
+    const blocked = await fetch(`${base}/`, {
+      headers: { cookie: pendingCookie },
       redirect: 'manual',
     });
-    expect(withCode.status).toBe(303);
+    expect(blocked.status).toBe(303);
+    expect(blocked.headers.get('location')).toBe('/login/verify');
+
+    const verifyPage = await (
+      await fetch(`${base}/login/verify`, { headers: { cookie: pendingCookie } })
+    ).text();
+    const verifyCsrf = /name="_csrf" value="([^"]+)"/.exec(verifyPage)?.[1] ?? '';
+    expect(verifyCsrf).not.toBe('');
+
+    const wrongCode = await fetch(`${base}/login/verify`, {
+      method: 'POST',
+      headers: { cookie: pendingCookie, 'content-type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({ _csrf: verifyCsrf, code: '000000' }),
+      redirect: 'manual',
+    });
+    expect(wrongCode.status).toBe(401);
+
+    const step2 = await fetch(`${base}/login/verify`, {
+      method: 'POST',
+      headers: { cookie: pendingCookie, 'content-type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({ _csrf: verifyCsrf, code: totp(secret) }),
+      redirect: 'manual',
+    });
+    expect(step2.status).toBe(303);
+    expect(step2.headers.get('location')).toBe('/');
+
+    // The session id must have been rotated — session fixation protection.
+    const fullCookie = (step2.headers.get('set-cookie') ?? '').split(';')[0] ?? '';
+    expect(fullCookie).not.toBe(pendingCookie);
+    const home = await fetch(`${base}/`, { headers: { cookie: fullCookie }, redirect: 'manual' });
+    expect(home.status).toBe(200);
+    // and the old pending id must be dead
+    const reused = await fetch(`${base}/`, { headers: { cookie: pendingCookie }, redirect: 'manual' });
+    expect(reused.status).toBe(303);
+    expect(reused.headers.get('location')).toBe('/login');
 
     // 5. Disabling requires a current code, not just a session.
     const refused = await form('/security/totp/disable', cookie, { _csrf: csrf, code: '000000' });
@@ -338,5 +372,105 @@ describe('Plaid setup panel', () => {
     expect(body).toContain('Environment');
     expect(body).toContain('transactions');
     expect(body).toContain('optional: liabilities');
+  });
+});
+
+describe('linking is scoped to the named profile', () => {
+  it('refuses to link without an explicit profile, rather than defaulting', async () => {
+    const { cookie, csrf } = await login();
+    // Falling back to the default here would consume the wrong profile's Plaid
+    // Item allowance and attribute the accounts to the wrong person, silently.
+    const res = await fetch(`${base}/api/plaid/link-token`, {
+      method: 'POST',
+      headers: { cookie, 'content-type': 'application/json', 'x-csrf-token': csrf },
+      body: JSON.stringify({}),
+      redirect: 'manual',
+    });
+    expect(res.status).toBe(400);
+    expect((await res.json() as { error: string }).error).toMatch(/profile is required/);
+  });
+
+  it('refuses an unknown profile', async () => {
+    const { cookie, csrf } = await login();
+    const res = await fetch(`${base}/api/plaid/exchange`, {
+      method: 'POST',
+      headers: { cookie, 'content-type': 'application/json', 'x-csrf-token': csrf },
+      body: JSON.stringify({ profile: 'ghost', public_token: 'x' }),
+      redirect: 'manual',
+    });
+    expect(res.status).toBe(400);
+    expect((await res.json() as { error: string }).error).toMatch(/no such profile/);
+  });
+
+  it('embeds the active profile in the page so the client can send it', async () => {
+    const { cookie, csrf } = await login();
+    await fetch(`${base}/settings`, {
+      method: 'POST',
+      headers: { cookie, 'content-type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({ _csrf: csrf, PLAID_CLIENT_ID: 'cid', PLAID_SECRET: 'sec' }),
+      redirect: 'manual',
+    });
+    const body = await (await fetch(`${base}/connections`, { headers: { cookie } })).text();
+    expect(body).toContain('const PROFILE = "me"');
+    // and it must survive Plaid's OAuth round trip, which returns with no query
+    expect(body).toContain('tally_profile');
+  });
+});
+
+describe('disconnecting a bank', () => {
+  it('reports an unknown item rather than silently doing nothing', async () => {
+    const { cookie, csrf } = await login();
+    const res = await fetch(`${base}/connections/remove`, {
+      method: 'POST',
+      headers: { cookie, 'content-type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({ _csrf: csrf, item_id: 'nope', profile: 'me' }),
+      redirect: 'manual',
+    });
+    expect(res.status).toBe(303);
+    expect(decodeURIComponent(res.headers.get('location') ?? '')).toContain('unknown Plaid item_id');
+  });
+
+  it('requires a CSRF token — revoking a token is destructive', async () => {
+    const { cookie } = await login();
+    const res = await fetch(`${base}/connections/remove`, {
+      method: 'POST',
+      headers: { cookie, 'content-type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({ item_id: 'nope', profile: 'me' }),
+      redirect: 'manual',
+    });
+    expect(res.status).toBe(403);
+  });
+});
+
+describe('connector URL', () => {
+  it('is absent from the page until explicitly requested', async () => {
+    const { cookie } = await login();
+    const body = await (await fetch(`${base}/security`, { headers: { cookie } })).text();
+    expect(body).toContain('Show connector URL');
+    // The secret must not be sitting in the source of a page nobody asked.
+    expect(body).not.toContain('e'.repeat(64));
+  });
+
+  it('reveals it on demand, with the warning that it is a credential', async () => {
+    const { cookie, csrf } = await login();
+    const res = await fetch(`${base}/security/connector`, {
+      method: 'POST',
+      headers: { cookie, 'content-type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({ _csrf: csrf }),
+    });
+    const body = await res.text();
+    expect(body).toContain(`/mcp/${'e'.repeat(64)}`);
+    expect(body).toContain('Add custom connector');
+    expect(body).toContain('Treat this whole URL as a password');
+  });
+
+  it('will not reveal it without a CSRF token', async () => {
+    const { cookie } = await login();
+    const res = await fetch(`${base}/security/connector`, {
+      method: 'POST',
+      headers: { cookie, 'content-type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({}),
+    });
+    expect(res.status).toBe(403);
   });
 });

@@ -182,6 +182,7 @@ CREATE TABLE IF NOT EXISTS sessions (
   id           TEXT PRIMARY KEY,
   username     TEXT NOT NULL,
   csrf         TEXT NOT NULL,
+  pending      INTEGER NOT NULL DEFAULT 0,
   created_at   TEXT NOT NULL,
   last_seen_at TEXT NOT NULL,
   expires_at   TEXT NOT NULL,
@@ -236,6 +237,7 @@ export function migrate(db: DB): void {
   addColumn('accounts', 'available', 'REAL');
   addColumn('plaid_items', 'consent_expiration', 'TEXT');
   addColumn('room', 'note', 'TEXT');
+  addColumn('sessions', 'pending', "INTEGER NOT NULL DEFAULT 0");
 
   migrateProfiles(db);
   encryptExistingTokens(db);
