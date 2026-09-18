@@ -432,3 +432,48 @@ describe('the merchant directory', () => {
     expect(sdm?.accounts).toEqual(['plaid:card']);
   });
 });
+
+describe('category labels', () => {
+  it('renders the bank taxonomy as readable text without changing the value', async () => {
+    const { prettyCategory } = await import('../src/web/pages.ts');
+    expect(prettyCategory('GENERAL_MERCHANDISE')).toBe('General merchandise');
+    expect(prettyCategory('FOOD_AND_DRINK')).toBe('Food and drink');
+    expect(prettyCategory('LOAN_PAYMENTS')).toBe('Loan payments');
+    expect(prettyCategory('UNCATEGORIZED')).toBe('Uncategorized');
+  });
+
+  it('keeps the raw category as the form value, so a round trip is lossless', async () => {
+    const { prettyCategory, transactionsPage } = await import('../src/web/pages.ts');
+    const { normalizeCategory } = await import('../src/overrides.ts');
+    // The label is display-only: normalising it back must return the original,
+    // or saving a row would silently rewrite its category.
+    for (const raw of ['GENERAL_MERCHANDISE', 'FOOD_AND_DRINK', 'RENT_AND_UTILITIES']) {
+      expect(normalizeCategory(prettyCategory(raw))).toBe(raw);
+    }
+    const out = transactionsPage({
+      nonce: 'n',
+      csrf: 'c',
+      filters: {
+        start: '2026-01-01',
+        end: '2026-12-31',
+        profile: '',
+        account_id: '',
+        category: '',
+        search: '',
+        direction: 'all',
+        min_amount: '',
+        group: 'none',
+      },
+      rows: getTransactions(db, { limit: 10 }),
+      merchants: [],
+      categoryGroups: [],
+      accounts: listAccounts(db, {}),
+      categories: ['GENERAL_MERCHANDISE'],
+      profiles: [],
+      rules: [],
+      truncated: false,
+    }).value;
+    expect(out).toContain('value="GENERAL_MERCHANDISE"');
+    expect(out).toContain('>General merchandise<');
+  });
+});

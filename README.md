@@ -305,7 +305,8 @@ Five pages:
   minimum and free text; money out / in / net for the filtered set; group by
   merchant or category. Edit a row's merchant and category inline, or "apply to
   all" on a merchant group to write a rule. Filters live in the query string, so
-  a view is a URL you can bookmark.
+  a view is a URL you can bookmark. Categories display as ordinary text
+  (`Food and drink`, not `FOOD_AND_DRINK`); the stored value is unchanged.
 - **Merchants** — every merchant seen on your cards, the category its spend is
   filed under, which cards paid it, and when. Set a category per merchant from a
   picker, filter to uncategorised only, and add categories of your own. Above it,

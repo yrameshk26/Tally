@@ -949,6 +949,17 @@ export function securityPage(opts: {
     </section>`;
 }
 
+/**
+ * Plaid ships categories as UPPER_SNAKE_CASE, which is both shouty and wide —
+ * GENERAL_MERCHANDISE does not fit a select in a table cell, while "General
+ * merchandise" does. Only the label changes; every form value stays the raw
+ * category, so nothing downstream has to know about this.
+ */
+export function prettyCategory(category: string): string {
+  const words = category.trim().replace(/_+/g, ' ').toLowerCase();
+  return words.charAt(0).toUpperCase() + words.slice(1);
+}
+
 // --- transactions -----------------------------------------------------------
 
 export type TxFilters = {
@@ -982,7 +993,7 @@ function filterBar(f: TxFilters, accounts: AccountView[], categories: string[], 
     <label>Category
       <select name="category">
         ${opt('', 'All categories', f.category === '')}
-        ${join(categories.map((c) => opt(c, c, c === f.category)))}
+        ${join(categories.map((c) => opt(c, prettyCategory(c), c === f.category)))}
       </select>
     </label>
     ${
@@ -1034,21 +1045,29 @@ export function transactionsPage(opts: {
   const received = round2(opts.rows.filter((r) => r.amount_cad > 0).reduce((s, r) => s + r.amount_cad, 0));
 
   /** Edit one row in place. Same data-autosubmit pattern as the profile cell. */
-  const editCell = (t: TransactionView): SafeHtml => html`<form method="post" action="/transactions/override" class="row tight">
+  /**
+   * Stacked, not inline. Three controls on one row inside a table cell that is
+   * already competing with four other columns crushed the category select to
+   * two characters ("GE", "FC") and cut merchant names mid-word.
+   */
+  const editCell = (t: TransactionView): SafeHtml => html`<form method="post" action="/transactions/override" class="cell-edit">
     ${csrfField(opts.csrf)}
     <input type="hidden" name="transaction_id" value="${t.id}">
     <input type="hidden" name="back" value="${currentQuery(f)}">
-    <input type="text" name="merchant" value="${t.merchant ?? ''}" aria-label="Merchant"
-      placeholder="${t.name ?? 'merchant'}" class="cell-input">
-    <select name="category" aria-label="Category">
-      <option value="">—</option>
-      ${join(
-        opts.categories.map(
-          (c) => html`<option value="${c}"${c === (t.category ?? '') ? raw(' selected') : raw('')}>${c}</option>`,
-        ),
-      )}
-    </select>
-    <button class="secondary" type="submit">Save</button>
+    <input type="text" name="merchant" value="${t.merchant ?? ''}" aria-label="Merchant for ${t.name ?? t.id}"
+      placeholder="${t.name ?? 'merchant'}">
+    <div class="cell-edit-row">
+      <select name="category" aria-label="Category for ${t.name ?? t.id}">
+        <option value="">uncategorised</option>
+        ${join(
+          opts.categories.map(
+            (c) =>
+              html`<option value="${c}"${c === (t.category ?? '') ? raw(' selected') : raw('')}>${prettyCategory(c)}</option>`,
+          ),
+        )}
+      </select>
+      <button class="secondary" type="submit">Save</button>
+    </div>
   </form>`;
 
   const ruleForm = (merchant: string, category: string): SafeHtml => html`<form method="post" action="/transactions/rule" class="row tight">
@@ -1058,7 +1077,11 @@ export function transactionsPage(opts: {
     <input type="text" name="merchant" value="${merchant}" aria-label="Rename every match to" class="cell-input">
     <select name="category" aria-label="Category for every match">
       <option value="">keep category</option>
-      ${join(opts.categories.map((c) => html`<option value="${c}"${c === category ? raw(' selected') : raw('')}>${c}</option>`))}
+      ${join(
+        opts.categories.map(
+          (c) => html`<option value="${c}"${c === category ? raw(' selected') : raw('')}>${prettyCategory(c)}</option>`,
+        ),
+      )}
     </select>
     <button class="secondary" type="submit">Apply to all</button>
   </form>`;
@@ -1124,7 +1147,7 @@ export function transactionsPage(opts: {
               <tbody>${join(
                 opts.categoryGroups.map(
                   (c) => html`<tr>
-                    <td>${c.category}</td>
+                    <td>${prettyCategory(c.category)}</td>
                     <td class="num neg">${c.spend_cad ? money(-c.spend_cad) : html`<span class="muted">—</span>`}</td>
                     <td class="num pos">${c.received_cad ? money(c.received_cad) : html`<span class="muted">—</span>`}</td>
                     <td class="num">${String(c.merchants)}</td>
@@ -1147,15 +1170,22 @@ export function transactionsPage(opts: {
               <tbody>${join(
                 opts.rows.map(
                   (t) => html`<tr>
-                    <td class="muted nowrap">${t.date}${t.pending ? html` <span class="pill">pending</span>` : raw('')}</td>
-                    <td>
-                      ${t.merchant ?? t.name ?? '—'}
+                    <td class="muted nowrap">${t.date}${t.pending ? html`<div><span class="pill">pending</span></div>` : raw('')}</td>
+                    <td class="cell-merchant">
+                      <span class="clip" title="${t.merchant ?? t.name ?? ''}">${t.merchant ?? t.name ?? '—'}</span>
                       ${t.corrected_by ? html`<span class="pill">${t.corrected_by === 'rule' ? 'rule' : 'edited'}</span>` : raw('')}
-                      ${t.merchant && t.name && t.merchant !== t.name ? html`<div class="sub-line">${t.name}</div>` : raw('')}
+                      ${
+                        t.merchant && t.name && t.merchant !== t.name
+                          ? html`<div class="sub-line clip" title="${t.name}">${t.name}</div>`
+                          : raw('')
+                      }
                     </td>
-                    <td class="muted">${t.account ?? '—'}${t.currency !== 'CAD' ? html` <span class="pill">${t.currency}</span>` : raw('')}</td>
-                    <td class="num ${t.amount_cad < 0 ? 'neg' : 'pos'}">${money(t.amount_cad)}</td>
-                    <td>${editCell(t)}</td>
+                    <td class="muted cell-account">
+                      <span class="clip" title="${t.account ?? ''}">${t.account ?? '—'}</span>
+                      ${t.currency !== 'CAD' ? html`<div><span class="pill">${t.currency}</span></div>` : raw('')}
+                    </td>
+                    <td class="num nowrap ${t.amount_cad < 0 ? 'neg' : 'pos'}">${money(t.amount_cad)}</td>
+                    <td class="cell-edit-col">${editCell(t)}</td>
                   </tr>`,
                 ),
               )}</tbody>
@@ -1259,7 +1289,7 @@ export function merchantsPage(opts: {
     <input type="hidden" name="back" value="${back}">
     <select name="category" data-autosubmit aria-label="Category for ${m.merchant}">
       ${opt('', 'uncategorised', !m.category || m.category === 'UNCATEGORIZED')}
-      ${join(opts.categories.map((c) => opt(c, c, c === m.category)))}
+      ${join(opts.categories.map((c) => opt(c, prettyCategory(c), c === m.category)))}
     </select>
     <noscript><button class="secondary" type="submit">Set</button></noscript>
   </form>`;
@@ -1327,7 +1357,7 @@ export function merchantsPage(opts: {
                 .filter((c) => c.spend_cad > 0)
                 .slice(0, 10)
                 .map((c) => ({
-                  label: c.category,
+                  label: prettyCategory(c.category),
                   value: c.spend_cad,
                   note: `${String(c.count)} transaction(s), ${String(c.merchants)} merchant(s)`,
                 })),
@@ -1344,7 +1374,7 @@ export function merchantsPage(opts: {
               <tbody>${join(
                 opts.categoryGroups.map(
                   (c) => html`<tr>
-                    <td>${c.category}</td>
+                    <td>${prettyCategory(c.category)}</td>
                     <td class="num neg">${c.spend_cad ? money(-c.spend_cad) : html`<span class="muted">—</span>`}</td>
                     <td class="num">${totalSpend > 0 ? `${((c.spend_cad / totalSpend) * 100).toFixed(1)}%` : '—'}</td>
                     <td class="num">${String(c.merchants)}</td>

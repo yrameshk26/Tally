@@ -338,8 +338,25 @@ ol.steps strong{color:var(--fg)}
 .filters button{align-self:flex-end}
 .btn-link{align-self:flex-end;padding:.5rem .35rem;font-size:var(--step--1);color:var(--fg-muted)}
 .btn-link:hover{color:var(--fg)}
-/* Inline edit inside a table cell: compact, and never wider than its column. */
-.cell-input{min-width:9rem;max-width:14rem}
+/* Editing inside a table row.
+   The controls stack rather than sitting in a row: three of them side by side
+   in a cell that is already competing with four other columns crushed the
+   category select to two visible characters. */
+.cell-edit{display:flex;flex-direction:column;gap:.35rem;min-width:13rem}
+.cell-edit input[type=text]{width:100%}
+.cell-edit-row{display:flex;gap:.35rem}
+.cell-edit-row select{flex:1;min-width:0}
+.cell-edit-row button{flex:0 0 auto}
+/* Column widths, so the edit controls get real room and the long free-text
+   columns give it up. Without this the browser sizes to content and the
+   description wins. */
+.cell-merchant{max-width:20rem}
+.cell-account{max-width:11rem}
+.cell-edit-col{width:16rem}
+/* A bank description can be 80 characters of routing detail. Clip it and keep
+   the whole string in a title, rather than letting one row set the table's
+   width or wrap to four lines. */
+.clip{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 /* A date that wraps onto two lines makes every row taller than it needs to be. */
 td .nowrap,td.nowrap{white-space:nowrap}
 .row.tight{gap:.35rem;flex-wrap:nowrap;align-items:center}
@@ -347,6 +364,10 @@ td .nowrap,td.nowrap{white-space:nowrap}
 @media(max-width:640px){
   .filters label{flex:1 1 9rem}
   .row.tight{flex-wrap:wrap}
+  /* Narrow screens scroll the table horizontally, so fixed caps would only
+     make every column smaller than it needs to be. */
+  .cell-merchant,.cell-account{max-width:14rem}
+  .cell-edit-col{width:14rem}
 }
 /* Width and gutter match the main element above, so the rule lines up with it. */
 .site-footer{max-width:68rem;margin:0 auto 2.5rem;padding:1.25rem 1.25rem 0;
