@@ -96,6 +96,7 @@ describe('tools', () => {
     const tools = (json['result'] as { tools: Array<{ name: string }> }).tools;
     const names = tools.map((t) => t.name).sort();
     expect(names).toEqual([
+      'backup_now',
       'create_profile',
       'delete_profile',
       'fx_rates',

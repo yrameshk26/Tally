@@ -34,6 +34,7 @@ import {
 } from './profiles.ts';
 import { createUpdateLinkToken, plaidStatus } from './sources/plaid.ts';
 import { lastSyncReport, runSync } from './sync.ts';
+import { pruneBackups, writeBackup } from './backup.ts';
 
 /** Profiles are user-defined, so this is a free-form id rather than an enum. */
 const PROFILE = z.string().min(1).max(32);
@@ -485,6 +486,26 @@ export function buildServer(db: DB = getDb()): McpServer {
           wise: report.wise,
           timings_ms: report.timings_ms,
         });
+      } catch (e) {
+        return fail(e);
+      }
+    },
+  );
+
+  server.registerTool(
+    'backup_now',
+    {
+      title: 'Back up the database',
+      description:
+        'Write a consistent snapshot of the database next to it, and prune old ones. Uses ' +
+        'sqlite\u2019s own transactional copy, so it is safe to run against a live server — ' +
+        'unlike copying the file, which misses anything still in the write-ahead log.',
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+    },
+    () => {
+      try {
+        const file = writeBackup(db);
+        return ok({ backed_up: true, file, pruned: pruneBackups() });
       } catch (e) {
         return fail(e);
       }

@@ -137,6 +137,18 @@ describe('profiles migration', () => {
     expect(row.profile_id).toBe('spouse');
   });
 
+  it('keeps the old settings table rather than dropping it', () => {
+    const db = legacyDb();
+    migrateProfiles(db);
+    // The only non-additive step in the migration, holding encrypted provider
+    // credentials. Recovery should be an INSERT..SELECT, not re-entering keys.
+    const kept = db
+      .prepare('SELECT key, value FROM settings_pre_profiles ORDER BY key')
+      .all() as Array<{ key: string; value: string }>;
+    expect(kept).toHaveLength(2);
+    expect(kept.find((r) => r.key === 'PLAID_SECRET')!.value).toBe('enc:v1:xxx:yyy:zzz');
+  });
+
   it('runs clean on a fresh database too', () => {
     const db = initDb(new Database(':memory:') as DB);
     const profiles = db.prepare('SELECT id FROM profiles').all() as Array<{ id: string }>;

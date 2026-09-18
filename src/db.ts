@@ -316,10 +316,14 @@ export function migrateProfiles(db: DB): void {
       );
       INSERT INTO settings_with_profile (profile_id, key, value, is_secret, updated_at)
         SELECT 'me', key, value, is_secret, updated_at FROM settings;
-      DROP TABLE settings;
+      ALTER TABLE settings RENAME TO settings_pre_profiles;
       ALTER TABLE settings_with_profile RENAME TO settings;
     `);
-    log.info('settings migrated onto the default profile');
+    // The old table is kept, not dropped. This is the only step of the whole
+    // migration that is not purely additive, and the rows it holds are
+    // encrypted provider credentials. Renaming makes recovery an INSERT..SELECT
+    // instead of re-entering every key by hand.
+    log.info('settings migrated onto the default profile (old table kept as settings_pre_profiles)');
   }
 }
 
