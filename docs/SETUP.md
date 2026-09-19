@@ -69,6 +69,24 @@ Three things that bite:
 To change the password later, run the script again and replace the value. The
 old sessions stay valid until you sign out everywhere on the Security page.
 
+### Idle sign-out
+
+A browser session ends after 30 minutes without activity, and a week after
+sign-in however much it is used. The second one is not extendable: a session in
+daily use still expires on the seventh day.
+
+```ini
+SESSION_IDLE_MINUTES=30   # 0 turns the idle timeout off, leaving only the week
+```
+
+While a page is open it reports activity back to the server, so reading one for
+half an hour does not sign you out; a tab nobody is touching signs itself out
+and returns to the login screen, rather than sitting there showing balances.
+
+None of this touches Claude. A connector authenticates with an OAuth token, so
+the browser signing out leaves MCP working. Revoking a connector is a separate
+action, on the Security page.
+
 ### Behind a reverse proxy
 
 ```ini

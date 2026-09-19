@@ -3,6 +3,39 @@
 Dated, append-only. Each entry says what was chosen, what it was chosen over,
 and why.
 
+## 2026-09-19 — Browser sessions expire on two clocks; MCP keeps its own
+
+The session cookie used to carry a 7-day lifetime that slid forward on every
+request, so a session in weekly use never expired, and a laptop closed with a
+tab open stayed signed in for a week. For a page showing every balance and
+transaction in the household, that is too generous.
+
+Now two clocks run and neither extends the other: `SESSION_IDLE_MINUTES`
+(default 30) since the last request, and the unchanged 7 days since sign-in,
+fixed at creation. `purgeExpiredSessions` sweeps both.
+
+The server only sees requests, so reading a page for half an hour looks exactly
+like abandoning it. The page shell therefore posts to `/session/ping` while
+there is activity, and submits the sign-out form when there is none. The server
+remains the authority; the script only supplies the signal the server cannot
+observe and closes the screen.
+
+`last_seen_at` is written at most once per sixth of the idle window rather than
+on every request. That throttle is also the error bar: a session can outlive
+the timeout by that much, never expire before it.
+
+Alternatives rejected:
+
+- **A shorter bank-style 15 minutes.** Correct for a bank with millions of
+  users on shared machines; here it interrupts reading a long transactions page.
+  The setting exists for anyone who wants it.
+- **Writing `last_seen_at` on every request.** Simpler and exact, but it is a
+  write per request for a benefit measured in minutes of precision.
+- **Applying the same timeout to MCP.** A connector holds an OAuth token with
+  its own lifetime and rotation. Tying it to browser activity would disconnect
+  Claude mid-conversation because nobody had the web UI open, which is
+  backwards: the UI exists to run the server, not to gate it.
+
 ## 2026-09-17 — SnapTrade Personal keys go through a signed REST client, not the SDK
 
 `snaptrade-typescript-sdk` marks `userId` and `userSecret` as required on every

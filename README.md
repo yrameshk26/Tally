@@ -61,7 +61,7 @@ place a trade or move money, and that is enforced as a project rule rather than
 an intention.
 
 It is also a genuinely small program: no ORM, no charting library, no auth
-framework, ~280 tests, and a dependency list you can read in one screen.
+framework, ~320 tests, and a dependency list you can read in one screen.
 
 **If this is useful to you, a ⭐ on the repo helps more people find it** — that is
 the only distribution this project has.
@@ -356,6 +356,14 @@ Five pages:
 - **Security** — two-factor enrolment, active sessions, authorized MCP clients,
   sign out everywhere.
 
+**Signed out when idle.** The browser session ends after 30 minutes without
+activity, and a week after sign-in however much it is used. Set
+`SESSION_IDLE_MINUTES` to change the idle window, or `0` to keep only the
+weekly one. The page reports activity back while you are reading it and signs
+itself out on screen when you are not, so an abandoned tab stops showing
+balances. Claude is unaffected: a connector authenticates with an OAuth token,
+not this cookie.
+
 **Turn on two-factor authentication**, straight after your first sign-in. A
 single password is otherwise the only thing between the public internet and
 every balance, transaction and stored bank token. Security → start enrolment →
@@ -393,6 +401,8 @@ Read [SECURITY.md](SECURITY.md) before deploying. The short version:
   per-IP rate limiter degrades into a single shared bucket.
 - Back up `TOKEN_ENC_KEY` somewhere other than the server. Losing it means
   re-linking every bank.
+- Leave the idle timeout on. `SESSION_IDLE_MINUTES=0` means a tab you forgot
+  about stays signed in for a week.
 - Report vulnerabilities privately via GitHub Security Advisories, not issues.
 
 ## Development
@@ -401,7 +411,7 @@ Read [SECURITY.md](SECURITY.md) before deploying. The short version:
 |---|---|
 | `npm run demo` | Seed a fictional database to try it without credentials |
 | `npm run dev` | Run the server from TypeScript |
-| `npm run check` | Typecheck + 307 tests |
+| `npm run check` | Typecheck + 323 tests |
 | `npm run sync` | One-shot sync; exits non-zero if a source errored |
 | `npm run db:init` | Create the database, seeding `room.json` if present |
 | `npm run hash-password` | Print an `ADMIN_PASSWORD_HASH` |
@@ -420,7 +430,8 @@ shape, profiles and the schema migrations, the OAuth authorization server
 handlers under the CSP), the summary's section selection, correction precedence
 and reach, category assignment and its match precision, the Markdown renderer
 against hostile input, the per-profile Plaid
-Item allowance, the guarantee that statement
+Item allowance, both session clocks (idle and absolute, and that neither
+extends the other), the guarantee that statement
 PDFs are never persisted (asserted against the source), and the HTTP endpoint
 end to end (auth, 405 on GET, rate limiting, `tools/list`, a tool call).
 

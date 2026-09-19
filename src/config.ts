@@ -114,6 +114,15 @@ export const config = {
   cookieSecure: bool('COOKIE_SECURE', int('TRUST_PROXY', 0) > 0),
   /** Failed logins allowed per 15 minutes, per IP. */
   loginRateLimit: int('LOGIN_RATE_LIMIT', 10),
+  /**
+   * Sign the browser out after this many minutes without activity. This holds
+   * every balance and transaction you own, so a tab left open on a machine
+   * someone else can reach should not stay signed in. 0 turns it off and
+   * leaves only the absolute lifetime in `src/auth/session.ts`. MCP is
+   * unaffected: a connector authenticates with an OAuth token, not this
+   * cookie, so Claude keeps working while the browser signs out.
+   */
+  sessionIdleMinutes: int('SESSION_IDLE_MINUTES', 30),
 
   tokenEncKey: str('TOKEN_ENC_KEY'),
 } as const;

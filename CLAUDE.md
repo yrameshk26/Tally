@@ -69,11 +69,20 @@ history is public too.
    household, not separate users. Auth for `/mcp` is OAuth 2.1 (see
    `src/oauth.ts`); the `/mcp/<MCP_SECRET>` path route is legacy and is turned
    off with `MCP_ALLOW_PATH_SECRET=false`.
-11. **Never scrape.** Wealthsimple's private GraphQL API is off limits;
+11. **A browser session dies twice over: idle and absolute.** `getSession`
+   enforces both and extends neither, so a session in daily use still ends a
+   week after sign-in. The idle window comes from `SESSION_IDLE_MINUTES` (30
+   by default, 0 off) and the page shell's heartbeat is what keeps a tab being
+   read from looking abandoned — if you change one, change the other, and keep
+   the `last_seen_at` write throttle well under the window or a session in
+   continuous use will expire early. MCP is not covered by any of this: a
+   connector holds an OAuth token, not this cookie, and signing the browser out
+   must never break it.
+12. **Never scrape.** Wealthsimple's private GraphQL API is off limits;
    SnapTrade only.
-12. **After every task:** `npm run typecheck && npm test`. Both must be clean
+13. **After every task:** `npm run typecheck && npm test`. Both must be clean
    before committing. Conventional commits, one per completed task.
-13. **Docs ship with the change, in the same commit.** Any new or changed
+14. **Docs ship with the change, in the same commit.** Any new or changed
    feature updates `README.md` and this file before the commit — never "later",
    never a follow-up commit. Concretely:
    - a new or renamed MCP tool → the tool table in README.md
@@ -85,7 +94,7 @@ history is public too.
    - a changed test count → the Development section
    The test is whether someone reading only these two files would be surprised
    by the code. If yes, the docs are not done.
-14. **The Link helper never deploys.** `src/link-server.ts` runs on the
+15. **The Link helper never deploys.** `src/link-server.ts` runs on the
    developer's machine only. Port 8788 must not be exposed and the file is
    deleted from the Docker image.
 

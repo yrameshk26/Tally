@@ -73,7 +73,9 @@ add an HTML UI, escape them — they are a stored-XSS vector.
 What it enforces: Argon2id at the OWASP minimum (19 MiB, t=2, p=1); a
 per-session CSRF token on every state-changing request; `HttpOnly`,
 `SameSite=Lax` and (behind a proxy) `Secure` session cookies held server-side so
-sign-out is real; a failure-only sign-in limiter checked before password
+sign-out is real; sessions that end after 30 minutes idle
+(`SESSION_IDLE_MINUTES`) and a week after sign-in, neither clock extending the
+other; a failure-only sign-in limiter checked before password
 verification; TOTP that is never persisted until a code proves enrolment
 succeeded, and that requires a current code to disable; and a CSP of
 `default-src 'none'` with nonces, whose only third-party allowance is Plaid Link

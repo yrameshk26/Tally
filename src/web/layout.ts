@@ -3,6 +3,7 @@
  * only third-party script anywhere is Plaid Link, and only on the page that
  * needs it. Everything inline is nonce-allowed so the CSP can stay strict.
  */
+import { idleMs } from '../auth/session.ts';
 import { html, raw, type SafeHtml } from '../lib/html.ts';
 import { logoSvg } from './logo.ts';
 
@@ -483,6 +484,7 @@ export function page(opts: {
   body: SafeHtml;
 }): string {
   const { title, nonce, current, chrome = true, body } = opts;
+  const idle = idleMs();
   const nav = chrome
     ? html`<header><div class="bar">
         <a class="brand" href="/">${raw(logoSvg(22, 'mark'))}tally</a>
@@ -523,6 +525,26 @@ export function page(opts: {
       `</scr` + `ipt>`
     : '';
 
+  // Idle sign-out. The server decides — getSession refuses a session that has
+  // been idle too long — but the server only sees requests, so a tab someone
+  // is reading looks identical to one they walked away from. This reports
+  // activity back, and signs out on screen when there has been none, so the
+  // page does not sit there showing balances to whoever passes the desk.
+  const idleScript =
+    chrome && idle > 0
+      ? `<script nonce="${nonce}">(()=>{const idle=${String(idle)},` +
+        `every=Math.max(6e4,Math.round(idle/6));let seen=Date.now(),sent=seen;` +
+        `const bump=()=>{seen=Date.now();if(seen-sent<every)return;sent=seen;` +
+        `fetch('/session/ping',{method:'POST'}).catch(()=>{})};` +
+        `for(const e of ['pointerdown','keydown','scroll','wheel'])` +
+        `addEventListener(e,bump,{passive:true});` +
+        `setInterval(()=>{if(Date.now()-seen<idle)return;` +
+        `const f=document.createElement('form');f.method='post';f.action='/logout';` +
+        `const i=document.createElement('input');i.type='hidden';i.name='idle';i.value='1';` +
+        `f.append(i);document.body.append(f);f.submit();},1e4)})();` +
+        `</scr` + `ipt>`
+      : '';
+
   return `<!doctype html>
 <html lang="en"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
@@ -532,7 +554,7 @@ export function page(opts: {
 <title>${title} · tally</title>
 <style nonce="${nonce}">${CSS}</style>
 ${speculation}
-</head><body>${nav.value}<main>${body.value}</main>${footer}${confirmScript}</body></html>`;
+</head><body>${nav.value}<main>${body.value}</main>${footer}${confirmScript}${idleScript}</body></html>`;
 }
 
 const NOTICE_ICON: Record<string, string> = {

@@ -65,6 +65,7 @@ import {
   destroyAllSessions,
   destroySession,
   getSession,
+  touchSession,
   listSessions,
   parseCookies,
   serializeCookie,
@@ -259,7 +260,12 @@ export function createWebRouter(db: DB): express.Router {
       req,
       res,
       'Sign in',
-      loginPage({ csrf: '', totpEnabled: totpEnabled(db), next: safeNext(req.query['next']) }),
+      loginPage({
+        csrf: '',
+        totpEnabled: totpEnabled(db),
+        next: safeNext(req.query['next']),
+        idleMinutes: req.query['idle'] === '1' ? config.sessionIdleMinutes : 0,
+      }),
       undefined,
       false,
     );
@@ -438,7 +444,27 @@ export function createWebRouter(db: DB): express.Router {
       'Set-Cookie',
       serializeCookie(COOKIE_NAME, '', { expires: new Date(0), secure: config.cookieSecure }),
     );
-    res.redirect(303, '/login');
+    // The shell's idle timer posts here too, and says so, because "you were
+    // signed out" with no reason reads as a bug.
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    res.redirect(303, body['idle'] ? '/login?idle=1' : '/login');
+  });
+
+  /**
+   * Activity heartbeat. The server can only see requests, so a tab being read
+   * for half an hour is indistinguishable from an abandoned one; this is the
+   * page saying somebody is still there. No CSRF token: SameSite=Lax already
+   * keeps a cross-site POST from carrying the cookie, and the worst a forged
+   * one could do is keep a session the user is holding open alive.
+   */
+  router.post('/session/ping', (req: Ctx, res: Response) => {
+    const session = sessionOf(req);
+    if (!session || session.pending) {
+      res.status(401).type('text/plain').send('signed out');
+      return;
+    }
+    touchSession(db, session);
+    res.status(204).end();
   });
 
   // --- overview ------------------------------------------------------------

@@ -64,12 +64,19 @@ export function loginPage(opts: {
   error?: string;
   username?: string;
   next?: string | null;
+  /** Minutes of inactivity that ended the last session, if that is why we are here. */
+  idleMinutes?: number;
 }): SafeHtml {
   return html`<div class="login">
     ${raw(logoSvg(56, 'mark'))}
     <h1>tally</h1>
     <p class="sub">Sign in to manage connections and view your summary.</p>
     ${opts.error ? notice('err', opts.error) : raw('')}
+    ${
+      !opts.error && opts.idleMinutes
+        ? notice('warn', `Signed out after ${String(opts.idleMinutes)} minutes of inactivity.`)
+        : raw('')
+    }
     <section>
       <form method="post" action="/login">
         ${csrfField(opts.csrf)}

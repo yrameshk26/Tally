@@ -231,6 +231,39 @@ describe('sign-out', () => {
     const after = await fetch(`${base}/`, { headers: { cookie }, redirect: 'manual' });
     expect(after.status).toBe(303);
   });
+
+  it('says why, when the idle timer was what signed you out', async () => {
+    const { cookie } = await login();
+    const out = await fetch(`${base}/logout`, {
+      method: 'POST',
+      headers: { cookie, 'content-type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({ idle: '1' }),
+      redirect: 'manual',
+    });
+    expect(out.headers.get('location')).toBe('/login?idle=1');
+    const login_ = await fetch(`${base}/login?idle=1`);
+    expect(await login_.text()).toMatch(/minutes of inactivity/);
+  });
+});
+
+describe('the activity heartbeat', () => {
+  it('accepts a signed-in caller and refuses everyone else', async () => {
+    const { cookie } = await login();
+    const ok = await fetch(`${base}/session/ping`, { method: 'POST', headers: { cookie } });
+    expect(ok.status).toBe(204);
+
+    const anon = await fetch(`${base}/session/ping`, { method: 'POST' });
+    expect(anon.status).toBe(401);
+  });
+
+  it('is wired into the page, so an abandoned tab signs itself out', async () => {
+    const { cookie } = await login();
+    const body = await (await fetch(`${base}/`, { headers: { cookie } })).text();
+    expect(body).toContain('/session/ping');
+    // The timeout the page enforces must be the one the server enforces.
+    expect(body).toContain(String(30 * 60 * 1000));
+    expect(inlineHandlers(body)).toEqual([]);
+  });
 });
 
 describe('two-factor enrolment', () => {
