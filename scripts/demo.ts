@@ -227,6 +227,51 @@ function main(): void {
         pending: day <= 2,
       });
     }
+    // Paying the card off from chequing, and moving money to savings. Both
+    // sides of each are real rows, which is what makes the Transactions tab's
+    // transfers filter and the report's exclusions have something to exclude.
+    if (day % 30 === 6) {
+      for (const [account, name, amount] of [
+        ['demo:chq', 'NORTHWIND VISA PAYMENT', 2_150],
+        ['demo:visa', 'PAYMENT - THANK YOU', -2_150],
+      ] as const) {
+        n += 1;
+        txs.push({
+          id: `demo:tx:${String(n)}`,
+          account_id: account,
+          date: dayISO(day),
+          name,
+          merchant: null,
+          amount,
+          currency: 'CAD',
+          amount_cad: amount,
+          category: 'LOAN_PAYMENTS',
+          category_detailed: 'LOAN_PAYMENTS_CREDIT_CARD_PAYMENT',
+          pending: false,
+        });
+      }
+    }
+    if (day % 30 === 16) {
+      for (const [account, name, amount, category] of [
+        ['demo:chq', 'TRANSFER TO RAINY DAY SAVINGS', 1_000, 'TRANSFER_OUT'],
+        ['demo:save', 'TRANSFER FROM EVERYDAY CHEQUING', -1_000, 'TRANSFER_IN'],
+      ] as const) {
+        n += 1;
+        txs.push({
+          id: `demo:tx:${String(n)}`,
+          account_id: account,
+          date: dayISO(day),
+          name,
+          merchant: null,
+          amount,
+          currency: 'CAD',
+          amount_cad: amount,
+          category,
+          category_detailed: null,
+          pending: false,
+        });
+      }
+    }
     if (day % 14 === 0) {
       n += 1;
       txs.push({

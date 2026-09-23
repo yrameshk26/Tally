@@ -29,10 +29,12 @@ import {
   settingsPage,
   transactionsPage,
   merchantsPage,
+  reportPage,
   chatPage,
   type MerchantFilters,
   type TxFilters,
 } from './pages.ts';
+import { buildPeriodReport, parsePeriod } from '../report.ts';
 import {
   MAX_PROFILES,
   createProfile,
@@ -81,6 +83,7 @@ import {
   getTransactions,
   groupByCategory,
   groupByMerchant,
+  isTransferLike,
   knownCategories,
   listAccounts,
 } from '../queries.ts';
@@ -767,6 +770,8 @@ export function createWebRouter(db: DB): express.Router {
     const dir = str('direction');
     const grp = str('group');
     return {
+      // Hidden unless asked for, so the totals on this page match the Overview.
+      transfers: str('transfers') === 'show' ? 'show' : 'hide',
       start: date('start', daysAgoISO(90)),
       end: date('end', todayISO()),
       profile: str('profile'),
@@ -792,7 +797,7 @@ export function createWebRouter(db: DB): express.Router {
 
   router.get('/transactions', requireAuth, (req: Ctx, res: Response) => {
     const f = readFilters(req);
-    const rows = getTransactions(db, {
+    const matched = getTransactions(db, {
       start: f.start,
       end: f.end,
       ...(f.profile ? { profile: f.profile } : {}),
@@ -804,6 +809,12 @@ export function createWebRouter(db: DB): express.Router {
     }).filter((t) =>
       f.direction === 'out' ? t.amount_cad < 0 : f.direction === 'in' ? t.amount_cad > 0 : true,
     );
+    // A card payment from chequing and the purchases it pays for would
+    // otherwise both count as money out. Asking for a transfer category by
+    // name is asking to see them, so the filter steps aside.
+    const hiding = f.transfers === 'hide' && !isTransferLike(f.category);
+    const rows = hiding ? matched.filter((t) => !isTransferLike(t.category)) : matched;
+    const hidden = matched.length - rows.length;
 
     render(
       req,
@@ -823,10 +834,30 @@ export function createWebRouter(db: DB): express.Router {
           ...r,
           matching_transactions: ruleImpact(db, r),
         })),
-        truncated: rows.length >= TX_PAGE_LIMIT,
+        hiddenTransfers: hidden,
+        truncated: matched.length >= TX_PAGE_LIMIT,
         flash: raw(flash(req, 'ok').value + flash(req, 'err').value),
       }),
       '/transactions',
+    );
+  });
+
+  // --- report ----------------------------------------------------------------
+
+  router.get('/report', requireAuth, (req: Ctx, res: Response) => {
+    const q = req.query as Record<string, unknown>;
+    const asked = typeof q['profile'] === 'string' ? q['profile'] : '';
+    const report = buildPeriodReport(db, {
+      period: parsePeriod({ period: q['period'], month: q['month'], year: q['year'] }),
+      profile: asked && getProfile(db, asked) ? asked : null,
+    });
+    // The title is also the file name the browser offers when saving as PDF.
+    render(
+      req,
+      res,
+      `Summary ${report.label}`,
+      reportPage({ nonce: req.nonce ?? '', report, profiles: listProfiles(db) }),
+      '/report',
     );
   });
 

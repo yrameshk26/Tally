@@ -78,11 +78,22 @@ history is public too.
    continuous use will expire early. MCP is not covered by any of this: a
    connector holds an OAuth token, not this cookie, and signing the browser out
    must never break it.
-12. **Never scrape.** Wealthsimple's private GraphQL API is off limits;
+12. **What counts as spending is defined once.** `NOT_SPENDING_CATEGORIES` in
+   `src/queries.ts` (transfers in and out, and card/loan payments) is excluded
+   by cashflow, by the Transactions tab's totals and by the period report, and
+   all three read categories *after* corrections, so a rule that files a row as
+   a transfer removes it everywhere at once. A new surface that totals income
+   or spending uses `getCashflow` or `isTransferLike`, never its own list:
+   paying a card from chequing counted alongside the purchases it paid for is
+   the double count this exists to prevent. The report's figures come from
+   `getCashflow` unchanged, and `test/report.test.ts` pins that they agree to
+   the cent. The report's PDF is the browser's print dialog, not a PDF library;
+   keep it that way (see DECISIONS.md).
+13. **Never scrape.** Wealthsimple's private GraphQL API is off limits;
    SnapTrade only.
-13. **After every task:** `npm run typecheck && npm test`. Both must be clean
+14. **After every task:** `npm run typecheck && npm test`. Both must be clean
    before committing. Conventional commits, one per completed task.
-14. **Docs ship with the change, in the same commit.** Any new or changed
+15. **Docs ship with the change, in the same commit.** Any new or changed
    feature updates `README.md` and this file before the commit — never "later",
    never a follow-up commit. Concretely:
    - a new or renamed MCP tool → the tool table in README.md
@@ -94,7 +105,7 @@ history is public too.
    - a changed test count → the Development section
    The test is whether someone reading only these two files would be surprised
    by the code. If yes, the docs are not done.
-15. **The Link helper never deploys.** `src/link-server.ts` runs on the
+16. **The Link helper never deploys.** `src/link-server.ts` runs on the
    developer's machine only. Port 8788 must not be exposed and the file is
    deleted from the Docker image.
 
@@ -108,6 +119,9 @@ src/
                   built-in assistant, so neither can hold a capability the
                   other lacks
   summary.ts      composes the read models into one picture (get_financial_summary)
+  report.ts       one month or one year: net worth at each end, cashflow, top
+                  merchants, largest expenses — the Reports page and
+                  get_period_report both read this
   overrides.ts    hand corrections (merchant rules, per-transaction, currency,
                   user categories), applied on read so a sync never undoes them
   llm/            optional built-in assistant: provider adapters (Anthropic and

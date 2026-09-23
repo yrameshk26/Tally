@@ -51,7 +51,7 @@ spend an evening on it. Draft PRs are welcome if you want early feedback.
 
 ## Before you open a PR
 
-Then, per `CLAUDE.md` rule 10, update `README.md` and `CLAUDE.md` in the *same*
+Then, per the "docs ship with the change" rule in `CLAUDE.md`, update `README.md` and `CLAUDE.md` in the *same*
 commit: a new tool goes in the tool table, a new page in the Web UI section, a
 new env var wherever its neighbours are documented, a new invariant as a hard
 rule. The test is whether someone reading only those two files would be

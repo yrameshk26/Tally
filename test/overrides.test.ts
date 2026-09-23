@@ -274,6 +274,7 @@ describe('the transactions page', () => {
       nonce: 'n',
       csrf: 'c',
       filters: {
+        transfers: 'hide',
         start: '2026-01-01',
         end: '2026-12-31',
         profile: '',
@@ -291,6 +292,7 @@ describe('the transactions page', () => {
       categories: knownCategories(db),
       profiles: [],
       rules: [],
+      hiddenTransfers: 0,
       truncated: false,
     }).value;
 
@@ -454,6 +456,7 @@ describe('category labels', () => {
       nonce: 'n',
       csrf: 'c',
       filters: {
+        transfers: 'hide',
         start: '2026-01-01',
         end: '2026-12-31',
         profile: '',
@@ -471,6 +474,7 @@ describe('category labels', () => {
       categories: ['GENERAL_MERCHANDISE'],
       profiles: [],
       rules: [],
+      hiddenTransfers: 0,
       truncated: false,
     }).value;
     expect(out).toContain('value="GENERAL_MERCHANDISE"');

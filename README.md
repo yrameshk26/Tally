@@ -42,6 +42,10 @@ against a database that already holds real accounts.
 
 ![The merchants directory with expenses by category](docs/screenshots/merchants.png)
 
+**Reports** — a month or a year on one page, saved as a PDF from the browser.
+
+![A monthly financial summary: net worth, income, spending by category, largest expenses](docs/screenshots/report.png)
+
 </details>
 
 | Source | What it covers | Auth | Cost |
@@ -61,7 +65,7 @@ place a trade or move money, and that is enforced as a project rule rather than
 an intention.
 
 It is also a genuinely small program: no ORM, no charting library, no auth
-framework, ~320 tests, and a dependency list you can read in one screen.
+framework, ~340 tests, and a dependency list you can read in one screen.
 
 **If this is useful to you, a ⭐ on the repo helps more people find it** — that is
 the only distribution this project has.
@@ -115,6 +119,7 @@ question:
 | `get_transactions` | Bank and card transactions — negative is money out |
 | `get_activities` | Brokerage movements: dividends, interest, buys, sells, fees, contributions |
 | `get_cashflow` | Income vs spend by month, category, merchant, profile |
+| `get_period_report` | One month or one year: net worth at each end and the change, income, spending, savings rate, categories with their share, top merchants, largest expenses. The same data the Reports page prints |
 | `get_contribution_room` | Remaining RRSP/TFSA/FHSA room per person |
 | `set_contributed`, `set_room_limit` | Correct the room figures by hand |
 | `list_profiles`, `create_profile`, `rename_profile`, `delete_profile` | Manage profiles |
@@ -333,7 +338,11 @@ Five pages:
   where the institution's label could be wrong.
 - **Transactions** — filter by date, account, category, profile, direction,
   minimum and free text; money out / in / net for the filtered set; group by
-  merchant or category. Edit a row's merchant and category inline, or "apply to
+  merchant or category. Transfers between your own accounts and card payments
+  are hidden by default, and the page says how many, so paying a card from
+  chequing is not counted as spending on top of the purchases it paid for and
+  the totals match the Overview. One click shows them; asking for a transfer
+  category by name shows them too. Edit a row's merchant and category inline, or "apply to
   all" on a merchant group to write a rule. Filters live in the query string, so
   a view is a URL you can bookmark. Categories display as ordinary text
   (`Food and drink`, not `FOOD_AND_DRINK`); the stored value is unchanged.
@@ -342,6 +351,14 @@ Five pages:
   picker, filter to uncategorised only, and add categories of your own. Above it,
   expenses by category as a ranked bar chart plus a totals table with each
   category's share.
+- **Reports** — one month or one calendar year: net worth at the start and end
+  and the change, income, spending, net saved and savings rate, income and
+  spending by month (for a year), spending by category with each share, top
+  merchants, and the ten largest expenses. **Save as PDF** uses the browser's
+  print dialog; the print stylesheet drops the navigation and controls and
+  forces the light palette, so a PDF from a dark-mode browser still comes out
+  on white. Defaults to the last complete month. A footnote states what was left
+  out (transfers, card payments, pending) and how much, out and in separately.
 - **Assistant** (optional, off by default) — a built-in chat that answers from
   your accounts using the same read-only tools the MCP server exposes. Replies
   render as Markdown with tables and charts, every answer shows which tools it
@@ -411,7 +428,7 @@ Read [SECURITY.md](SECURITY.md) before deploying. The short version:
 |---|---|
 | `npm run demo` | Seed a fictional database to try it without credentials |
 | `npm run dev` | Run the server from TypeScript |
-| `npm run check` | Typecheck + 323 tests |
+| `npm run check` | Typecheck + 344 tests |
 | `npm run sync` | One-shot sync; exits non-zero if a source errored |
 | `npm run db:init` | Create the database, seeding `room.json` if present |
 | `npm run hash-password` | Print an `ADMIN_PASSWORD_HASH` |
@@ -430,7 +447,10 @@ shape, profiles and the schema migrations, the OAuth authorization server
 handlers under the CSP), the summary's section selection, correction precedence
 and reach, category assignment and its match precision, the Markdown renderer
 against hostile input, the per-profile Plaid
-Item allowance, both session clocks (idle and absolute, and that neither
+Item allowance, the period report (a card payment never counted on top of
+its purchases, agreement with cashflow to the cent, net worth at each end of a
+period, and a month nobody measured reporting no change rather than zero),
+the Transactions tab's transfers filter, both session clocks (idle and absolute, and that neither
 extends the other), the guarantee that statement
 PDFs are never persisted (asserted against the source), and the HTTP endpoint
 end to end (auth, 405 on GET, rate limiting, `tools/list`, a tool call).

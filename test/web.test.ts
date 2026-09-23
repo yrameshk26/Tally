@@ -27,7 +27,7 @@ process.env['ADMIN_PASSWORD_HASH'] = await hashPassword(PASSWORD);
 
 const { createApp } = await import('../src/index.ts');
 const { getDb } = await import('../src/db.ts');
-const { upsertAccount } = await import('../src/store.ts');
+const { upsertAccount, upsertTransactions } = await import('../src/store.ts');
 
 let server: Server;
 let base: string;
@@ -57,7 +57,7 @@ async function login(): Promise<{ cookie: string; csrf: string }> {
 
 describe('the UI is gated', () => {
   it('redirects an anonymous visitor to the login page', async () => {
-    for (const path of ['/', '/settings', '/connections', '/security']) {
+    for (const path of ['/', '/settings', '/connections', '/security', '/report', '/transactions']) {
       const res = await fetch(`${base}${path}`, { redirect: 'manual' });
       expect(res.status, path).toBe(303);
       expect(res.headers.get('location')).toBe('/login');
@@ -243,6 +243,100 @@ describe('sign-out', () => {
     expect(out.headers.get('location')).toBe('/login?idle=1');
     const login_ = await fetch(`${base}/login?idle=1`);
     expect(await login_.text()).toMatch(/minutes of inactivity/);
+  });
+});
+
+describe('transfers on the Transactions tab', () => {
+  // A card paid off from chequing: 250 of purchases, and 250 moving between
+  // two accounts the household owns. Only the purchases are spending.
+  const seed = (): void => {
+    const db = getDb();
+    for (const id of ['plaid:tx-chq', 'plaid:tx-card']) {
+      upsertAccount(db, {
+        id,
+        source: 'plaid',
+        institution: 'Test Bank',
+        name: id,
+        mask: null,
+        account_category: 'DEPOSITORY',
+        account_subtype: null,
+        registered_type: 'NON_REG',
+        currency: 'CAD',
+        balance: 0,
+        balance_cad: 0,
+        available: null,
+        active: true,
+        status: 'ok',
+        item_id: null,
+      });
+    }
+    const row = (id: string, account: string, amount: number, category: string, merchant: string | null) => ({
+      id,
+      account_id: account,
+      date: '2031-04-10',
+      name: id.toUpperCase(),
+      merchant,
+      amount,
+      currency: 'CAD',
+      amount_cad: amount,
+      category,
+      category_detailed: null,
+      pending: false,
+    });
+    upsertTransactions(db, [
+      row('web-buy', 'plaid:tx-card', 250, 'FOOD_AND_DRINK', 'Northgate Grocery'),
+      row('web-pay-chq', 'plaid:tx-chq', 250, 'LOAN_PAYMENTS', null),
+      row('web-pay-card', 'plaid:tx-card', -250, 'LOAN_PAYMENTS', null),
+    ]);
+  };
+  const page = async (query: string): Promise<string> => {
+    const { cookie } = await login();
+    return (await fetch(`${base}/transactions?start=2031-04-01&end=2031-04-30${query}`, { headers: { cookie } })).text();
+  };
+
+  it('hides them by default, says so, and totals only the purchases', async () => {
+    seed();
+    const body = await page('');
+    expect(body).toMatch(/2 transfers and card\s+payments hidden/);
+    expect(body).toContain('-$250.00');
+    expect(body).not.toContain('-$500.00');
+    expect(body).toContain('transfers=show');
+  });
+
+  it('shows them on request, and warns about the double count', async () => {
+    seed();
+    const body = await page('&transfers=show');
+    expect(body).toMatch(/counts that spending twice/);
+    expect(body).toContain('-$500.00');
+  });
+
+  it('steps aside when you ask for a transfer category by name', async () => {
+    seed();
+    const body = await page('&category=LOAN_PAYMENTS');
+    expect(body).not.toMatch(/hidden, so paying a card/);
+    expect(body).toContain('WEB-PAY-CHQ');
+  });
+});
+
+describe('the period report', () => {
+  it('renders for a signed-in user, with a way to save it', async () => {
+    const { cookie } = await login();
+    const res = await fetch(`${base}/report?period=year&year=2031`, { headers: { cookie } });
+    expect(res.status).toBe(200);
+    const body = await res.text();
+    expect(body).toContain('Financial summary');
+    expect(body).toContain('<title>Summary 2031');
+    expect(body).toContain('id="save-pdf"');
+    expect(inlineHandlers(body)).toEqual([]);
+  });
+
+  it('survives a hostile query string', async () => {
+    const { cookie } = await login();
+    const res = await fetch(`${base}/report?period=<script>&month=../../etc&profile=%3Cb%3E`, {
+      headers: { cookie },
+    });
+    expect(res.status).toBe(200);
+    expect(await res.text()).not.toContain('<script>&');
   });
 });
 

@@ -112,6 +112,7 @@ describe('tools', () => {
       'get_holdings',
       'get_net_worth',
       'get_net_worth_history',
+      'get_period_report',
       'get_spend_by_merchant',
       'get_statement',
       'get_transactions',

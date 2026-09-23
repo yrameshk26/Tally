@@ -23,6 +23,7 @@ import { logoSvg } from './logo.ts';
 import { areaChart, chartRuntime, groupedColumns, hBars, stackedBar } from './charts.ts';
 import { renderMarkdown } from './markdown.ts';
 import type { ChatRow, StoredMessage } from '../llm/store.ts';
+import type { PeriodReport } from '../report.ts';
 
 const sign = (n: number): SafeHtml =>
   html`<span class="${n < 0 ? 'neg' : n > 0 ? 'pos' : 'muted'}">${money(n)}</span>`;
@@ -970,6 +971,8 @@ export function prettyCategory(category: string): string {
 // --- transactions -----------------------------------------------------------
 
 export type TxFilters = {
+  /** Transfers between own accounts and card/loan payments. */
+  transfers: 'hide' | 'show';
   start: string;
   end: string;
   profile: string;
@@ -1021,6 +1024,12 @@ function filterBar(f: TxFilters, accounts: AccountView[], categories: string[], 
       </select>
     </label>
     <label>Min $ <input type="number" name="min_amount" value="${f.min_amount}" min="0" step="1" class="w-sm"></label>
+    <label>Transfers
+      <select name="transfers">
+        ${opt('hide', 'Hidden', f.transfers === 'hide')}
+        ${opt('show', 'Shown', f.transfers === 'show')}
+      </select>
+    </label>
     <label>Group
       <select name="group">
         ${opt('none', 'No grouping', f.group === 'none')}
@@ -1044,6 +1053,8 @@ export function transactionsPage(opts: {
   categories: string[];
   profiles: Profile[];
   rules: Array<MerchantRule & { matching_transactions: number }>;
+  /** Rows the transfers filter took out, so the page can say so. */
+  hiddenTransfers: number;
   truncated: boolean;
   flash?: SafeHtml;
 }): SafeHtml {
@@ -1109,6 +1120,25 @@ export function transactionsPage(opts: {
       <div class="kpi"><div class="label">Net</div><div class="value ${received - spend >= 0 ? 'pos' : 'neg'}">${money(round2(received - spend))}</div></div>
       <div class="kpi"><div class="label">Transactions</div><div class="value">${String(opts.rows.length)}</div></div>
     </div>
+
+    ${
+      // Said out loud either way. A filter that silently drops rows from a
+      // ledger is how people stop trusting the ledger.
+      f.transfers === 'hide'
+        ? opts.hiddenTransfers > 0
+          ? html`<p class="hint">
+              ${String(opts.hiddenTransfers)} transfer${opts.hiddenTransfers === 1 ? '' : 's'} and card
+              payment${opts.hiddenTransfers === 1 ? '' : 's'} hidden, so paying a card is not counted as
+              spending on top of the purchases it paid for. These totals match the Overview.
+              <a href="${currentQuery({ ...f, transfers: 'show' })}">Show them</a>
+            </p>`
+          : raw('')
+        : html`<p class="hint">
+            Showing transfers and card payments. A card payment and the purchases it pays for both
+            appear here, so money out counts that spending twice.
+            <a href="${currentQuery({ ...f, transfers: 'hide' })}">Hide them</a>
+          </p>`
+    }
 
     ${
       opts.truncated
@@ -1237,7 +1267,8 @@ export function transactionsPage(opts: {
 /** Round-trips the current filters through a form post, so an edit returns here. */
 function currentQuery(f: TxFilters): string {
   const q = new URLSearchParams();
-  for (const [k, v] of Object.entries(f)) if (v && v !== 'all' && v !== 'none') q.set(k, v);
+  // Defaults stay out of the URL, so a plain /transactions is the default view.
+  for (const [k, v] of Object.entries(f)) if (v && v !== 'all' && v !== 'none' && v !== 'hide') q.set(k, v);
   const s = q.toString();
   return s ? `/transactions?${s}` : '/transactions';
 }
@@ -1642,4 +1673,228 @@ export function chatPage(opts: {
           with every message.</p>
       </div>
     </div>`;
+}
+
+// --- report -------------------------------------------------------------------
+
+/** A category worth $25 of $5,000 is not 0% of spending, it is a sliver of it. */
+const pct = (share: number, value = share): string =>
+  share < 0.005 && value > 0 ? '<1%' : `${String(Math.round(share * 100))}%`;
+const MONTH_SHORT = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+/**
+ * One month or one year, laid out to print. "Save as PDF" is the browser's own
+ * print dialog: the charts are SVG, so they come out as vectors, and there is no
+ * PDF library in the dependency tree to keep patched. The print stylesheet
+ * drops the navigation and the controls and forces the light palette.
+ */
+export function reportPage(opts: {
+  nonce: string;
+  report: PeriodReport;
+  profiles: Profile[];
+}): SafeHtml {
+  const r = opts.report;
+  const nw = r.net_worth;
+  const profileName = r.profile ? (opts.profiles.find((p) => p.id === r.profile)?.name ?? r.profile) : null;
+  const opt = (value: string, label: string, selected: boolean): SafeHtml =>
+    html`<option value="${value}"${selected ? raw(' selected') : raw('')}>${label}</option>`;
+  const signed = (v: number): SafeHtml =>
+    html`<span class="${v >= 0 ? 'pos' : 'neg'}">${v > 0 ? '+' : ''}${money(v)}</span>`;
+
+  const controls = html`<form method="get" action="/report" class="filters">
+    <label>Period
+      <select name="period">
+        ${opt('month', 'Month', r.period === 'month')}
+        ${opt('year', 'Year', r.period === 'year')}
+      </select>
+    </label>
+    <label>Month <input type="month" name="month" value="${r.start.slice(0, 7)}"></label>
+    <label>Year <input type="number" name="year" value="${r.start.slice(0, 4)}" min="2000" max="2100" class="w-sm"></label>
+    ${
+      opts.profiles.length > 1
+        ? html`<label>Profile
+            <select name="profile">
+              ${opt('', 'Everyone', !r.profile)}
+              ${join(opts.profiles.map((p) => opt(p.id, p.name, p.id === r.profile)))}
+            </select>
+          </label>`
+        : raw('')
+    }
+    <button type="submit">Show</button>
+    <button type="button" class="secondary" id="save-pdf">Save as PDF</button>
+  </form>`;
+
+  const netWorth = html`<section>
+    <h2>Net worth</h2>
+    ${
+      nw.end_cad === null
+        ? html`<p class="empty">No net worth was recorded during this period. It is snapshotted
+            once a day from the first sync, so periods before that have no figure.</p>`
+        : html`<div class="table-wrap"><table>
+            <tbody>
+              <tr><td>Start${nw.start_date ? html` <span class="muted">(${nw.start_date})</span>` : raw('')}</td>
+                <td class="num">${nw.start_cad === null ? '—' : money(nw.start_cad)}</td></tr>
+              <tr><td>End <span class="muted">(${nw.end_date ?? ''})</span></td>
+                <td class="num">${money(nw.end_cad)}</td></tr>
+              <tr><td><strong>Change</strong></td>
+                <td class="num"><strong>${nw.change_cad === null ? '—' : signed(nw.change_cad)}</strong></td></tr>
+              ${
+                nw.end_assets_cad !== null && nw.end_liabilities_cad !== null
+                  ? html`<tr><td>Assets at end</td><td class="num">${money(nw.end_assets_cad)}</td></tr>
+                      <tr><td>Liabilities at end</td><td class="num neg">${money(nw.end_liabilities_cad)}</td></tr>`
+                  : raw('')
+              }
+            </tbody>
+          </table></div>
+          ${
+            nw.history.length > 1
+              ? areaChart({
+                  title: `Net worth, ${r.label}`,
+                  points: nw.history.map((p) => ({ label: p.date, value: p.net_worth_cad })),
+                  width: 900,
+                })
+              : raw('')
+          }
+          ${
+            nw.end_by_registered_type && Object.keys(nw.end_by_registered_type).length > 0
+              ? html`<h3>By account type at end</h3>
+                  <div class="table-wrap"><table>
+                    <thead><tr><th>Type</th><th class="num">Balance</th></tr></thead>
+                    <tbody>${join(
+                      Object.entries(nw.end_by_registered_type)
+                        .sort((a, b) => b[1] - a[1])
+                        .map(([t, v]) => html`<tr><td>${t}</td><td class="num">${signed(v)}</td></tr>`),
+                    )}</tbody>
+                  </table></div>`
+              : raw('')
+          }`
+    }
+  </section>`;
+
+  const monthly =
+    r.period === 'year'
+      ? html`<section>
+          <h2>Income and spending by month</h2>
+          ${groupedColumns({
+            title: `Income and spending, ${r.label}`,
+            groups: r.by_month.map((m) => ({
+              label: MONTH_SHORT[Number(m.month.slice(5)) - 1] ?? m.month,
+              a: m.income_cad,
+              b: m.spend_cad,
+            })),
+            seriesA: 'Income',
+            seriesB: 'Spending',
+          })}
+          <div class="table-wrap"><table>
+            <thead><tr><th>Month</th><th class="num">Income</th><th class="num">Spending</th><th class="num">Net</th></tr></thead>
+            <tbody>${join(
+              r.by_month.map(
+                (m) => html`<tr><td>${m.month}</td><td class="num">${money(m.income_cad)}</td>
+                  <td class="num">${money(m.spend_cad)}</td><td class="num">${signed(m.net_cad)}</td></tr>`,
+              ),
+            )}</tbody>
+          </table></div>
+        </section>`
+      : raw('');
+
+  const categories = html`<section>
+    <h2>Spending by category</h2>
+    ${
+      r.by_category.length === 0
+        ? html`<p class="empty">No spending recorded in this period.</p>`
+        : html`${hBars({
+            title: `Spending by category, ${r.label}`,
+            rows: r.by_category.map((c) => ({ label: prettyCategory(c.category), value: c.spend_cad })),
+            width: 900,
+          })}
+          <div class="table-wrap"><table>
+            <thead><tr><th>Category</th><th class="num">Spending</th><th class="num">Share</th></tr></thead>
+            <tbody>${join(
+              r.by_category.map(
+                (c) => html`<tr><td>${prettyCategory(c.category)}</td>
+                  <td class="num">${money(c.spend_cad)}</td><td class="num">${pct(c.share, c.spend_cad)}</td></tr>`,
+              ),
+            )}</tbody>
+          </table></div>`
+    }
+  </section>`;
+
+  const merchants = html`<section>
+    <h2>Top merchants</h2>
+    ${
+      r.top_merchants.length === 0
+        ? html`<p class="empty">No spending recorded in this period.</p>`
+        : html`<div class="table-wrap"><table>
+            <thead><tr><th>Merchant</th><th class="num">Spending</th><th class="num">Transactions</th></tr></thead>
+            <tbody>${join(
+              r.top_merchants.map(
+                (m) => html`<tr><td>${m.merchant}</td><td class="num">${money(m.spend_cad)}</td>
+                  <td class="num">${String(m.count)}</td></tr>`,
+              ),
+            )}</tbody>
+          </table></div>`
+    }
+  </section>`;
+
+  const largest = html`<section>
+    <h2>Largest expenses</h2>
+    ${
+      r.largest_expenses.length === 0
+        ? html`<p class="empty">No spending recorded in this period.</p>`
+        : html`<div class="table-wrap"><table>
+            <thead><tr><th>Date</th><th>Merchant</th><th>Account</th><th>Category</th><th class="num">Amount</th></tr></thead>
+            <tbody>${join(
+              r.largest_expenses.map(
+                (e) => html`<tr><td class="nowrap">${e.date}</td><td>${e.merchant}</td>
+                  <td class="muted">${e.account ?? '—'}</td>
+                  <td class="muted">${e.category ? prettyCategory(e.category) : '—'}</td>
+                  <td class="num neg">${money(e.amount_cad)}</td></tr>`,
+              ),
+            )}</tbody>
+          </table></div>`
+    }
+  </section>`;
+
+  return html`<div class="report">
+    ${controls}
+    <h1>Financial summary</h1>
+    <p class="sub">
+      ${r.label}${r.to_date ? ' (to date)' : ''} · ${profileName ?? 'Everyone'} ·
+      ${r.start} to ${r.to_date ? r.generated_at.slice(0, 10) : r.end} · All figures in CAD ·
+      Generated ${r.generated_at.slice(0, 10)}
+    </p>
+
+    <div class="kpis">
+      <div class="kpi"><div class="label">Net worth</div>
+        <div class="value">${nw.end_cad === null ? '—' : money(nw.end_cad)}</div>
+        ${nw.change_cad === null ? raw('') : html`<div class="sub-line">${signed(nw.change_cad)} this period</div>`}</div>
+      <div class="kpi"><div class="label">Income</div><div class="value pos">${money(r.income_cad)}</div></div>
+      <div class="kpi"><div class="label">Spending</div><div class="value neg">${money(-r.spend_cad)}</div></div>
+      <div class="kpi"><div class="label">Net saved</div>
+        <div class="value ${r.net_cad >= 0 ? 'pos' : 'neg'}">${money(r.net_cad)}</div>
+        ${r.savings_rate === null ? raw('') : html`<div class="sub-line">${pct(r.savings_rate)} of income</div>`}</div>
+    </div>
+
+    ${netWorth}
+    ${monthly}
+    ${categories}
+    ${merchants}
+    ${largest}
+
+    <p class="hint report-notes">
+      Counts ${String(r.transactions_counted)} settled transaction${r.transactions_counted === 1 ? '' : 's'}.
+      Transfers between your own accounts and card or loan payments are not income or spending, so
+      ${String(r.excluded.count)} of them are left out (${money(r.excluded.out_cad)} out,
+      ${money(r.excluded.in_cad)} in)${
+        r.excluded.pending ? `, as are ${String(r.excluded.pending)} still pending` : ''
+      }. Net worth comes from the daily snapshot nearest each end of the period.
+    </p>
+  </div>
+  ${raw(chartRuntime(opts.nonce))}
+  ${raw(
+    `<script nonce="${opts.nonce}">` +
+      `document.getElementById('save-pdf')?.addEventListener('click',()=>window.print());` +
+      `</scr` +
+      `ipt>`,
+  )}`;
 }

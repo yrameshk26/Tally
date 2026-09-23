@@ -58,6 +58,7 @@ import {
   setTransactionOverride,
 } from '../overrides.ts';
 import { lastSyncReport, runSync } from '../sync.ts';
+import { buildPeriodReport, parsePeriod } from '../report.ts';
 import { pruneBackups, writeBackup } from '../backup.ts';
 
 /** Profiles are user-defined, so this is a free-form id rather than an enum. */
@@ -251,6 +252,30 @@ export function toolDefs(db: DB): ToolDef[] {
     handler: (args) => {
       try {
         return ok(getCashflow(db, args));
+      } catch (e) {
+        return fail(e);
+      }
+    },
+  }),
+  tool({
+    name: 'get_period_report',
+    title: 'Monthly or annual report',
+    description:
+      'One month or one calendar year, summarised: net worth at the start and end and the ' +
+      'change, income, spending, net saved and savings rate, spending by category with each ' +
+      'share, top merchants, and the ten largest expenses. Transfers and card payments are ' +
+      'excluded, and the response says how many and how much. The same data the web UI prints ' +
+      'as a PDF. Omit everything for the last complete month.',
+    inputSchema: {
+      period: z.enum(['month', 'year']).optional(),
+      month: z.string().regex(/^\d{4}-\d{2}$/, 'expected YYYY-MM').optional(),
+      year: z.number().int().min(2000).max(2100).optional(),
+      profile: PROFILE.optional(),
+    },
+    annotations: READ_ONLY,
+    handler: (args) => {
+      try {
+        return ok(buildPeriodReport(db, { period: parsePeriod(args), profile: args.profile ?? null }));
       } catch (e) {
         return fail(e);
       }

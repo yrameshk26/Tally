@@ -3,6 +3,44 @@
 Dated, append-only. Each entry says what was chosen, what it was chosen over,
 and why.
 
+## 2026-09-23 — The report's PDF is the browser's print dialog
+
+A user asked for a monthly and annual summary they could keep as a PDF, like
+the annual statements some banks send. The report page renders it, and "Save as
+PDF" calls `window.print()`. A print stylesheet drops the navigation and the
+controls, hides the collapsed chart-table twins (the report prints its tables
+in full), keeps sections from splitting across pages, and restates the light
+palette so a PDF printed from a dark-mode browser still comes out on white.
+
+Alternatives rejected:
+
+- **A PDF library (pdfkit and friends).** The charts are hand-written SVG; a
+  library would need a second renderer for them, or an SVG-to-PDF shim, and
+  would be the largest dependency in the tree for one button. Rejected for the
+  same reason a charting library is.
+- **Headless Chromium on the server.** Produces a file directly, but adds a
+  browser to a Docker image that currently has none, and a process that renders
+  HTML with every balance in the household to a path on disk.
+- **Generating the file server-side at all.** Nothing about the report needs a
+  server-made file: the browser already has the page, prints vectors, and puts
+  the file where the user chooses. The page title is set to `Summary <period>`,
+  which is the file name the dialog offers.
+
+The cost is one extra click in the print dialog. The figures come from
+`buildPeriodReport`, which `get_period_report` returns over MCP as JSON, so an
+agent gets the same numbers without any of this.
+
+## 2026-09-23 — Transfers are hidden on the Transactions tab by default
+
+The tab listed every row and totalled all of it, so paying a card from chequing
+showed up as money out alongside the purchases it paid for. Cashflow and the
+Overview already excluded transfers and card payments; the tab was the one
+surface that did not, and a user reading it reasonably concluded the whole app
+double counted. Now it applies the same exclusion by default, says how many
+rows it hid with a link to show them, and steps aside when a transfer category
+is asked for by name. Hiding silently was rejected: a ledger that drops rows
+without saying so is one people stop trusting.
+
 ## 2026-09-19 — Browser sessions expire on two clocks; MCP keeps its own
 
 The session cookie used to carry a 7-day lifetime that slid forward on every

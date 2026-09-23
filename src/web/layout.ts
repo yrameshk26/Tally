@@ -13,6 +13,7 @@ export const NAV: Nav[] = [
   { href: '/', label: 'Overview' },
   { href: '/transactions', label: 'Transactions' },
   { href: '/merchants', label: 'Merchants' },
+  { href: '/report', label: 'Reports' },
   { href: '/chat', label: 'Assistant' },
   { href: '/connections', label: 'Connections' },
   { href: '/profiles', label: 'Profiles' },
@@ -105,6 +106,27 @@ const CSS = `
   --shadow:0 1px 2px oklch(0% 0 0/.35);
   --shadow-lift:0 2px 6px oklch(0% 0 0/.4), 0 16px 32px oklch(0% 0 0/.35);
 }}
+
+/* Paper is white whatever the screen is set to. Printing from a dark-mode
+   browser otherwise produces light text on a page the printer leaves blank, or
+   a PDF that is a black rectangle. The light values, restated. */
+@media print{:root{
+  color-scheme:light;
+  --bg:#fff; --bg-sunk:#fff; --panel:#fff;
+  --line:oklch(91.5% .006 var(--hue));
+  --line-strong:oklch(85% .008 var(--hue));
+  --fg:oklch(24% .018 var(--hue));
+  --fg-muted:oklch(52% .016 var(--hue));
+  --fg-faint:oklch(64% .012 var(--hue));
+  --accent:oklch(52% .11 var(--accent-hue));
+  --pos:oklch(52% .11 var(--accent-hue));
+  --neg:oklch(54% .18 25);
+  --warn:oklch(58% .13 75);
+  --s1:#0f7f62; --s2:#eb6834; --s3:#2a78d6;
+  --s4:#eda100; --s5:#e87ba4; --s6:#4a3aa7;
+  --shadow:none; --shadow-lift:none;
+}}
+@page{margin:14mm}
 
 /* Cross-document view transitions: page changes crossfade instead of
    flashing white, which is what makes a multi-page app feel like an SPA
@@ -401,7 +423,7 @@ td .nowrap,td.nowrap{white-space:nowrap}
 .msg-body table{margin:.5rem 0}
 /* Links inside a reply are the only place the page has no styled anchor, so
    without this they fall back to the UA blue — unreadable on the dark surface. */
-.msg-body a{color:var(--accent);text-decoration:underline;text-underline-offset:2px}
+.msg-body a,.hint a{color:var(--accent);text-decoration:underline;text-underline-offset:2px}
 .msg-body a:hover{filter:brightness(1.15)}
 .msg-body h3,.msg-body h4,.msg-body h5{margin:1.1rem 0 .4rem}
 .msg-body blockquote{margin:.6rem 0;padding-left:.9rem;border-left:2px solid var(--line);
@@ -426,12 +448,24 @@ td .nowrap,td.nowrap{white-space:nowrap}
 /* Print is the PDF path: no chrome, no controls, just the conversation. */
 @media print{
   header,nav,.site-footer,.chat-threads,.chat-input,.msg-actions,.msg-tools,form{display:none!important}
+  body{background:#fff}
+  main{max-width:none;padding:0}
+  /* A chart's table twin is collapsed on screen; the report prints its own
+     tables, and a closed <details> would print as a stray summary line. */
+  .chart-table,.tip{display:none!important}
+  section,.kpi{break-inside:avoid}
+  .report h2{break-after:avoid}
+  /* Four figures across a Letter page: a seven-digit net worth at the screen
+     size runs out of its card. */
+  .kpi .value{font-size:var(--step-1)}
   .chat-layout{grid-template-columns:1fr}
   .msg{border:none;padding:0;background:none;break-inside:avoid}
   .msg.user{max-width:100%;font-weight:600}
   a[target=_blank]::after{content:" (" attr(href) ")";font-size:.85em;color:#555}
 }
 .chart-table{margin-top:.75rem}
+/* The report prints its tables in full, so a collapsed twin would repeat them. */
+.report .chart-table{display:none}
 .chart-table summary{cursor:pointer;font-size:var(--step--1);color:var(--fg-muted);
   padding:.25rem 0;list-style-position:inside}
 .chart-table summary:hover{color:var(--fg)}

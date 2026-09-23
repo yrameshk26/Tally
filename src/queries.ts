@@ -576,6 +576,18 @@ export function getHoldingsByAccount(
 export const TRANSFER_CATEGORIES = ['TRANSFER_IN', 'TRANSFER_OUT'];
 /** Card and loan payments — excluded by default so card spend is not double counted. */
 export const PAYMENT_CATEGORIES = ['LOAN_PAYMENTS'];
+/**
+ * Everything that is neither income nor spending: money moving between the
+ * household's own accounts, and paying off a card whose purchases are already
+ * counted one by one. Cashflow, the Transactions tab's totals and the period
+ * report all exclude exactly this set, so they cannot disagree.
+ */
+export const NOT_SPENDING_CATEGORIES = [...TRANSFER_CATEGORIES, ...PAYMENT_CATEGORIES];
+
+/** Read after corrections, so a rule that recategorises a row moves it in or out. */
+export function isTransferLike(category: string | null | undefined): boolean {
+  return NOT_SPENDING_CATEGORIES.includes(category ?? '');
+}
 
 export type CashflowResult = {
   start: string;
