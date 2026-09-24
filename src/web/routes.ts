@@ -128,7 +128,7 @@ import {
   listChats,
   turnsFor,
 } from '../llm/store.ts';
-import { runSync } from '../sync.ts';
+import { failedSources, lastSyncReport, runSync, syncProgress } from '../sync.ts';
 import { loadRates } from '../fx.ts';
 import { createFailureLimiter } from '../ratelimit.ts';
 import { safeNext } from './oauth.ts';
@@ -503,6 +503,8 @@ export function createWebRouter(db: DB): express.Router {
         history,
         cashflow,
         lastSync: last?.finished_at ?? null,
+        syncing: syncProgress(),
+        justStarted: req.query['syncing'] === '1',
         fxAsOf: totals.fx_as_of,
         csrf: req.session!.csrf,
         flash: raw(flash(req, 'ok').value + flash(req, 'err').value),
@@ -511,21 +513,38 @@ export function createWebRouter(db: DB): express.Router {
     );
   });
 
-  router.post('/sync', requireAuth, requireCsrf, async (_req: Ctx, res: Response) => {
-    try {
-      const report = await runSync(db);
-      const failed = (['fx', 'snaptrade', 'plaid', 'wise'] as const).filter(
-        (k) => report[k] && 'error' in (report[k] as object),
-      );
-      res.redirect(
-        303,
-        failed.length
-          ? `/?err=${encodeURIComponent(`Sync finished with errors in: ${failed.join(', ')}`)}`
-          : `/?ok=${encodeURIComponent('Sync complete.')}`,
-      );
-    } catch (e) {
-      res.redirect(303, `/?err=${encodeURIComponent(errMessage(e))}`);
-    }
+  /**
+   * Start a sync and come straight back. It used to be awaited here, which held
+   * the page on a spinner for as long as every bank took, a couple of minutes
+   * with a dozen linked, and could outlast a proxy's timeout. The Overview now
+   * shows the run in progress and reloads itself when it finishes.
+   */
+  router.post('/sync', requireAuth, requireCsrf, (_req: Ctx, res: Response) => {
+    runSync(db).catch((e: unknown) => log.error('sync: run failed', { error: errMessage(e) }));
+    // The flag covers a run so quick it is over before the Overview renders:
+    // the page still polls once, and reloads with the result.
+    res.redirect(303, '/?syncing=1');
+  });
+
+  /** Polled by the Overview while a run is in flight. */
+  router.get('/sync/status', requireAuth, (_req: Ctx, res: Response) => {
+    const progress = syncProgress();
+    const last = progress.running ? null : lastSyncReport(db);
+    const failed = last ? failedSources(last) : [];
+    res.set('Cache-Control', 'no-store').json({
+      ...progress,
+      last: last
+        ? {
+            finished_at: last.finished_at,
+            duration_ms: last.duration_ms,
+            failed,
+            // Ready to use as the flash message once the page reloads.
+            message: failed.length
+              ? `Refreshed, but these could not be read: ${failed.join(', ')}. See Connections.`
+              : `Refreshed in ${String(Math.max(1, Math.round(last.duration_ms / 1000)))}s.`,
+          }
+        : null,
+    });
   });
 
   // --- settings ------------------------------------------------------------

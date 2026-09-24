@@ -131,7 +131,7 @@ question:
 | `list_categories`, `add_category`, `delete_category` | Categories beyond the bank's taxonomy |
 | `set_account_currency` | Reinterpret an account a bank labelled in the wrong currency |
 | `plaid_status`, `plaid_relink_url` | Item health, per-profile Item allowance, one-click repair |
-| `sync_now`, `sync_report` | Refresh on demand; tell the user how stale data is |
+| `sync_now`, `sync_report` | Refresh on demand (joining a run already in progress); tell the user how stale data is |
 | `list_statements` | Monthly statements Plaid can fetch, per bank and account |
 | `get_statement` | One statement PDF, streamed through memory and never stored |
 | `backup_now` | A consistent sqlite snapshot, safe against a live server |
@@ -335,7 +335,13 @@ Five pages:
   month; cards and loans with limit, utilisation, statement, minimum and due
   date; every account and every position. Each chart has a table view, so no
   number is gated behind a hover. Accounts and cards carry a currency control
-  where the institution's label could be wrong.
+  where the institution's label could be wrong. **Refresh now** starts a sync
+  and returns at once: every widget dims under a loading shimmer, a progress
+  bar names the step in flight ("Banks and cards · Partner, 4 of 7"), and the
+  page reloads with all of them fresh when it finishes, saying how long it took
+  or which sources could not be read. A refresh during the nightly job, or
+  while Claude is running `sync_now`, joins that run rather than starting a
+  second.
 - **Transactions** — filter by date, account, category, profile, direction,
   minimum and free text; money out / in / net for the filtered set; group by
   merchant or category. Transfers between your own accounts and card payments
@@ -428,7 +434,7 @@ Read [SECURITY.md](SECURITY.md) before deploying. The short version:
 |---|---|
 | `npm run demo` | Seed a fictional database to try it without credentials |
 | `npm run dev` | Run the server from TypeScript |
-| `npm run check` | Typecheck + 344 tests |
+| `npm run check` | Typecheck + 354 tests |
 | `npm run sync` | One-shot sync; exits non-zero if a source errored |
 | `npm run db:init` | Create the database, seeding `room.json` if present |
 | `npm run hash-password` | Print an `ADMIN_PASSWORD_HASH` |
@@ -450,7 +456,8 @@ against hostile input, the per-profile Plaid
 Item allowance, the period report (a card payment never counted on top of
 its purchases, agreement with cashflow to the cent, net worth at each end of a
 period, and a month nobody measured reporting no change rather than zero),
-the Transactions tab's transfers filter, both session clocks (idle and absolute, and that neither
+the Transactions tab's transfers filter, one sync at a time (a second request
+joins the first) and naming which profile's source failed, both session clocks (idle and absolute, and that neither
 extends the other), the guarantee that statement
 PDFs are never persisted (asserted against the source), and the HTTP endpoint
 end to end (auth, 405 on GET, rate limiting, `tools/list`, a tool call).

@@ -89,11 +89,20 @@ history is public too.
    `getCashflow` unchanged, and `test/report.test.ts` pins that they agree to
    the cent. The report's PDF is the browser's print dialog, not a PDF library;
    keep it that way (see DECISIONS.md).
-13. **Never scrape.** Wealthsimple's private GraphQL API is off limits;
+13. **One sync at a time, and the web UI never waits on it.** `runSync`
+   is single-flight: a second caller (the Refresh button, the nightly job, MCP
+   `sync_now`) gets the run already in progress. Start syncs only through it —
+   a second path would run every bank twice and race the writes. The web UI
+   never awaits it: `POST /sync` starts the run and redirects, and the Overview
+   polls `/sync/status`, because a dozen banks take minutes and would outlast
+   a proxy timeout. Report failures with `failedSources`, not by looking for
+   `error` on the merged per-source entry, which with two profiles is keyed by
+   profile and never matches.
+14. **Never scrape.** Wealthsimple's private GraphQL API is off limits;
    SnapTrade only.
-14. **After every task:** `npm run typecheck && npm test`. Both must be clean
+15. **After every task:** `npm run typecheck && npm test`. Both must be clean
    before committing. Conventional commits, one per completed task.
-15. **Docs ship with the change, in the same commit.** Any new or changed
+16. **Docs ship with the change, in the same commit.** Any new or changed
    feature updates `README.md` and this file before the commit — never "later",
    never a follow-up commit. Concretely:
    - a new or renamed MCP tool → the tool table in README.md
@@ -105,7 +114,7 @@ history is public too.
    - a changed test count → the Development section
    The test is whether someone reading only these two files would be surprised
    by the code. If yes, the docs are not done.
-16. **The Link helper never deploys.** `src/link-server.ts` runs on the
+17. **The Link helper never deploys.** `src/link-server.ts` runs on the
    developer's machine only. Port 8788 must not be exposed and the file is
    deleted from the Docker image.
 
@@ -132,7 +141,8 @@ src/
   store.ts        upserts shared by every source adapter
   queries.ts      read models behind the tools
   fx.ts           Bank of Canada Valet rates + convert()
-  sync.ts         orchestrator; one source failing never aborts the others
+  sync.ts         orchestrator; one source failing never aborts the others;
+                  one run at a time, with progress for the Overview
   snapshots.ts    net-worth totals + daily history rows
   scheduler.ts    in-process nightly sync
   backup.ts       nightly sqlite backup + prune

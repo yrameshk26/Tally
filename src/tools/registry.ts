@@ -904,7 +904,9 @@ export function toolDefs(db: DB): ToolDef[] {
     title: 'Refresh data',
     description:
       'Pull fresh FX rates, brokerage holdings, bank balances and transactions now. Read-only ' +
-      'against every institution. Takes a few seconds per linked Item.',
+      'against every institution. Takes a few seconds per linked Item. If a sync is already ' +
+      'running (the nightly job, or Refresh in the web UI) this waits for that one and returns ' +
+      'its report rather than starting a second.',
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
     handler: async () => {
       try {

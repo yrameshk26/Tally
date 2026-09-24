@@ -9,7 +9,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { AddressInfo } from 'node:net';
 import type { Server } from 'node:http';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 
 const USER = 'ramesh';
 const PASSWORD = 'a-test-password-12345';
@@ -337,6 +337,64 @@ describe('the period report', () => {
     });
     expect(res.status).toBe(200);
     expect(await res.text()).not.toContain('<script>&');
+  });
+});
+
+describe('refreshing from the Overview', () => {
+  // Only the Bank of Canada call is held back; the test's own requests to the
+  // server go through the real fetch.
+  const realFetch = globalThis.fetch;
+  const offlineFx = (): void => {
+    vi.stubGlobal('fetch', (input: string | URL | Request, init?: RequestInit) =>
+      String(input instanceof Request ? input.url : input).includes('bankofcanada.ca')
+        ? Promise.reject(new Error('offline in tests'))
+        : realFetch(input, init),
+    );
+  };
+  const status = async (cookie: string): Promise<Record<string, unknown>> =>
+    (await (await realFetch(`${base}/sync/status`, { headers: { cookie } })).json()) as Record<string, unknown>;
+
+  it('comes straight back instead of holding the page for the whole sync', async () => {
+    offlineFx();
+    try {
+      const { cookie, csrf } = await login();
+      const res = await realFetch(`${base}/sync`, {
+        method: 'POST',
+        headers: { cookie, 'content-type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams({ _csrf: csrf }),
+        redirect: 'manual',
+      });
+      expect(res.status).toBe(303);
+      expect(res.headers.get('location')).toBe('/?syncing=1');
+
+      // It finishes on its own, and the status says how it went.
+      let s = await status(cookie);
+      for (let i = 0; i < 50 && s['running']; i += 1) {
+        await new Promise((r) => setTimeout(r, 50));
+        s = await status(cookie);
+      }
+      expect(s['running']).toBe(false);
+      expect((s['last'] as { message: string }).message).toMatch(/Refreshed/);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('keeps its status behind sign-in', async () => {
+    const res = await fetch(`${base}/sync/status`, { redirect: 'manual' });
+    expect(res.status).toBe(303);
+  });
+
+  it('shows the loading state straight after a refresh, and not otherwise', async () => {
+    const { cookie } = await login();
+    const loading = await (await fetch(`${base}/?syncing=1`, { headers: { cookie } })).text();
+    expect(loading).toMatch(/<div class="sync-banner" id="sync-banner" role="status" aria-live="polite">/);
+    expect(loading).toContain('Refreshing…');
+
+    const idle = await (await fetch(`${base}/`, { headers: { cookie } })).text();
+    expect(idle).toMatch(/id="sync-banner"[^>]* hidden>/);
+    expect(idle).toContain('Refresh now');
+    expect(inlineHandlers(idle)).toEqual([]);
   });
 });
 

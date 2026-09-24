@@ -3,6 +3,35 @@
 Dated, append-only. Each entry says what was chosen, what it was chosen over,
 and why.
 
+## 2026-09-24 — Refresh returns at once; the Overview shows the run
+
+Refresh used to await the whole sync inside the request, so the page sat on
+the browser's spinner for as long as every bank took, a couple of minutes with
+a dozen linked, and could outlast a proxy timeout. Nothing stopped a second run
+either: clicking during the nightly job, or while Claude ran `sync_now`, began
+another full pass over every bank in parallel.
+
+Now `runSync` is single-flight and records which step it is on. `POST /sync`
+starts it and redirects to the Overview, which dims every widget under a
+shimmer, shows a progress bar naming the step, polls `/sync/status`, and
+reloads when the run ends so every widget comes back fresh. The click shows
+the loading state before the server answers; `?syncing=1` covers a run so short
+it finished before the page rendered.
+
+Alternatives rejected:
+
+- **Swap the fresh widgets in without a reload.** The charts carry nonced
+  scripts that do not run when inserted as HTML, so this needs a client-side
+  renderer, which the project deliberately does not have. A reload is one
+  round trip and cross-fades under the existing view transitions.
+- **Server-sent events for progress.** A stream per open tab for a job that
+  runs a few times a day; polling every 1.5s while a run is in flight, and not
+  at all otherwise, is simpler and survives a proxy that buffers responses.
+
+Found on the way: the old redirect decided success by looking for `error` on
+the merged per-source entry, which with two profiles is keyed by profile, so a
+failed bank reported "Sync complete." `failedSources` reads each profile.
+
 ## 2026-09-23 — The report's PDF is the browser's print dialog
 
 A user asked for a monthly and annual summary they could keep as a PDF, like

@@ -24,6 +24,7 @@ import { areaChart, chartRuntime, groupedColumns, hBars, stackedBar } from './ch
 import { renderMarkdown } from './markdown.ts';
 import type { ChatRow, StoredMessage } from '../llm/store.ts';
 import type { PeriodReport } from '../report.ts';
+import type { SyncProgress } from '../sync.ts';
 
 const sign = (n: number): SafeHtml =>
   html`<span class="${n < 0 ? 'neg' : n > 0 ? 'pos' : 'muted'}">${money(n)}</span>`;
@@ -110,11 +111,17 @@ export function overviewPage(opts: {
   history: Array<{ label: string; value: number }>;
   cashflow: Array<{ month: string; income: number; spend: number }>;
   lastSync: string | null;
+  /** A run in flight, from any trigger: this button, the nightly job, or MCP. */
+  syncing: SyncProgress;
+  /** Just asked for one, which may already have finished by the time we render. */
+  justStarted?: boolean;
   fxAsOf: string | null;
   csrf: string;
   flash?: SafeHtml;
 }): SafeHtml {
   const { totals, accounts, holdings } = opts;
+  const sync = opts.syncing;
+  const loading = sync.running || opts.justStarted === true;
   const cards = accounts.filter(isLiabilityAccount);
   const assets = accounts.filter((a) => a.balance_cad >= 0);
 
@@ -208,9 +215,54 @@ export function overviewPage(opts: {
     </div>
 
     <div class="row mb">
-      <form method="post" action="/sync">${csrfField(opts.csrf)}<button type="submit">Refresh now</button></form>
+      <form method="post" action="/sync">${csrfField(opts.csrf)}<button type="submit" id="sync-btn"${
+        loading ? raw(' aria-disabled="true"') : raw('')
+      }>${loading ? 'Refreshing…' : 'Refresh now'}</button></form>
       <span class="muted">Pulls fresh balances, holdings and transactions. Read-only.</span>
     </div>
+
+    ${
+      // Always in the page, hidden when idle, so the click can show it before
+      // the server has answered. While it is visible, the stylesheet dims every
+      // widget under a shimmer; when the run ends the page reloads with all of
+      // them fresh.
+      html`<div class="sync-banner" id="sync-banner" role="status" aria-live="polite"${loading ? raw('') : raw(' hidden')}>
+        <span class="spinner" aria-hidden="true"></span>
+        <div class="sync-text">
+          <strong>Refreshing from your banks and brokerages</strong>
+          <span class="muted" id="sync-step">${
+            sync.running && sync.step
+              ? `${sync.step} (${String(Math.min(sync.done + 1, sync.total))} of ${String(sync.total)})`
+              : 'Starting…'
+          }</span>
+        </div>
+        <progress id="sync-bar" max="${String(Math.max(1, sync.total))}" value="${String(sync.done)}"></progress>
+      </div>`
+    }
+    ${raw(
+      `<script nonce="${opts.nonce}">(()=>{` +
+        `const b=document.getElementById('sync-banner'),btn=document.getElementById('sync-btn');` +
+        `const bar=document.getElementById('sync-bar'),st=document.getElementById('sync-step');` +
+        `if(!b||!btn)return;` +
+        // Show the loading state the instant the button is pressed.
+        `btn.form.addEventListener('submit',e=>{if(btn.getAttribute('aria-disabled')){e.preventDefault();return}` +
+        `b.hidden=false;btn.textContent='Refreshing…';btn.setAttribute('aria-disabled','true')});` +
+        `if(b.hidden)return;` +
+        `const tick=async()=>{try{` +
+        `const r=await fetch('/sync/status',{cache:'no-store'});` +
+        // Signed out mid-run: the idle timeout, or sign out everywhere.
+        `if(r.redirected||r.status===401){location.replace('/login');return}` +
+        `const s=await r.json();` +
+        `if(s.running){bar.max=s.total||1;bar.value=s.done;` +
+        `st.textContent=s.step?s.step+' ('+Math.min(s.done+1,s.total)+' of '+s.total+')':'';` +
+        `setTimeout(tick,1500);return}` +
+        `const bad=s.last&&s.last.failed.length;` +
+        `location.replace('/?'+(bad?'err':'ok')+'='+encodeURIComponent(s.last?s.last.message:'Refreshed.'))` +
+        `}catch(_){setTimeout(tick,3000)}};` +
+        `setTimeout(tick,600)})();` +
+        `</scr` +
+        `ipt>`,
+    )}
 
     <section>
       <h2>Net worth over time</h2>

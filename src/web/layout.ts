@@ -463,6 +463,30 @@ td .nowrap,td.nowrap{white-space:nowrap}
   .msg.user{max-width:100%;font-weight:600}
   a[target=_blank]::after{content:" (" attr(href) ")";font-size:.85em;color:#555}
 }
+/* A sync in flight: the banner, and every widget under it dimmed beneath a
+   shimmer until the page reloads with fresh figures. Keyed off the banner being
+   visible, so the click can show it before the server has answered. */
+.sync-banner{display:flex;align-items:center;gap:.9rem;padding:.8rem 1rem;margin-bottom:1.1rem;
+  background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);box-shadow:var(--shadow)}
+.sync-banner[hidden]{display:none}
+.sync-text{display:flex;flex-direction:column;gap:.1rem;flex:1;min-width:0}
+.sync-text .muted{font-size:var(--step--1)}
+.sync-banner progress{width:min(14rem,35%);accent-color:var(--accent)}
+.spinner{flex:none;width:1.1rem;height:1.1rem;border-radius:50%;
+  border:2px solid color-mix(in oklch,var(--accent) 25%,transparent);border-top-color:var(--accent);
+  animation:spin .8s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+main:has(.sync-banner:not([hidden])) :is(section,.kpi){position:relative;overflow:hidden}
+main:has(.sync-banner:not([hidden])) :is(section,.kpi)>*{opacity:.4;transition:opacity .25s}
+main:has(.sync-banner:not([hidden])) :is(section,.kpi)::after{content:"";position:absolute;inset:0;
+  pointer-events:none;background:linear-gradient(100deg,transparent 30%,
+  color-mix(in oklch,var(--fg) 9%,transparent) 50%,transparent 70%);
+  background-size:250% 100%;animation:shimmer 1.3s ease-in-out infinite}
+@keyframes shimmer{from{background-position:120% 0}to{background-position:-20% 0}}
+button[aria-disabled=true]{opacity:.65;cursor:progress}
+/* The global rule shortens animations to nothing, which on an infinite shimmer
+   reads as flicker. Stop these outright; the dimming alone says "loading". */
+@media (prefers-reduced-motion:reduce){.spinner,main :is(section,.kpi)::after{animation:none}}
 .chart-table{margin-top:.75rem}
 /* The report prints its tables in full, so a collapsed twin would repeat them. */
 .report .chart-table{display:none}
