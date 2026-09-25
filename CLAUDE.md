@@ -169,8 +169,9 @@ src/
                   code stay "tally")
   link-server.ts  LOCAL ONLY Plaid Link helper
   sources/        snaptrade.ts, plaid.ts, wise.ts, statements.ts (never persisted)
-  web/            routes, pages, layout (CSS tokens), charts, markdown, OAuth
-                  pages, logo
+  web/            routes, pages, layout (app shell + the one stylesheet, as
+                  tokens), icons (hand-drawn), charts, markdown, OAuth pages,
+                  logo
   auth/           password, TOTP, sessions
   lib/            logger, money, registered-type classifier, token crypto, html
 scripts/          db-init, sync, backup, demo (fictional data, no network)

@@ -3,6 +3,31 @@
 Dated, append-only. Each entry says what was chosen, what it was chosen over,
 and why.
 
+## 2026-09-25 — The UI moves to a sidebar app shell
+
+A visual revamp: a fixed sidebar with grouped, icon-led navigation on desktop,
+a gradient hero card for net worth with its change over the history window,
+16px cards on a soft accent glow, filled inputs with custom select chevrons,
+a segmented control for switching profile, and a glass sign-in card. Light and
+dark are both redesigned rather than one derived from the other.
+
+What did not change, on purpose: the chart palette (validated for colour-blind
+separation in both modes; restyling a chart is not a reason to repaint its
+series), server rendering with no framework and no webfonts, the nonce CSP with
+no inline styles, the print path, and every id and class the scripts and tests
+depend on.
+
+The sidebar also retires yesterday's two-row header. That existed because a
+single top row had about 120px to spare beside nine links and Sign out; a
+sidebar has room for any app name, and below 1060px the same markup becomes a
+top bar whose links scroll as one row of pills. Figures in the KPI cards are
+sized to their card with container query units, so a seven-digit balance fits
+however many cards share a row.
+
+Found on the way: the chart tooltip sat in the page corner as an empty ring on
+every page with a chart, because `.tip{display:flex}` overrode its `hidden`
+attribute. It had been there since the tooltip was added.
+
 ## 2026-09-25 — A custom logo, raster only
 
 Settings → Appearance takes a logo for the navigation, sign-in screen and tab

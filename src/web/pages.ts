@@ -5,6 +5,7 @@
  */
 import { esc, html, join, money, raw, type SafeHtml } from '../lib/html.ts';
 import { brandMark, csrfField, notice } from './layout.ts';
+import { icon } from './icons.ts';
 import {
   isLiabilityAccount,
   type AccountView,
@@ -124,6 +125,20 @@ export function overviewPage(opts: {
   const { totals, accounts, holdings } = opts;
   const sync = opts.syncing;
   const loading = sync.running || opts.justStarted === true;
+  // The change across the same window the history chart draws, so the badge
+  // on the hero and the line under it tell one story.
+  const first = opts.history[0];
+  const latest = opts.history[opts.history.length - 1];
+  const heroDelta =
+    first && latest && opts.history.length > 1 && first.value !== 0
+      ? (() => {
+          const change = round2(latest.value - first.value);
+          const pct = (change / Math.abs(first.value)) * 100;
+          const days = Math.max(1, Math.round((Date.parse(latest.label) - Date.parse(first.label)) / 86_400_000));
+          return html`<div class="delta">${raw(icon(change >= 0 ? 'up' : 'down', 14))}${change >= 0 ? '+' : ''}${money(change)}
+            (${change >= 0 ? '+' : ''}${pct.toFixed(1)}%)<span class="muted-on-hero">${String(days)} days</span></div>`;
+        })()
+      : raw('');
   const cards = accounts.filter(isLiabilityAccount);
   const assets = accounts.filter((a) => a.balance_cad >= 0);
 
@@ -200,28 +215,31 @@ export function overviewPage(opts: {
         : raw('');
 
   return html`
-    <h1>Overview</h1>
-    <p class="sub">
-      All figures in CAD. Assets positive, liabilities negative.
-      ${opts.fxAsOf ? html`FX as of ${opts.fxAsOf}.` : raw('')}
-      ${opts.lastSync ? html`Last sync ${opts.lastSync.slice(0, 16).replace('T', ' ')} UTC.` : raw('')}
-    </p>
+    <div class="page-head">
+      <div>
+        <h1>Overview</h1>
+        <p class="sub">
+          All figures in CAD. Assets positive, liabilities negative.
+          ${opts.fxAsOf ? html`FX as of ${opts.fxAsOf}.` : raw('')}
+          ${opts.lastSync ? html`Last sync ${opts.lastSync.slice(0, 16).replace('T', ' ')} UTC.` : raw('')}
+        </p>
+      </div>
+      <div class="page-actions">
+        <form method="post" action="/sync" title="Pulls fresh balances, holdings and transactions. Read-only.">${csrfField(opts.csrf)}<button type="submit" id="sync-btn"${
+          loading ? raw(' aria-disabled="true"') : raw('')
+        }>${raw(icon('refresh', 16))}<span>${loading ? 'Refreshing…' : 'Refresh now'}</span></button></form>
+      </div>
+    </div>
     ${opts.flash ?? raw('')}
     ${staleness}
 
     <div class="kpis">
-      <div class="kpi"><div class="label">Net worth</div><div class="value">${money(totals.net_worth_cad)}</div></div>
+      <div class="kpi hero"><div class="label">Net worth</div><div class="value">${money(totals.net_worth_cad)}</div>${heroDelta}</div>
       <div class="kpi"><div class="label">Assets</div><div class="value pos">${money(totals.total_assets_cad)}</div></div>
       <div class="kpi"><div class="label">Liabilities</div><div class="value ${totals.total_liabilities_cad < 0 ? 'neg' : 'muted'}">${money(totals.total_liabilities_cad)}</div></div>
       <div class="kpi"><div class="label">Invested</div><div class="value">${money(holdings.total_invested_cad)}</div></div>
     </div>
 
-    <div class="row mb">
-      <form method="post" action="/sync">${csrfField(opts.csrf)}<button type="submit" id="sync-btn"${
-        loading ? raw(' aria-disabled="true"') : raw('')
-      }>${loading ? 'Refreshing…' : 'Refresh now'}</button></form>
-      <span class="muted">Pulls fresh balances, holdings and transactions. Read-only.</span>
-    </div>
 
     ${
       // Always in the page, hidden when idle, so the click can show it before
@@ -248,7 +266,7 @@ export function overviewPage(opts: {
         `if(!b||!btn)return;` +
         // Show the loading state the instant the button is pressed.
         `btn.form.addEventListener('submit',e=>{if(btn.getAttribute('aria-disabled')){e.preventDefault();return}` +
-        `b.hidden=false;btn.textContent='Refreshing…';btn.setAttribute('aria-disabled','true')});` +
+        `b.hidden=false;const l=btn.querySelector('span');if(l)l.textContent='Refreshing…';btn.setAttribute('aria-disabled','true')});` +
         `if(b.hidden)return;` +
         `const tick=async()=>{try{` +
         `const r=await fetch('/sync/status',{cache:'no-store'});` +
@@ -619,13 +637,14 @@ export function settingsPage(opts: {
 /** Profile switcher shared by the pages that are scoped to one. */
 export function profileTabs(profiles: Profile[], activeId: string, basePath: string): SafeHtml {
   if (profiles.length <= 1) return raw('');
-  return html`<div class="row mb">${join(
+  return html`<nav class="segmented mb" aria-label="Profile">${join(
     profiles.map(
       (p) =>
-        html`<a class="btn ${p.id === activeId ? '' : 'secondary'}"
-              href="${basePath}?profile=${encodeURIComponent(p.id)}">${p.name}</a>`,
+        html`<a href="${basePath}?profile=${encodeURIComponent(p.id)}"${
+          p.id === activeId ? raw(' aria-current="page"') : raw('')
+        }>${p.name}</a>`,
     ),
-  )}</div>`;
+  )}</nav>`;
 }
 
 export function profilesPage(opts: {
@@ -1978,13 +1997,13 @@ export function reportPage(opts: {
   </section>`;
 
   return html`<div class="report">
-    ${controls}
     <h1>Financial summary</h1>
     <p class="sub">
       ${r.label}${r.to_date ? ' (to date)' : ''} · ${profileName ?? 'Everyone'} ·
       ${r.start} to ${r.to_date ? r.generated_at.slice(0, 10) : r.end} · All figures in CAD ·
       Generated ${r.generated_at.slice(0, 10)}
     </p>
+    ${controls}
 
     <div class="kpis">
       <div class="kpi"><div class="label">Net worth</div>

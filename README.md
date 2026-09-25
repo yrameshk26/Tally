@@ -328,9 +328,14 @@ ADMIN_PASSWORD_HASH=$argon2id$v=19$m=19456,p=1,t=2$...
 TOKEN_ENC_KEY=...              # required: encrypts stored secrets and the TOTP seed
 ```
 
-Five pages:
+A sidebar on desktop, grouped into Money (Overview, Transactions, Merchants,
+Reports), Ask (Assistant) and Manage (Connections, Profiles, Settings,
+Security); below 1060px the same links become a top bar with one scrolling row
+of pills. Light and dark follow the system, and every page prints cleanly.
+Server-rendered, no framework, no webfonts, no inline styles under a strict CSP.
 
-- **Overview** — net worth, assets, liabilities and invested; net worth over
+- **Overview** — net worth as a hero card with its change over the history
+  window, then assets, liabilities and invested; net worth over
   time; allocation by registered type; largest holdings; income vs spend by
   month; cards and loans with limit, utilisation, statement, minimum and due
   date; every account and every position. Each chart has a table view, so no
@@ -382,8 +387,8 @@ Five pages:
   screen, navigation, browser tab, the Claude connection prompt); clear it to go
   back to "tally", or set `APP_NAME` in the environment. It is a display
   preference only: the MCP server, cookies and code keep the name tally, so a
-  renamed install takes updates without a patch. A name longer than about six
-  characters moves the navigation to its own row, rather than letting it wrap.
+  renamed install takes updates without a patch. The sidebar ellipsises a long
+  name, with the full name on hover.
   **Logo** replaces the mark in the navigation, the sign-in screen and the
   browser tab: PNG, JPEG or WebP up to 256 KB, stored in the database so it
   travels with backups. SVG is refused, because an SVG can carry script.
