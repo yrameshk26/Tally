@@ -68,10 +68,11 @@ export function loginPage(opts: {
   next?: string | null;
   /** Minutes of inactivity that ended the last session, if that is why we are here. */
   idleMinutes?: number;
+  appName?: string;
 }): SafeHtml {
   return html`<div class="login">
     ${raw(logoSvg(56, 'mark'))}
-    <h1>tally</h1>
+    <h1>${opts.appName || 'tally'}</h1>
     <p class="sub">Sign in to manage connections and view your summary.</p>
     ${opts.error ? notice('err', opts.error) : raw('')}
     ${
@@ -441,6 +442,10 @@ const LABELS: Record<string, { label: string; hint: string }> = {
   },
   LLM_MODEL: { label: 'Assistant model', hint: 'Blank uses the provider default.' },
   LLM_BASE_URL: { label: 'Assistant base URL', hint: 'Only for a custom or self-hosted endpoint.' },
+  APP_NAME: {
+    label: 'App name',
+    hint: 'What the sign-in screen, the navigation and the browser tab call this, up to 40 characters. Clear it to go back to “tally”.',
+  },
 };
 
 export function settingsPage(opts: {
@@ -509,7 +514,8 @@ export function settingsPage(opts: {
         // profile, so offering these fields elsewhere would silently write a key
         // nothing ever reads.
         opts.isDefaultProfile
-          ? html`${group('Assistant — optional built-in chat', [
+          ? html`${group('Appearance', ['APP_NAME'])}
+            ${group('Assistant — optional built-in chat', [
               'LLM_PROVIDER',
               'LLM_API_KEY',
               'LLM_MODEL',
@@ -522,7 +528,7 @@ export function settingsPage(opts: {
           : raw('')
       }
       <input type="hidden" name="profile" value="${opts.activeProfile.id}">
-      <div class="row"><button type="submit">Save credentials</button>
+      <div class="row"><button type="submit">Save settings</button>
         <span class="muted">Secrets are encrypted at rest and never displayed again.</span></div>
     </form>
 
@@ -686,7 +692,18 @@ export function connectionsPage(opts: {
       <div class="table-wrap"><table class="kv"><tbody>
         <tr>
           <td>Allowed redirect URI<div class="sub-line">Team Settings → API (or Developers → API). Required for OAuth banks — Chase, Amex, Bank of America.</div></td>
-          <td><div class="code-block">${opts.redirectUri}</div></td>
+          <td><div class="code-block">${opts.redirectUri}</div>${
+            // Behind a TLS-terminating proxy that does not pass the scheme on,
+            // the server believes it is on http, sends that to Plaid, and it
+            // never matches the https URI registered in the dashboard.
+            /^http:\/\//.test(opts.redirectUri) && !/^http:\/\/(localhost|127\.0\.0\.1)([:/]|$)/.test(opts.redirectUri)
+              ? html`<p class="hint mt-xs"><span class="pill warn">check</span> This starts with <strong>http://</strong>. If you
+                  reached this page over https, your reverse proxy is not telling the server so:
+                  have it send <code>X-Forwarded-Proto</code> (Caddy and Traefik do by default,
+                  nginx needs <code>proxy_set_header X-Forwarded-Proto $scheme;</code>).
+                  Otherwise Plaid receives an address that does not match the one you registered.</p>`
+              : raw('')
+          }</td>
         </tr>
         <tr>
           <td>Environment<div class="sub-line">The secret must be the one for this environment.</div></td>
@@ -853,6 +870,7 @@ export function connectionsPage(opts: {
 }
 
 export function securityPage(opts: {
+  appName?: string;
   username: string;
   mcpUrl: string;
   legacyEnabled: boolean;
@@ -925,7 +943,7 @@ export function securityPage(opts: {
         concentration”, “how much RRSP room is left”.</p>
       <ol class="steps">
         <li>In Claude, open <strong>Settings → Connectors → Add custom connector</strong>.</li>
-        <li>Name it <strong>tally</strong> and paste this URL — it contains no secret:</li>
+        <li>Name it <strong>${opts.appName || 'tally'}</strong> and paste this URL — it contains no secret:</li>
       </ol>
       <div class="code-block mt-xs">${opts.mcpUrl}</div>
       <ol class="steps mt-sm" start="3">
@@ -1584,6 +1602,7 @@ function assistantBody(markdown: string): SafeHtml {
 }
 
 export function chatPage(opts: {
+  appName?: string;
   nonce: string;
   csrf: string;
   ready: boolean;
@@ -1606,7 +1625,7 @@ export function chatPage(opts: {
       )}
       <section>
         <h2>Before you turn this on</h2>
-        <p>Every other part of tally keeps your data on this server: Claude reaches it through MCP,
+        <p>Every other part of ${opts.appName || 'tally'} keeps your data on this server: Claude reaches it through MCP,
           with your consent, one request at a time. A built-in assistant is different — it sends
           balances and transactions to whichever provider holds the key, on every message. That is a
           real trade, and it is off until you make it.</p>

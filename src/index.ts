@@ -18,7 +18,7 @@ import { buildServer } from './mcp.ts';
 import { startScheduler } from './scheduler.ts';
 import { createRateLimiter } from './ratelimit.ts';
 import { createWebRouter, webDisabledReason } from './web/routes.ts';
-import { createOAuthRouter } from './web/oauth.ts';
+import { createOAuthRouter, originOf } from './web/oauth.ts';
 import { verifyAccessToken } from './oauth.ts';
 import { faviconSvg } from './web/logo.ts';
 
@@ -126,8 +126,7 @@ export function createApp(): express.Express {
       tooMany(res);
       return;
     }
-    const proto = (req.headers['x-forwarded-proto'] as string) ?? req.protocol;
-    const metadata = `${proto}://${req.get('host')}/.well-known/oauth-protected-resource`;
+    const metadata = `${originOf(req)}/.well-known/oauth-protected-resource`;
     const header = String(req.headers.authorization ?? '');
     const token = header.startsWith('Bearer ') ? header.slice(7).trim() : '';
     const identity = token ? verifyAccessToken(db, token) : null;

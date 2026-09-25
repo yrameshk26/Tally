@@ -941,7 +941,11 @@ export function knownCategories(db: DB): string[] {
        ORDER BY c`,
     )
     .all() as Array<{ c: string }>;
-  return rows.map((r) => r.c);
+  // The categories that take a row out of spending are always on offer, even
+  // before any row carries one. A card payment the bank filed as something
+  // else can only be hidden by choosing one of these, and nobody should have
+  // to know to type "TRANSFER_OUT" in by hand.
+  return [...new Set([...rows.map((r) => r.c), ...NOT_SPENDING_CATEGORIES])].sort();
 }
 
 export function setAccountProfile(db: DB, accountId: string, profileId: string): boolean {

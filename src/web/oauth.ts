@@ -22,6 +22,7 @@ import { notice, page } from './layout.ts';
 import { csrfField } from './layout.ts';
 import { safeEqual } from '../auth/password.ts';
 import { COOKIE_NAME, getSession, parseCookies, type Session } from '../auth/session.ts';
+import { appName } from '../settings.ts';
 import {
   SCOPE,
   clientRedirectUris,
@@ -36,9 +37,21 @@ import {
 import { createFailureLimiter } from '../ratelimit.ts';
 import { randomBytes } from 'node:crypto';
 
+/**
+ * The scheme and host the browser used to reach this server. Every absolute
+ * URL we hand out goes through here: the OAuth issuer, the MCP connector URL,
+ * and the redirect URI Plaid must find registered character for character.
+ *
+ * Behind a chain of proxies (a CDN in front of Caddy, say) X-Forwarded-Proto
+ * arrives as "https, http", and only the first entry is what the browser saw.
+ * Taking the header whole built "https, http://host/connections/oauth", a
+ * redirect URI nobody registered, and Plaid refused Link with INVALID_FIELD.
+ */
 export function originOf(req: Request): string {
-  const proto = (req.headers['x-forwarded-proto'] as string) ?? req.protocol;
-  return `${proto}://${req.get('host')}`;
+  const header = req.headers['x-forwarded-proto'];
+  const first = (Array.isArray(header) ? header[0] : header)?.split(',')[0]?.trim().toLowerCase();
+  const proto = first === 'https' || first === 'http' ? first : req.protocol;
+  return `${proto}://${req.get('host') ?? 'localhost'}`;
 }
 
 /** The canonical resource identifier every token is minted for. */
@@ -239,7 +252,10 @@ export function createOAuthRouter(db: DB): express.Router {
         "base-uri 'none'",
       ].join('; '),
     );
-    res.set('Cache-Control', 'no-store').type('html').send(page({ title, nonce, chrome: false, body }));
+    res
+      .set('Cache-Control', 'no-store')
+      .type('html')
+      .send(page({ title, nonce, chrome: false, body, appName: appName(db) }));
   };
 
   router.get('/oauth/authorize', (req: Request, res: Response) => {
@@ -266,7 +282,7 @@ export function createOAuthRouter(db: DB): express.Router {
       html`<div class="login">
         <h1>Authorize access</h1>
         <p class="sub"><strong>${client.client_name ?? 'An application'}</strong> is asking to read
-          your financial data through tally, as <strong>${session.username}</strong>.</p>
+          your financial data through ${appName(db)}, as <strong>${session.username}</strong>.</p>
         <section>
           <p class="hint mb-sm">It will be able to see balances, holdings, transactions and
             contribution room across every profile. It cannot move money — no such capability

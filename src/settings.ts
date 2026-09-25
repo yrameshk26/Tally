@@ -45,6 +45,7 @@ export const MANAGED_KEYS = [
   'LLM_API_KEY',
   'LLM_MODEL',
   'LLM_BASE_URL',
+  'APP_NAME',
 ] as const;
 
 export type ManagedKey = (typeof MANAGED_KEYS)[number];
@@ -59,7 +60,40 @@ export const DEFAULTS: Partial<Record<ManagedKey, string>> = {
   SNAPTRADE_TRANSPORT: 'rest',
   PLAID_ENV: 'production',
   LLM_PROVIDER: 'anthropic',
+  APP_NAME: 'tally',
 };
+
+/**
+ * Keys that belong to the install rather than a profile. They are read from
+ * the default profile only, so storing one anywhere else would write a row
+ * nothing ever reads.
+ */
+export const INSTALL_KEYS = new Set<string>(['APP_NAME']);
+
+export const DEFAULT_APP_NAME = 'tally';
+
+/**
+ * What the UI calls itself. A display preference only: the MCP server name, the
+ * OAuth resource name, cookie names and the repository all stay "tally".
+ * Control characters are stripped and whitespace collapsed, and it is capped
+ * at 40 characters so a long name cannot push the navigation off the screen.
+ */
+export function cleanAppName(value: string): string {
+  return value
+    .replace(/[\u0000-\u001f\u007f]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 40)
+    .trim();
+}
+
+export function appName(db: DB): string {
+  try {
+    return cleanAppName(getSetting(db, 'APP_NAME')) || DEFAULT_APP_NAME;
+  } catch {
+    return DEFAULT_APP_NAME;
+  }
+}
 
 function isManaged(key: string): key is ManagedKey {
   return (MANAGED_KEYS as readonly string[]).includes(key);
@@ -100,6 +134,13 @@ export function setSetting(
   profileId = DEFAULT_PROFILE_ID,
 ): void {
   if (!isManaged(key)) throw new Error(`refusing to store unmanaged setting ${key}`);
+  if (INSTALL_KEYS.has(key) && profileId !== DEFAULT_PROFILE_ID) {
+    throw new Error(`${key} is set for the whole install, on the default profile`);
+  }
+  if (key === 'APP_NAME') {
+    value = cleanAppName(value);
+    if (!value) throw new Error('The app name cannot be blank. Clear the field to go back to "tally".');
+  }
   const secret = SECRET_KEYS.has(key);
   if (secret && !config.tokenEncKey) {
     throw new Error('TOKEN_ENC_KEY must be set before storing a secret in the database');

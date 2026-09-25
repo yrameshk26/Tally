@@ -73,7 +73,15 @@ import {
   serializeCookie,
   type Session,
 } from '../auth/session.ts';
-import { describeSettings, setSetting, MANAGED_KEYS, SECRET_KEYS } from '../settings.ts';
+import {
+  appName,
+  deleteSetting,
+  describeSettings,
+  setSetting,
+  INSTALL_KEYS,
+  MANAGED_KEYS,
+  SECRET_KEYS,
+} from '../settings.ts';
 import { plaidCreds, plaidReady, snaptradeReady, testCredentials, wiseReady } from '../credentials.ts';
 import {
   getCashflow,
@@ -131,14 +139,14 @@ import {
 import { failedSources, lastSyncReport, runSync, syncProgress } from '../sync.ts';
 import { loadRates } from '../fx.ts';
 import { createFailureLimiter } from '../ratelimit.ts';
-import { safeNext } from './oauth.ts';
+import { originOf, safeNext } from './oauth.ts';
 import { listClients, revokeClient } from '../oauth.ts';
 
 type Ctx = Request & { session?: Session; nonce?: string };
 
+/** Shown on the Connections page, so what to register in Plaid is never a guess. */
 function redirectUriFor(req: Request): string {
-  const proto = (req.headers['x-forwarded-proto'] as string) ?? req.protocol;
-  return `${proto}://${req.get('host')}/connections/oauth`;
+  return `${originOf(req)}/connections/oauth`;
 }
 
 export function createWebRouter(db: DB): express.Router {
@@ -205,7 +213,7 @@ export function createWebRouter(db: DB): express.Router {
   };
 
   const render = (req: Ctx, res: Response, title: string, body: ReturnType<typeof html>, current?: string, chrome = true): void => {
-    res.type('html').send(page({ title, nonce: req.nonce ?? '', current, chrome, body }));
+    res.type('html').send(page({ title, nonce: req.nonce ?? '', current, chrome, body, appName: appName(db) }));
   };
 
   const sessionOf = (req: Ctx): Session | null =>
@@ -268,6 +276,7 @@ export function createWebRouter(db: DB): express.Router {
         totpEnabled: totpEnabled(db),
         next: safeNext(req.query['next']),
         idleMinutes: req.query['idle'] === '1' ? config.sessionIdleMinutes : 0,
+        appName: appName(db),
       }),
       undefined,
       false,
@@ -286,7 +295,7 @@ export function createWebRouter(db: DB): express.Router {
         req,
         res,
         'Sign in',
-        loginPage({ csrf: '', totpEnabled: totpEnabled(db), error: message, username, next }),
+        loginPage({ csrf: '', totpEnabled: totpEnabled(db), error: message, username, next, appName: appName(db) }),
         undefined,
         false,
       );
@@ -588,7 +597,16 @@ export function createWebRouter(db: DB): express.Router {
     const saved: string[] = [];
     try {
       for (const key of MANAGED_KEYS) {
+        // Install-wide keys are only offered on the default profile; a post
+        // naming one elsewhere is ignored rather than stored where nothing reads it.
+        if (INSTALL_KEYS.has(key) && profileId !== DEFAULT_PROFILE_ID) continue;
         const value = String(body[key] ?? '').trim();
+        // Clearing the name is how you go back to "tally"; everywhere else a
+        // blank field means "leave it".
+        if (key === 'APP_NAME' && key in body && !value) {
+          if (deleteSetting(db, key, profileId)) saved.push(key);
+          continue;
+        }
         // A blank secret means "keep what is stored" — otherwise every save
         // would silently wipe credentials the form never displays.
         if (!value && SECRET_KEYS.has(key)) continue;
@@ -1065,6 +1083,7 @@ export function createWebRouter(db: DB): express.Router {
       res,
       'Assistant',
       chatPage({
+        appName: appName(db),
         nonce: req.nonce ?? '',
         csrf: req.session?.csrf ?? '',
         ready: llmReady(db),
@@ -1134,10 +1153,7 @@ export function createWebRouter(db: DB): express.Router {
   // --- security ------------------------------------------------------------
 
   /** The full connector URL, including the secret. Built from the host in use. */
-  const connectorUrl = (req: Ctx): string => {
-    const proto = (req.headers['x-forwarded-proto'] as string) ?? req.protocol;
-    return `${proto}://${req.get('host')}/mcp/${config.mcpSecret}`;
-  };
+  const connectorUrl = (req: Ctx): string => `${originOf(req)}/mcp/${config.mcpSecret}`;
 
   const security = (
     req: Ctx,
@@ -1150,8 +1166,9 @@ export function createWebRouter(db: DB): express.Router {
       res,
       'Security',
       securityPage({
+        appName: appName(db),
         username: req.session!.username,
-        mcpUrl: `${(req.headers['x-forwarded-proto'] as string) ?? req.protocol}://${req.get('host')}/mcp`,
+        mcpUrl: `${originOf(req)}/mcp`,
         legacyEnabled: config.mcpAllowPathSecret,
         connectorUrl: showConnector ? connectorUrl(req) : null,
         clients: listClients(db),

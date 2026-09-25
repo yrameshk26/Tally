@@ -4,7 +4,7 @@
  * needs it. Everything inline is nonce-allowed so the CSP can stay strict.
  */
 import { idleMs } from '../auth/session.ts';
-import { html, raw, type SafeHtml } from '../lib/html.ts';
+import { esc, html, raw, type SafeHtml } from '../lib/html.ts';
 import { logoSvg } from './logo.ts';
 
 export type Nav = { href: string; label: string };
@@ -25,9 +25,13 @@ export const NAV: Nav[] = [
  * Open-source footer. Deliberately one quiet line: this is a page someone opens
  * to look at their own money, not a place to sell to them.
  */
-const footer =
+const footer = (name: string): string =>
   '<footer class="site-footer">' +
-  '<span>tally — open source, MIT.</span> ' +
+  // A renamed install still says what it runs on, so the link to the project
+  // survives the rename.
+  (name === 'tally'
+    ? '<span>tally — open source, MIT.</span> '
+    : `<span>${esc(name)} runs on tally, open source, MIT.</span> `) +
   '<a href="https://github.com/yrameshk26/Tally" rel="noreferrer noopener" target="_blank">Star it on GitHub</a>' +
   ' · ' +
   '<a href="https://github.com/sponsors/yrameshk26" rel="noreferrer noopener" target="_blank">Sponsor</a>' +
@@ -159,8 +163,11 @@ header{
 .bar{max-width:68rem;margin:0 auto;padding:.7rem 1.25rem;display:flex;gap:1rem;align-items:center;flex-wrap:wrap}
 .brand{
   display:inline-flex;align-items:center;gap:.5rem;font-weight:660;font-size:var(--step-1);
-  letter-spacing:-.022em;text-decoration:none;color:inherit;
+  letter-spacing:-.022em;text-decoration:none;color:inherit;min-width:0;max-width:100%;
 }
+/* The name is a setting, up to 40 characters; past what the row can hold it
+   ends in an ellipsis, and the full name is on hover and in the tab title. */
+.brand-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .brand .mark{color:var(--accent);flex:0 0 auto}
 .login .mark{color:var(--accent);display:block;margin:0 auto .6rem}
 nav{display:flex;gap:.15rem;flex:1;flex-wrap:wrap}
@@ -487,6 +494,26 @@ button[aria-disabled=true]{opacity:.65;cursor:progress}
 /* The global rule shortens animations to nothing, which on an infinite shimmer
    reads as flicker. Stop these outright; the dimming alone says "loading". */
 @media (prefers-reduced-motion:reduce){.spinner,main :is(section,.kpi)::after{animation:none}}
+/* Two-row header: the name and Sign out on top, the whole nav on one line
+   beneath, scrolling sideways if it must. Used whenever the single row cannot
+   hold all three: below 1060px, where nine links alone fill it, and at any width
+   for a name longer than "tally"-sized, which the server knows and marks with
+   .two-row. The single row used to wrap link by link, leaving a couple of
+   stragglers, or Sign out, stranded on a ragged line of their own. */
+.bar.two-row{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:.4rem .75rem}
+.bar.two-row .brand{grid-column:1;grid-row:1}
+.bar.two-row > form{grid-column:2;grid-row:1;justify-self:end}
+.bar.two-row nav{grid-column:1/-1;grid-row:2;flex-wrap:nowrap;overflow-x:auto;
+  scrollbar-width:none;margin-inline:-.72rem;padding-inline:.72rem}
+.bar.two-row nav::-webkit-scrollbar{display:none}
+@media (max-width:1059px){
+  .bar{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:.4rem .75rem}
+  .brand{grid-column:1;grid-row:1}
+  .bar > form{grid-column:2;grid-row:1;justify-self:end}
+  nav{grid-column:1/-1;grid-row:2;flex-wrap:nowrap;overflow-x:auto;
+    scrollbar-width:none;margin-inline:-.72rem;padding-inline:.72rem}
+  nav::-webkit-scrollbar{display:none}
+}
 .chart-table{margin-top:.75rem}
 /* The report prints its tables in full, so a collapsed twin would repeat them. */
 .report .chart-table{display:none}
@@ -540,12 +567,20 @@ export function page(opts: {
   current?: string;
   chrome?: boolean;
   body: SafeHtml;
+  /** What the UI calls itself (Settings → Appearance). Defaults to "tally". */
+  appName?: string;
 }): string {
   const { title, nonce, current, chrome = true, body } = opts;
+  const name = opts.appName || 'tally';
   const idle = idleMs();
   const nav = chrome
-    ? html`<header><div class="bar">
-        <a class="brand" href="/">${raw(logoSvg(22, 'mark'))}tally</a>
+    ? html`<header><div class="bar${
+        // About six characters is all the single row has room for beside nine
+        // links and Sign out (measured: ~120px at the widest). Past that the
+        // header takes two rows at every width, rather than wrapping raggedly.
+        [...name].length > 6 ? ' two-row' : ''
+      }">
+        <a class="brand" href="/" title="${name}">${raw(logoSvg(22, 'mark'))}<span class="brand-name">${name}</span></a>
         <nav>${raw(
           NAV.map(
             (n) =>
@@ -609,10 +644,10 @@ export function page(opts: {
 <meta name="robots" content="noindex,nofollow">
 <meta name="color-scheme" content="light dark">
 <link rel="icon" type="image/svg+xml" href="/favicon.svg">
-<title>${title} · tally</title>
+<title>${title} · ${esc(name)}</title>
 <style nonce="${nonce}">${CSS}</style>
 ${speculation}
-</head><body>${nav.value}<main>${body.value}</main>${footer}${confirmScript}${idleScript}</body></html>`;
+</head><body>${nav.value}<main>${body.value}</main>${footer(name)}${confirmScript}${idleScript}</body></html>`;
 }
 
 const NOTICE_ICON: Record<string, string> = {

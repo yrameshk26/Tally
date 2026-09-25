@@ -98,11 +98,18 @@ history is public too.
    a proxy timeout. Report failures with `failedSources`, not by looking for
    `error` on the merged per-source entry, which with two profiles is keyed by
    profile and never matches.
-14. **Never scrape.** Wealthsimple's private GraphQL API is off limits;
+14. **Every absolute URL comes from `originOf`.** The Plaid redirect URI, the
+   MCP connector URL, the OAuth issuer and the protected-resource metadata are
+   all built from `originOf(req)` in `src/web/oauth.ts`, which takes the first
+   entry of `X-Forwarded-Proto` (a chain of proxies sends `https, http`) and
+   ignores a value that is not a scheme. Five copies of the header read used to
+   exist and all took it whole, which built `https, http://host/…` and made
+   Plaid refuse Link. Do not read the header anywhere else.
+15. **Never scrape.** Wealthsimple's private GraphQL API is off limits;
    SnapTrade only.
-15. **After every task:** `npm run typecheck && npm test`. Both must be clean
+16. **After every task:** `npm run typecheck && npm test`. Both must be clean
    before committing. Conventional commits, one per completed task.
-16. **Docs ship with the change, in the same commit.** Any new or changed
+17. **Docs ship with the change, in the same commit.** Any new or changed
    feature updates `README.md` and this file before the commit — never "later",
    never a follow-up commit. Concretely:
    - a new or renamed MCP tool → the tool table in README.md
@@ -114,7 +121,7 @@ history is public too.
    - a changed test count → the Development section
    The test is whether someone reading only these two files would be surprised
    by the code. If yes, the docs are not done.
-17. **The Link helper never deploys.** `src/link-server.ts` runs on the
+18. **The Link helper never deploys.** `src/link-server.ts` runs on the
    developer's machine only. Port 8788 must not be exposed and the file is
    deleted from the Docker image.
 
@@ -149,7 +156,9 @@ src/
   oauth.ts        OAuth 2.1 AS: DCR, PKCE, code/token issuance and rotation
   credentials.ts  provider secrets, encrypted at rest, per profile
   profiles.ts     up to 5 profiles; create/rename/delete, move an account
-  settings.ts     DB-stored settings that override the environment
+  settings.ts     DB-stored settings that override the environment; APP_NAME
+                  is install-wide and display-only (the MCP server, cookies and
+                  code stay "tally")
   link-server.ts  LOCAL ONLY Plaid Link helper
   sources/        snaptrade.ts, plaid.ts, wise.ts, statements.ts (never persisted)
   web/            routes, pages, layout (CSS tokens), charts, markdown, OAuth

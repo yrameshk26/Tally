@@ -97,6 +97,33 @@ COOKIE_SECURE=true   # defaults on when TRUST_PROXY > 0
 Without `TRUST_PROXY`, every request looks like it came from the proxy, and the
 per-IP rate limiter becomes one shared bucket for the whole internet.
 
+The proxy must also tell the server the browser used https, with the
+`X-Forwarded-Proto` header. Caddy and Traefik send it by default; nginx needs it
+spelled out. Without it the server thinks it is on http, and every absolute URL
+it hands out is wrong: the Plaid redirect URI (see below), the MCP connector URL,
+and the OAuth issuer Claude checks.
+
+```caddyfile
+# Caddy: a custom https domain in front of the app. reverse_proxy passes
+# X-Forwarded-Proto and X-Forwarded-For on its own.
+money.example.com {
+    reverse_proxy localhost:8787
+}
+```
+
+```nginx
+# nginx: say it explicitly.
+location / {
+    proxy_pass http://127.0.0.1:8787;
+    proxy_set_header Host $host;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+}
+```
+
+With a chain of proxies (a CDN in front of Caddy, say) the header arrives as
+`https, http`; the server takes the first entry, which is what the browser saw.
+
 ---
 
 ## 2. Two-factor authentication
@@ -179,8 +206,24 @@ and card half will not work — everything else still will.
 4. Under **API → Allowed redirect URIs**, add the URL Link returns to. For the
    local helper:
    `http://localhost:8788/oauth-return`
-   For the web UI, add `https://your-host/connections/oauth` as well. Plaid
-   rejects Link with `INVALID_FIELD` if the exact URI is not registered.
+   For the web UI it is `https://your-host/connections/oauth`, and you do not
+   have to work it out: **Connections → Plaid dashboard setup** shows the exact
+   value this server sends. Copy that. Plaid rejects Link with `INVALID_FIELD`
+   unless it matches a registered URI character for character.
+
+   **If Link fails with `INVALID_FIELD` on the first bank**, compare the two
+   strings and look for:
+   - **http instead of https.** Your reverse proxy is not sending
+     `X-Forwarded-Proto` (see *Behind a reverse proxy* above). The Connections
+     page flags this when it happens.
+   - **A different host.** `www.` versus bare domain, or the address you typed
+     versus the one the proxy forwards. The URI is built from the host the
+     request arrived on, so open the UI at the address you registered.
+   - **A port.** `https://host:8443/…` and `https://host/…` are different URIs.
+   - **A trailing slash**, or a path other than `/connections/oauth`.
+
+   You can register several URIs, so it is fine to keep both the local helper's
+   and the web UI's.
 
 ```ini
 PLAID_CLIENT_ID=your-client-id

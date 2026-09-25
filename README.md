@@ -349,7 +349,10 @@ Five pages:
   chequing is not counted as spending on top of the purchases it paid for and
   the totals match the Overview. One click shows them; asking for a transfer
   category by name shows them too. Edit a row's merchant and category inline, or "apply to
-  all" on a merchant group to write a rule. Filters live in the query string, so
+  all" on a merchant group to write a rule. Transfer in, Transfer out and Loan
+  payments are always in the category picker, so a card payment the bank filed
+  as something else can be hidden by recategorising it, for one row or as a
+  rule for every future one. Filters live in the query string, so
   a view is a URL you can bookmark. Categories display as ordinary text
   (`Food and drink`, not `FOOD_AND_DRINK`); the stored value is unchanged.
 - **Merchants** — every merchant seen on your cards, the category its spend is
@@ -375,7 +378,17 @@ Five pages:
   account between them.
 - **Settings** — provider credentials, stored encrypted in the database and
   overriding the environment without a redeploy, with a "test all providers"
-  check.
+  check. **Appearance → App name** renames what the UI calls itself (sign-in
+  screen, navigation, browser tab, the Claude connection prompt); clear it to go
+  back to "tally", or set `APP_NAME` in the environment. It is a display
+  preference only: the MCP server, cookies and code keep the name tally, so a
+  renamed install takes updates without a patch. A name longer than about six
+  characters moves the navigation to its own row, rather than letting it wrap.
+- **Connections → Plaid dashboard setup** shows the exact redirect URI, products
+  and environment this server sends to Plaid, and flags an `http://` redirect
+  URI on a real domain, which means the reverse proxy is not passing
+  `X-Forwarded-Proto` and Plaid will refuse Link. See
+  [docs/SETUP.md](docs/SETUP.md) for Caddy and nginx.
 - **Security** — two-factor enrolment, active sessions, authorized MCP clients,
   sign out everywhere.
 
@@ -434,7 +447,7 @@ Read [SECURITY.md](SECURITY.md) before deploying. The short version:
 |---|---|
 | `npm run demo` | Seed a fictional database to try it without credentials |
 | `npm run dev` | Run the server from TypeScript |
-| `npm run check` | Typecheck + 354 tests |
+| `npm run check` | Typecheck + 370 tests |
 | `npm run sync` | One-shot sync; exits non-zero if a source errored |
 | `npm run db:init` | Create the database, seeding `room.json` if present |
 | `npm run hash-password` | Print an `ADMIN_PASSWORD_HASH` |
@@ -456,7 +469,9 @@ against hostile input, the per-profile Plaid
 Item allowance, the period report (a card payment never counted on top of
 its purchases, agreement with cashflow to the cent, net worth at each end of a
 period, and a month nobody measured reporting no change rather than zero),
-the Transactions tab's transfers filter, one sync at a time (a second request
+the Transactions tab's transfers filter, the app name (escaped, capped,
+install-wide, reset by clearing it), the public origin behind a chain of
+proxies, one sync at a time (a second request
 joins the first) and naming which profile's source failed, both session clocks (idle and absolute, and that neither
 extends the other), the guarantee that statement
 PDFs are never persisted (asserted against the source), and the HTTP endpoint

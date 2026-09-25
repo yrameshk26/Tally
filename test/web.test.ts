@@ -398,6 +398,42 @@ describe('refreshing from the Overview', () => {
   });
 });
 
+describe('renaming the app', () => {
+  const save = async (cookie: string, csrf: string, fields: Record<string, string>): Promise<Response> =>
+    fetch(`${base}/settings`, {
+      method: 'POST',
+      headers: { cookie, 'content-type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({ _csrf: csrf, profile: 'me', ...fields }),
+      redirect: 'manual',
+    });
+
+  it('shows the new name everywhere, and goes back to tally when cleared', async () => {
+    const { cookie, csrf } = await login();
+    expect((await save(cookie, csrf, { APP_NAME: 'Vinny Finance' })).status).toBe(303);
+
+    const home = await (await fetch(`${base}/`, { headers: { cookie } })).text();
+    expect(home).toContain('<title>Overview · Vinny Finance</title>');
+    expect(home).toContain('<span class="brand-name">Vinny Finance</span>');
+    expect(home).toContain('Vinny Finance runs on tally');
+    // Signed out, the sign-in screen carries it too.
+    expect(await (await fetch(`${base}/login`)).text()).toContain('<h1>Vinny Finance</h1>');
+
+    // Clearing the field is the way back.
+    await save(cookie, csrf, { APP_NAME: '' });
+    const after = await (await fetch(`${base}/`, { headers: { cookie } })).text();
+    expect(after).toContain('<title>Overview · tally</title>');
+  });
+
+  it('leaves the name alone when the field is not in the form at all', async () => {
+    const { cookie, csrf } = await login();
+    await save(cookie, csrf, { APP_NAME: 'Kept' });
+    // A save from a form without the field, e.g. another profile's page.
+    await save(cookie, csrf, {});
+    expect(await (await fetch(`${base}/login`)).text()).toContain('<h1>Kept</h1>');
+    await save(cookie, csrf, { APP_NAME: '' });
+  });
+});
+
 describe('the activity heartbeat', () => {
   it('accepts a signed-in caller and refuses everyone else', async () => {
     const { cookie } = await login();

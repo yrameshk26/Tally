@@ -3,6 +3,45 @@
 Dated, append-only. Each entry says what was chosen, what it was chosen over,
 and why.
 
+## 2026-09-25 — The app name is a display setting; the header has two layouts
+
+A user renamed "tally" in their copy and then could not take updates without
+losing the change. The name is now `APP_NAME` under Settings → Appearance (or the
+environment). It changes what a person reads: the sign-in screen, the
+navigation, the tab title, the Claude connection prompt. Nothing a machine reads
+changes: the MCP server name, the OAuth resource name, cookie and storage keys
+stay "tally", so connectors, sessions and links survive a rename. The footer
+still credits the project ("X runs on tally"), since the rename is the user's
+and the link is how anyone else finds this.
+
+It is install-wide, stored on the default profile, and cleaned before it is
+stored (control characters out, whitespace collapsed, 40 characters). A blank
+value is refused by `setSetting`; clearing the field in the form is how you go
+back to "tally".
+
+Measuring the header while doing this showed it had no room to spare: at the
+widest, nine links and Sign out leave about 120px, enough for "tally" and not
+much more, and below 1060px it was already wrapping link by link. So the header
+has two layouts. One row when the name is six characters or fewer and the
+screen is at least 1060px; otherwise two rows, name and Sign out on top and the
+whole nav on one line beneath, scrolling sideways if it must, as phones already
+did. The server picks, because it knows the name. Letting flex-wrap decide was
+tried first and stranded Sign out on a line of its own at 1024px, and scrolled
+the whole page sideways at 800px.
+
+## 2026-09-25 — One place builds the public origin
+
+The same user needed several attempts to get Plaid's redirect URI accepted
+behind Caddy. The URI is built from the request, and five places read
+`X-Forwarded-Proto` whole. Behind a chain of proxies that header is
+`https, http`, which produced `https, http://host/connections/oauth`, a URI
+nobody registers. `originOf` now takes the first entry and ignores anything that
+is not a scheme, and everything that builds an absolute URL uses it. The
+Connections page also warns when the redirect URI it is about to send starts
+with `http://` on a real domain, which is what a proxy that does not pass the
+scheme at all looks like, and the setup guide has Caddy and nginx examples and
+a checklist for comparing the two strings.
+
 ## 2026-09-24 — Refresh returns at once; the Overview shows the run
 
 Refresh used to await the whole sync inside the request, so the page sat on
