@@ -589,6 +589,23 @@ export function isTransferLike(category: string | null | undefined): boolean {
   return NOT_SPENDING_CATEGORIES.includes(category ?? '');
 }
 
+/**
+ * Rows for a rollup: a sum or a ranking over a window. A rollup over a
+ * truncated sample is a wrong number, not a partial one, so this is far above
+ * any real household's year rather than a display page size.
+ */
+export const ROLLUP_ROW_LIMIT = 50_000;
+
+/** Split rows into what counts as spending and income, and what does not. */
+export function splitTransfers<T extends { category: string | null }>(
+  rows: T[],
+): { counted: T[]; transfers: T[] } {
+  const counted: T[] = [];
+  const transfers: T[] = [];
+  for (const r of rows) (isTransferLike(r.category) ? transfers : counted).push(r);
+  return { counted, transfers };
+}
+
 export type CashflowResult = {
   start: string;
   end: string;

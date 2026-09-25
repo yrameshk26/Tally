@@ -3,6 +3,21 @@
 Dated, append-only. Each entry says what was chosen, what it was chosen over,
 and why.
 
+## 2026-09-25 — Merchants stops double counting card payments
+
+Found while screenshotting the redesign: the Merchants page listed "Loan
+payments" and "Transfer out" as expense categories and added them to its total,
+so paying a card from chequing counted the card's purchases twice, which is the
+bug fixed on the Transactions tab and in reports two days earlier. The page and
+`get_spend_by_merchant` never picked up the shared exclusion. Both do now, via
+`splitTransfers`, and both say how many rows they left out; the MCP tool takes
+`include_transfers` like `get_cashflow`.
+
+Both also capped their rows at 1,000 under a comment saying they read the whole
+window. The Merchants page defaults to a year, and a dozen linked banks pass a
+thousand transactions long before that, so the totals silently covered only the
+newest ones. Rollups now read up to `ROLLUP_ROW_LIMIT`.
+
 ## 2026-09-25 — The UI moves to a sidebar app shell
 
 A visual revamp: a fixed sidebar with grouped, icon-led navigation on desktop,

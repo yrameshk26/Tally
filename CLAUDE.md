@@ -80,15 +80,18 @@ history is public too.
    must never break it.
 12. **What counts as spending is defined once.** `NOT_SPENDING_CATEGORIES` in
    `src/queries.ts` (transfers in and out, and card/loan payments) is excluded
-   by cashflow, by the Transactions tab's totals and by the period report, and
-   all three read categories *after* corrections, so a rule that files a row as
+   by cashflow, the Transactions tab's totals, the period report, the Merchants
+   page and `get_spend_by_merchant`, and all of them read categories *after*
+   corrections, so a rule that files a row as
    a transfer removes it everywhere at once. A new surface that totals income
    or spending uses `getCashflow` or `isTransferLike`, never its own list:
    paying a card from chequing counted alongside the purchases it paid for is
    the double count this exists to prevent. The report's figures come from
    `getCashflow` unchanged, and `test/report.test.ts` pins that they agree to
-   the cent. The report's PDF is the browser's print dialog, not a PDF library;
-   keep it that way (see DECISIONS.md).
+   the cent. A rollup reads its whole window (`ROLLUP_ROW_LIMIT`), never a page
+   of rows: a total over the newest thousand transactions is wrong, not partial.
+   The report's PDF is the browser's print dialog, not a PDF library; keep it
+   that way (see DECISIONS.md).
 13. **One sync at a time, and the web UI never waits on it.** `runSync`
    is single-flight: a second caller (the Refresh button, the nightly job, MCP
    `sync_now`) gets the run already in progress. Start syncs only through it —

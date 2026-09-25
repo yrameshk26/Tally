@@ -239,6 +239,51 @@ describe('the printed page', () => {
   });
 });
 
+describe('spend by merchant, over MCP', () => {
+  type Rollup = {
+    transactions: number;
+    excluded_transfers: number;
+    groups: Array<{ category?: string; merchant?: string; spend_cad: number }>;
+  };
+  const call = async (args: Record<string, unknown>): Promise<Rollup> => {
+    const def = toolDefs(db).find((d) => d.name === 'get_spend_by_merchant')!;
+    const res = await def.handler({ start: '2026-08-01', end: '2026-08-31', ...args });
+    return JSON.parse((res.content[0] as { text: string }).text) as Rollup;
+  };
+
+  it('does not count a card payment on top of the purchases it paid for', async () => {
+    const r = await call({ group_by: 'category' });
+    const cats = r.groups.map((g) => g.category);
+    expect(cats).not.toContain('LOAN_PAYMENTS');
+    expect(cats).not.toContain('TRANSFER_OUT');
+    // 300 of purchases, plus the pending coffee this rollup has always shown.
+    expect(r.groups.reduce((s, g) => s + g.spend_cad, 0)).toBe(345);
+    expect(r.excluded_transfers).toBe(4);
+  });
+
+  it('includes them when asked', async () => {
+    const r = await call({ group_by: 'category', include_transfers: true });
+    expect(r.groups.map((g) => g.category)).toContain('LOAN_PAYMENTS');
+    expect(r.excluded_transfers).toBe(0);
+  });
+
+  it('reads the whole window, not the first thousand rows', async () => {
+    // A year with a dozen linked banks is well past a thousand transactions;
+    // a rollup over the newest thousand is a wrong total, not a partial one.
+    upsertTransactions(
+      db,
+      Array.from({ length: 1_200 }, (_, i) =>
+        tx(`bulk-${String(i)}`, 'card', '2026-08-12', 1, 'SHOPPING', 'Corner Store'),
+      ),
+    );
+    const r = await call({ group_by: 'merchant', limit: 3 });
+    expect(r.transactions).toBeGreaterThan(1_200);
+    expect(r.groups.find((g) => g.merchant === 'Corner Store')?.spend_cad).toBe(1_200);
+    // `limit` trims the groups shown, never the rows summed.
+    expect(r.groups).toHaveLength(3);
+  });
+});
+
 describe('over MCP', () => {
   it('is a read-only tool that returns the same report', async () => {
     const def = toolDefs(db).find((d) => d.name === 'get_period_report');

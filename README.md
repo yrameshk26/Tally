@@ -124,7 +124,7 @@ question:
 | `set_contributed`, `set_room_limit` | Correct the room figures by hand |
 | `list_profiles`, `create_profile`, `rename_profile`, `delete_profile` | Manage profiles |
 | `move_account` | Re-attribute an account to another profile |
-| `get_spend_by_merchant` | Rollup by merchant or category — where duplicate spellings show up |
+| `get_spend_by_merchant` | Rollup by merchant or category, over the whole window — where duplicate spellings show up. Transfers and card payments left out unless `include_transfers` |
 | `set_transaction_category` | Correct one transaction's merchant or category |
 | `set_merchant_rule`, `list_merchant_rules`, `delete_merchant_rule` | Rewrite every match, past and future |
 | `set_merchant_category` | File one merchant under a category, creating it if needed |
@@ -364,7 +364,8 @@ Server-rendered, no framework, no webfonts, no inline styles under a strict CSP.
   filed under, which cards paid it, and when. Set a category per merchant from a
   picker, filter to uncategorised only, and add categories of your own. Above it,
   expenses by category as a ranked bar chart plus a totals table with each
-  category's share.
+  category's share. Transfers and card payments are left out of the directory
+  and the totals, with a count and a link to them on the Transactions tab.
 - **Reports** — one month or one calendar year: net worth at the start and end
   and the change, income, spending, net saved and savings rate, income and
   spending by month (for a year), spending by category with each share, top
@@ -455,7 +456,7 @@ Read [SECURITY.md](SECURITY.md) before deploying. The short version:
 |---|---|
 | `npm run demo` | Seed a fictional database to try it without credentials |
 | `npm run dev` | Run the server from TypeScript |
-| `npm run check` | Typecheck + 384 tests |
+| `npm run check` | Typecheck + 388 tests |
 | `npm run sync` | One-shot sync; exits non-zero if a source errored |
 | `npm run db:init` | Create the database, seeding `room.json` if present |
 | `npm run hash-password` | Print an `ADMIN_PASSWORD_HASH` |

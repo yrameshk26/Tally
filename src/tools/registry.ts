@@ -21,6 +21,9 @@ import {
   getNetWorth,
   getNetWorthHistory,
   getTransactions,
+  NOT_SPENDING_CATEGORIES,
+  ROLLUP_ROW_LIMIT,
+  splitTransfers,
   groupByCategory,
   groupByMerchant,
   knownCategories,
@@ -512,7 +515,9 @@ export function toolDefs(db: DB): ToolDef[] {
       'Transactions rolled up by merchant (or by category) after hand corrections, with spend, ' +
       'money received, count and date range per group. Use this to find where money actually ' +
       'goes, and to spot one merchant recorded under two spellings — those show up as two ' +
-      'groups with similar names, and set_merchant_rule merges them.',
+      'groups with similar names, and set_merchant_rule merges them. Transfers between the ' +
+      'household’s own accounts and card/loan payments are left out by default, so paying a ' +
+      'card is not counted on top of its purchases; the response says how many were left out.',
     inputSchema: {
       start: DATE.optional(),
       end: DATE.optional(),
@@ -521,6 +526,7 @@ export function toolDefs(db: DB): ToolDef[] {
       group_by: z.enum(['merchant', 'category']).optional(),
       search: z.string().optional(),
       limit: z.number().int().min(1).max(200).optional(),
+      include_transfers: z.boolean().optional(),
     },
     annotations: READ_ONLY,
     handler: (args) => {
@@ -528,8 +534,11 @@ export function toolDefs(db: DB): ToolDef[] {
         const start = args.start ?? daysAgoISO(180);
         const end = args.end ?? todayISO();
         // A rollup over a truncated sample is a wrong number, not a partial
-        // one, so read the rows without the caller's display limit.
-        const rows = getTransactions(db, { ...args, start, end, limit: 1000 });
+        // one, so read the whole window; `limit` only trims the groups shown.
+        const { limit, include_transfers, ...filters } = args;
+        const window = getTransactions(db, { ...filters, start, end, limit: ROLLUP_ROW_LIMIT });
+        const { counted, transfers } = splitTransfers(window);
+        const rows = include_transfers ? window : counted;
         const groups =
           args.group_by === 'category' ? groupByCategory(rows) : groupByMerchant(rows);
         return ok({
@@ -537,7 +546,9 @@ export function toolDefs(db: DB): ToolDef[] {
           end,
           group_by: args.group_by ?? 'merchant',
           transactions: rows.length,
-          groups: args.limit ? groups.slice(0, args.limit) : groups,
+          excluded_transfers: include_transfers ? 0 : transfers.length,
+          excluded_categories: include_transfers ? [] : NOT_SPENDING_CATEGORIES,
+          groups: limit ? groups.slice(0, limit) : groups,
         });
       } catch (e) {
         return fail(e);

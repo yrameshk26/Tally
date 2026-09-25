@@ -1446,6 +1446,8 @@ export function merchantsPage(opts: {
   categories: string[];
   customCategories: string[];
   profiles: Profile[];
+  /** Transfers and card payments left out of the directory and the totals. */
+  hiddenTransfers?: number;
   flash?: SafeHtml;
 }): SafeHtml {
   const f = opts.filters;
@@ -1521,6 +1523,16 @@ export function merchantsPage(opts: {
       <div class="kpi"><div class="label">Uncategorised</div><div class="value ${uncategorized.length ? 'neg' : 'muted'}">${String(uncategorized.length)}</div></div>
       <div class="kpi"><div class="label">Total spend</div><div class="value neg">${money(-totalSpend)}</div></div>
     </div>
+    ${
+      opts.hiddenTransfers
+        ? html`<p class="hint mb">
+            ${String(opts.hiddenTransfers)} transfer${opts.hiddenTransfers === 1 ? '' : 's'} and card
+            payment${opts.hiddenTransfers === 1 ? '' : 's'} are left out: moving money between your own
+            accounts is not spending, and paying a card would count its purchases twice.
+            <a href="/transactions?transfers=show&amp;start=${f.start}&amp;end=${f.end}">See them on the Transactions tab</a>
+          </p>`
+        : raw('')
+    }
 
     <section>
       <h2>Expenses by category</h2>

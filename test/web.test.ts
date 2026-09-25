@@ -310,6 +310,18 @@ describe('transfers on the Transactions tab', () => {
     expect(body).toContain('-$500.00');
   });
 
+  it('keeps them out of the Merchants totals too', async () => {
+    seed();
+    const { cookie } = await login();
+    const body = await (
+      await fetch(`${base}/merchants?start=2031-04-01&end=2031-04-30`, { headers: { cookie } })
+    ).text();
+    // 250 of groceries is the only spending; the payment would have doubled it.
+    expect(body).toContain('-$250.00');
+    expect(body).not.toContain('-$500.00');
+    expect(body).toMatch(/2 transfers and card\s+payments are left out/);
+  });
+
   it('steps aside when you ask for a transfer category by name', async () => {
     seed();
     const body = await page('&category=LOAN_PAYMENTS');

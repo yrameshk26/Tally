@@ -93,6 +93,8 @@ import {
   groupByMerchant,
   isTransferLike,
   knownCategories,
+  ROLLUP_ROW_LIMIT,
+  splitTransfers,
   listAccounts,
 } from '../queries.ts';
 import {
@@ -1057,14 +1059,18 @@ export function createWebRouter(db: DB): express.Router {
     const f = readMerchantFilters(req);
     // A directory over a truncated sample would show the wrong merchants, not
     // merely fewer, so this reads the whole window.
-    const rows = getTransactions(db, {
+    const window = getTransactions(db, {
       start: f.start,
       end: f.end,
       ...(f.profile ? { profile: f.profile } : {}),
       ...(f.account_id ? { account_id: f.account_id } : {}),
       ...(f.search ? { search: f.search } : {}),
-      limit: 1000,
+      limit: ROLLUP_ROW_LIMIT,
     });
+    // Paying a card and moving money to savings are not merchants or spending:
+    // counted here they doubled the card's purchases in "Expenses by category"
+    // and the total. Same exclusion as cashflow and the Transactions tab.
+    const { counted: rows, transfers } = splitTransfers(window);
     const all = groupByMerchant(rows);
     const merchants = f.uncategorized
       ? all.filter((m) => !m.category || m.category === 'UNCATEGORIZED')
@@ -1080,6 +1086,7 @@ export function createWebRouter(db: DB): express.Router {
         filters: f,
         merchants,
         categoryGroups: groupByCategory(rows),
+        hiddenTransfers: transfers.length,
         cards: listAccounts(db, {}),
         categories: knownCategories(db),
         customCategories: customCategories(db),
