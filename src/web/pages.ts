@@ -4,7 +4,7 @@
  * for why that matters here specifically.
  */
 import { esc, html, join, money, raw, type SafeHtml } from '../lib/html.ts';
-import { csrfField, notice } from './layout.ts';
+import { brandMark, csrfField, notice } from './layout.ts';
 import {
   isLiabilityAccount,
   type AccountView,
@@ -69,9 +69,10 @@ export function loginPage(opts: {
   /** Minutes of inactivity that ended the last session, if that is why we are here. */
   idleMinutes?: number;
   appName?: string;
+  logoUrl?: string | null;
 }): SafeHtml {
   return html`<div class="login">
-    ${raw(logoSvg(56, 'mark'))}
+    ${brandMark(opts.logoUrl ?? null, 56)}
     <h1>${opts.appName || 'tally'}</h1>
     <p class="sub">Sign in to manage connections and view your summary.</p>
     ${opts.error ? notice('err', opts.error) : raw('')}
@@ -449,6 +450,8 @@ const LABELS: Record<string, { label: string; hint: string }> = {
 };
 
 export function settingsPage(opts: {
+  nonce?: string;
+  logoUrl?: string | null;
   settings: SettingView[];
   profiles: Profile[];
   activeProfile: Profile;
@@ -531,6 +534,54 @@ export function settingsPage(opts: {
       <div class="row"><button type="submit">Save settings</button>
         <span class="muted">Secrets are encrypted at rest and never displayed again.</span></div>
     </form>
+
+    ${
+      // Its own section, outside the settings form: a file upload cannot live
+      // inside another form, and it posts the raw file rather than fields.
+      opts.isDefaultProfile
+        ? html`<section class="mt">
+            <h2>Logo</h2>
+            <div class="logo-row">
+              <div class="logo-preview">${brandMark(opts.logoUrl ?? null, 56)}</div>
+              <div>
+                <p class="hint mb-sm">Replaces the mark in the navigation, on the sign-in screen and in
+                  the browser tab. PNG, JPEG or WebP, up to 256 KB; a square image looks best.
+                  SVG is not accepted, since an SVG can carry script.</p>
+                <div class="row">
+                  <input type="file" id="logo-file" accept="image/png,image/jpeg,image/webp" aria-label="Logo image">
+                  <button type="button" id="logo-upload" class="secondary">Upload</button>
+                  <span class="muted" id="logo-msg" role="status"></span>
+                </div>
+                ${
+                  opts.logoUrl
+                    ? html`<form method="post" action="/settings/logo/delete" class="mt-sm">
+                        ${csrfField(opts.csrf)}
+                        <button class="secondary" type="submit">Remove logo</button>
+                      </form>`
+                    : raw('')
+                }
+              </div>
+            </div>
+          </section>
+          ${raw(
+            `<script nonce="${opts.nonce ?? ''}">(()=>{` +
+              `const f=document.getElementById('logo-file'),b=document.getElementById('logo-upload'),m=document.getElementById('logo-msg');` +
+              `if(!f||!b)return;` +
+              `b.addEventListener('click',async()=>{const file=f.files&&f.files[0];` +
+              `if(!file){m.textContent='Choose an image first.';return}` +
+              `if(file.size>262144){m.textContent='That file is over 256 KB.';return}` +
+              `b.setAttribute('aria-disabled','true');m.textContent='Uploading…';` +
+              `try{const r=await fetch('/settings/logo',{method:'POST',` +
+              `headers:{'content-type':'application/octet-stream','x-csrf-token':${JSON.stringify(opts.csrf)}},body:file});` +
+              `const j=await r.json().catch(()=>({ok:false,error:'Upload failed ('+r.status+').'}));` +
+              `if(j.ok){location.replace('/settings?ok='+encodeURIComponent('Logo updated.'));return}` +
+              `m.textContent=j.error||'Upload failed.'}catch(_){m.textContent='Upload failed. Check your connection.'}` +
+              `b.removeAttribute('aria-disabled')})})();` +
+              `</scr` +
+              `ipt>`,
+          )}`
+        : raw('')
+    }
 
     <section class="mt">
       <h2>Check credentials</h2>

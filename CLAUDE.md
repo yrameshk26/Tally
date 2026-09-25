@@ -105,11 +105,18 @@ history is public too.
    ignores a value that is not a scheme. Five copies of the header read used to
    exist and all took it whole, which built `https, http://host/…` and made
    Plaid refuse Link. Do not read the header anywhere else.
-15. **Never scrape.** Wealthsimple's private GraphQL API is off limits;
+15. **An uploaded logo is a raster image, decided by its bytes.** `src/brand.ts`
+   accepts PNG, JPEG and WebP only, identified by magic bytes, never by the
+   file name or the type the browser claimed; 256 KB at most. Never SVG: it is a
+   document that can run script, and opened at its own URL it would run on this
+   origin inside a signed-in session. `/brand/logo` is public (the sign-in screen
+   needs it) and is served with the sniffed type, `nosniff` and
+   `default-src 'none'; sandbox`. Keep all three.
+16. **Never scrape.** Wealthsimple's private GraphQL API is off limits;
    SnapTrade only.
-16. **After every task:** `npm run typecheck && npm test`. Both must be clean
+17. **After every task:** `npm run typecheck && npm test`. Both must be clean
    before committing. Conventional commits, one per completed task.
-17. **Docs ship with the change, in the same commit.** Any new or changed
+18. **Docs ship with the change, in the same commit.** Any new or changed
    feature updates `README.md` and this file before the commit — never "later",
    never a follow-up commit. Concretely:
    - a new or renamed MCP tool → the tool table in README.md
@@ -121,7 +128,7 @@ history is public too.
    - a changed test count → the Development section
    The test is whether someone reading only these two files would be surprised
    by the code. If yes, the docs are not done.
-18. **The Link helper never deploys.** `src/link-server.ts` runs on the
+19. **The Link helper never deploys.** `src/link-server.ts` runs on the
    developer's machine only. Port 8788 must not be exposed and the file is
    deleted from the Docker image.
 
@@ -135,6 +142,7 @@ src/
                   built-in assistant, so neither can hold a capability the
                   other lacks
   summary.ts      composes the read models into one picture (get_financial_summary)
+  brand.ts        uploaded logo: raster only, sniffed by its bytes, in the database
   report.ts       one month or one year: net worth at each end, cashflow, top
                   merchants, largest expenses — the Reports page and
                   get_period_report both read this

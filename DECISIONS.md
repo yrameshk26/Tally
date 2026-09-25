@@ -3,6 +3,24 @@
 Dated, append-only. Each entry says what was chosen, what it was chosen over,
 and why.
 
+## 2026-09-25 — A custom logo, raster only
+
+Settings → Appearance takes a logo for the navigation, sign-in screen and tab
+icon. PNG, JPEG and WebP only, identified by their first bytes; 256 KB at most;
+stored in `brand_assets` so it is in every backup and needs no writable path.
+
+SVG is refused even though it is the natural format for a logo. It is a
+document, not a picture: it can carry script, and someone opening its URL
+directly would run that script on this origin with the session cookie attached.
+Sanitising SVG is a library and an arms race; not accepting it is neither. The
+route is public, because the sign-in screen shows the logo before anyone signs
+in, so it is served with the sniffed type, `nosniff` and a `sandbox` CSP. The
+content hash in the URL lets it be cached for a year.
+
+The upload posts the raw file with the CSRF token in a header, from a few lines
+of script on the Settings page. A multipart form would have needed a parser
+dependency for one field.
+
 ## 2026-09-25 — The app name is a display setting; the header has two layouts
 
 A user renamed "tally" in their copy and then could not take updates without

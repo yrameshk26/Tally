@@ -293,6 +293,16 @@ CREATE TABLE IF NOT EXISTS meta (
   key   TEXT PRIMARY KEY,
   value TEXT NOT NULL
 );
+
+-- An uploaded logo. Raster only (see src/brand.ts); kept in the database so it
+-- travels with the backup and needs no writable path on the host.
+CREATE TABLE IF NOT EXISTS brand_assets (
+  name        TEXT PRIMARY KEY,
+  mime        TEXT NOT NULL,
+  data        BLOB NOT NULL,
+  sha         TEXT NOT NULL,
+  updated_at  TEXT NOT NULL
+);
 `;
 
 let handle: DB | null = null;

@@ -384,6 +384,9 @@ Five pages:
   preference only: the MCP server, cookies and code keep the name tally, so a
   renamed install takes updates without a patch. A name longer than about six
   characters moves the navigation to its own row, rather than letting it wrap.
+  **Logo** replaces the mark in the navigation, the sign-in screen and the
+  browser tab: PNG, JPEG or WebP up to 256 KB, stored in the database so it
+  travels with backups. SVG is refused, because an SVG can carry script.
 - **Connections → Plaid dashboard setup** shows the exact redirect URI, products
   and environment this server sends to Plaid, and flags an `http://` redirect
   URI on a real domain, which means the reverse proxy is not passing
@@ -447,7 +450,7 @@ Read [SECURITY.md](SECURITY.md) before deploying. The short version:
 |---|---|
 | `npm run demo` | Seed a fictional database to try it without credentials |
 | `npm run dev` | Run the server from TypeScript |
-| `npm run check` | Typecheck + 370 tests |
+| `npm run check` | Typecheck + 384 tests |
 | `npm run sync` | One-shot sync; exits non-zero if a source errored |
 | `npm run db:init` | Create the database, seeding `room.json` if present |
 | `npm run hash-password` | Print an `ADMIN_PASSWORD_HASH` |
@@ -469,7 +472,9 @@ against hostile input, the per-profile Plaid
 Item allowance, the period report (a card payment never counted on top of
 its purchases, agreement with cashflow to the cent, net worth at each end of a
 period, and a month nobody measured reporting no change rather than zero),
-the Transactions tab's transfers filter, the app name (escaped, capped,
+the Transactions tab's transfers filter, logo uploads (SVG and HTML refused by
+their bytes whatever they are called, served with nosniff and a sandbox CSP),
+the app name (escaped, capped,
 install-wide, reset by clearing it), the public origin behind a chain of
 proxies, one sync at a time (a second request
 joins the first) and naming which profile's source failed, both session clocks (idle and absolute, and that neither

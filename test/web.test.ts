@@ -434,6 +434,63 @@ describe('renaming the app', () => {
   });
 });
 
+describe('uploading a logo', () => {
+  const PNG = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13, 0x49, 0x48, 0x44, 0x52]);
+  const upload = (cookie: string, csrf: string | null, body: Buffer): Promise<Response> =>
+    fetch(`${base}/settings/logo`, {
+      method: 'POST',
+      headers: {
+        cookie,
+        'content-type': 'application/octet-stream',
+        ...(csrf ? { 'x-csrf-token': csrf } : {}),
+      },
+      body,
+    });
+
+  it('needs the CSRF token, like every other change', async () => {
+    const { cookie } = await login();
+    expect((await upload(cookie, null, PNG)).status).toBe(403);
+  });
+
+  it('refuses an SVG with a reason, even one that claims to be a PNG', async () => {
+    const { cookie, csrf } = await login();
+    const res = await upload(cookie, csrf, Buffer.from('<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>'));
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as { error: string }).error).toMatch(/SVG is not accepted/);
+  });
+
+  it('serves an accepted logo as an image and nothing else, to anyone', async () => {
+    const { cookie, csrf } = await login();
+    expect((await upload(cookie, csrf, PNG)).status).toBe(200);
+    const home = await (await fetch(`${base}/`, { headers: { cookie } })).text();
+    const src = /<img class="mark mark-img" src="([^"]+)"/.exec(home)?.[1] ?? '';
+    expect(src).toMatch(/^\/brand\/logo\?v=/);
+
+    // No cookie: the sign-in screen needs it before anyone has signed in.
+    const res = await fetch(`${base}${src}`);
+    expect(res.status).toBe(200);
+    expect(res.headers.get('content-type')).toBe('image/png');
+    expect(res.headers.get('x-content-type-options')).toBe('nosniff');
+    expect(res.headers.get('content-security-policy')).toBe("default-src 'none'; sandbox");
+    expect(res.headers.get('cache-control')).toContain('immutable');
+    expect(Buffer.from(await res.arrayBuffer()).equals(PNG)).toBe(true);
+  });
+
+  it('goes back to the built-in mark when removed', async () => {
+    const { cookie, csrf } = await login();
+    await upload(cookie, csrf, PNG);
+    await fetch(`${base}/settings/logo/delete`, {
+      method: 'POST',
+      headers: { cookie, 'content-type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({ _csrf: csrf }),
+      redirect: 'manual',
+    });
+    expect((await fetch(`${base}/brand/logo`)).status).toBe(404);
+    const home = await (await fetch(`${base}/`, { headers: { cookie } })).text();
+    expect(home).toContain('/favicon.svg');
+  });
+});
+
 describe('the activity heartbeat', () => {
   it('accepts a signed-in caller and refuses everyone else', async () => {
     const { cookie } = await login();

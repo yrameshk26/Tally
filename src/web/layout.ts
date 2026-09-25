@@ -9,6 +9,13 @@ import { logoSvg } from './logo.ts';
 
 export type Nav = { href: string; label: string };
 
+/** The uploaded logo if there is one, otherwise the built-in tally mark. */
+export function brandMark(logoUrl: string | null, size: number): SafeHtml {
+  return logoUrl
+    ? html`<img class="mark mark-img" src="${logoUrl}" alt="" width="${String(size)}" height="${String(size)}">`
+    : raw(logoSvg(size, 'mark'));
+}
+
 export const NAV: Nav[] = [
   { href: '/', label: 'Overview' },
   { href: '/transactions', label: 'Transactions' },
@@ -170,6 +177,10 @@ header{
 .brand-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .brand .mark{color:var(--accent);flex:0 0 auto}
 .login .mark{color:var(--accent);display:block;margin:0 auto .6rem}
+.mark-img{object-fit:contain;border-radius:22%}
+.logo-row{display:flex;gap:1.1rem;align-items:flex-start}
+.logo-preview{flex:none;padding:.6rem;border:1px solid var(--line);border-radius:var(--radius);background:var(--bg-sunk)}
+.logo-preview .mark{color:var(--accent);display:block}
 nav{display:flex;gap:.15rem;flex:1;flex-wrap:wrap}
 nav a{
   padding:.38rem .72rem;border-radius:var(--radius-sm);text-decoration:none;
@@ -569,6 +580,8 @@ export function page(opts: {
   body: SafeHtml;
   /** What the UI calls itself (Settings → Appearance). Defaults to "tally". */
   appName?: string;
+  /** An uploaded logo (src/brand.ts), or null for the built-in mark. */
+  logoUrl?: string | null;
 }): string {
   const { title, nonce, current, chrome = true, body } = opts;
   const name = opts.appName || 'tally';
@@ -580,7 +593,7 @@ export function page(opts: {
         // header takes two rows at every width, rather than wrapping raggedly.
         [...name].length > 6 ? ' two-row' : ''
       }">
-        <a class="brand" href="/" title="${name}">${raw(logoSvg(22, 'mark'))}<span class="brand-name">${name}</span></a>
+        <a class="brand" href="/" title="${name}">${brandMark(opts.logoUrl ?? null, 22)}<span class="brand-name">${name}</span></a>
         <nav>${raw(
           NAV.map(
             (n) =>
@@ -643,7 +656,7 @@ export function page(opts: {
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="robots" content="noindex,nofollow">
 <meta name="color-scheme" content="light dark">
-<link rel="icon" type="image/svg+xml" href="/favicon.svg">
+${opts.logoUrl ? `<link rel="icon" href="${esc(opts.logoUrl)}">` : '<link rel="icon" type="image/svg+xml" href="/favicon.svg">'}
 <title>${title} · ${esc(name)}</title>
 <style nonce="${nonce}">${CSS}</style>
 ${speculation}

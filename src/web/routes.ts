@@ -137,6 +137,7 @@ import {
   turnsFor,
 } from '../llm/store.ts';
 import { failedSources, lastSyncReport, runSync, syncProgress } from '../sync.ts';
+import { MAX_LOGO_BYTES, deleteLogo, getLogo, logoUrl, setLogo } from '../brand.ts';
 import { loadRates } from '../fx.ts';
 import { createFailureLimiter } from '../ratelimit.ts';
 import { originOf, safeNext } from './oauth.ts';
@@ -213,7 +214,9 @@ export function createWebRouter(db: DB): express.Router {
   };
 
   const render = (req: Ctx, res: Response, title: string, body: ReturnType<typeof html>, current?: string, chrome = true): void => {
-    res.type('html').send(page({ title, nonce: req.nonce ?? '', current, chrome, body, appName: appName(db) }));
+    res.type('html').send(
+      page({ title, nonce: req.nonce ?? '', current, chrome, body, appName: appName(db), logoUrl: logoUrl(db) }),
+    );
   };
 
   const sessionOf = (req: Ctx): Session | null =>
@@ -257,6 +260,58 @@ export function createWebRouter(db: DB): express.Router {
     return msg ? notice(kind, msg) : raw('');
   };
 
+  // --- logo ------------------------------------------------------------------
+
+  /**
+   * Public, because the sign-in screen shows it before anyone has signed in.
+   * Served with its sniffed type, nosniff, and a CSP that forbids everything, so
+   * even opened on its own it is an image and nothing else. The content hash in
+   * the URL is what makes a year of caching safe.
+   */
+  router.get('/brand/logo', (req: Ctx, res: Response) => {
+    const logo = getLogo(db);
+    if (!logo) {
+      res.status(404).type('text/plain').send('no logo');
+      return;
+    }
+    res
+      .set('Content-Type', logo.mime)
+      .set('Content-Security-Policy', "default-src 'none'; sandbox")
+      .set('Content-Disposition', 'inline; filename="logo"')
+      .set(
+        'Cache-Control',
+        req.query['v'] === logo.sha ? 'public, max-age=31536000, immutable' : 'no-cache',
+      )
+      .send(logo.data);
+  });
+
+  /**
+   * The raw file as the request body, sent by the Settings page's script, with
+   * the CSRF token in a header. Raw rather than multipart because a multipart
+   * parser is a dependency for one form. The parser's own limit sits above the
+   * real one so an oversize file gets setLogo's plain message, not a bare 413.
+   */
+  router.post(
+    '/settings/logo',
+    requireAuth,
+    express.raw({ type: 'application/octet-stream', limit: MAX_LOGO_BYTES * 4 }),
+    requireCsrf,
+    (req: Ctx, res: Response) => {
+      try {
+        const body = Buffer.isBuffer(req.body) ? req.body : Buffer.alloc(0);
+        setLogo(db, body);
+        res.json({ ok: true });
+      } catch (e) {
+        res.status(400).json({ ok: false, error: errMessage(e) });
+      }
+    },
+  );
+
+  router.post('/settings/logo/delete', requireAuth, requireCsrf, (_req: Ctx, res: Response) => {
+    deleteLogo(db);
+    res.redirect(303, `/settings?ok=${encodeURIComponent('Logo removed. Using the built-in mark.')}`);
+  });
+
   // --- login / logout ------------------------------------------------------
 
   router.get('/login', (req: Ctx, res: Response) => {
@@ -277,6 +332,7 @@ export function createWebRouter(db: DB): express.Router {
         next: safeNext(req.query['next']),
         idleMinutes: req.query['idle'] === '1' ? config.sessionIdleMinutes : 0,
         appName: appName(db),
+        logoUrl: logoUrl(db),
       }),
       undefined,
       false,
@@ -295,7 +351,15 @@ export function createWebRouter(db: DB): express.Router {
         req,
         res,
         'Sign in',
-        loginPage({ csrf: '', totpEnabled: totpEnabled(db), error: message, username, next, appName: appName(db) }),
+        loginPage({
+          csrf: '',
+          totpEnabled: totpEnabled(db),
+          error: message,
+          username,
+          next,
+          appName: appName(db),
+          logoUrl: logoUrl(db),
+        }),
         undefined,
         false,
       );
@@ -568,6 +632,8 @@ export function createWebRouter(db: DB): express.Router {
       res,
       'Settings',
       settingsPage({
+        nonce: req.nonce ?? '',
+        logoUrl: logoUrl(db),
         settings: describeSettings(db, activeProfile(req).id),
         profiles: listProfiles(db),
         activeProfile: activeProfile(req),

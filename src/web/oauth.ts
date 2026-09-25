@@ -23,6 +23,7 @@ import { csrfField } from './layout.ts';
 import { safeEqual } from '../auth/password.ts';
 import { COOKIE_NAME, getSession, parseCookies, type Session } from '../auth/session.ts';
 import { appName } from '../settings.ts';
+import { logoUrl } from '../brand.ts';
 import {
   SCOPE,
   clientRedirectUris,
@@ -255,7 +256,7 @@ export function createOAuthRouter(db: DB): express.Router {
     res
       .set('Cache-Control', 'no-store')
       .type('html')
-      .send(page({ title, nonce, chrome: false, body, appName: appName(db) }));
+      .send(page({ title, nonce, chrome: false, body, appName: appName(db), logoUrl: logoUrl(db) }));
   };
 
   router.get('/oauth/authorize', (req: Request, res: Response) => {
