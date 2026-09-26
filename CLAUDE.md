@@ -107,7 +107,11 @@ history is public too.
    entry of `X-Forwarded-Proto` (a chain of proxies sends `https, http`) and
    ignores a value that is not a scheme. Five copies of the header read used to
    exist and all took it whole, which built `https, http://host/…` and made
-   Plaid refuse Link. Do not read the header anywhere else.
+   Plaid refuse Link. Do not read the header anywhere else. The one exception is
+   the Plaid redirect: `plaidRedirectFor` prefers `PLAID_REDIRECT_URI` when its
+   path is `/connections/oauth`, since what was registered in the dashboard is
+   what Plaid accepts, and a built value that differs only fails on the first
+   OAuth bank.
 15. **An uploaded logo is a raster image, decided by its bytes.** `src/brand.ts`
    accepts PNG, JPEG and WebP only, identified by magic bytes, never by the
    file name or the type the browser claimed; 256 KB at most. Never SVG: it is a
@@ -173,10 +177,13 @@ src/
   link-server.ts  LOCAL ONLY Plaid Link helper
   sources/        snaptrade.ts, plaid.ts, wise.ts, statements.ts (never persisted)
   web/            routes, pages, layout (app shell + the one stylesheet, as
-                  tokens), icons (hand-drawn), charts, markdown, OAuth pages,
-                  logo
+                  tokens; the theme choice is per browser, in localStorage,
+                  applied from <head>), icons (hand-drawn), charts, markdown,
+                  OAuth pages, logo
   auth/           password, TOTP, sessions
-  lib/            logger, money, registered-type classifier, token crypto, html
+  lib/            logger, money, registered-type classifier, token crypto, html,
+                  category (Plaid's RENT_AND_UTILITIES split into RENT and
+                  UTILITIES at write time, from its detailed category)
 scripts/          db-init, sync, backup, demo (fictional data, no network)
 test/             vitest — pure logic, fixtures, and the HTTP endpoint
 .github/          CI, dependabot, issue templates, FUNDING.yml

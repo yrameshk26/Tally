@@ -109,6 +109,23 @@ describe('reading a period', () => {
     expect(parsePeriod({ period: 'year', year: 'soon' }, TODAY)).toEqual({ kind: 'year', year: 2026 });
   });
 
+  it('reads the month and the year as two fields, the way the page sends them', () => {
+    expect(parsePeriod({ period: 'month', month: '03', year: '2025' }, TODAY)).toEqual({ kind: 'month', month: '2025-03' });
+    // A month with no usable year is not guessed at.
+    expect(parsePeriod({ period: 'month', month: '03', year: 'soon' }, TODAY)).toEqual({ kind: 'month', month: '2026-08' });
+  });
+
+  it('offers a month dropdown, not a browser month picker', () => {
+    const out = reportPage({
+      nonce: 'n',
+      report: buildPeriodReport(db, { period: { kind: 'month', month: '2026-08' } }, TODAY),
+      profiles: [],
+    }).value;
+    expect(out).not.toContain('type="month"');
+    expect(out).toContain('<option value="08" selected>August</option>');
+    expect(out).toContain('<option value="2026" selected>2026</option>');
+  });
+
   it('knows how long February is', () => {
     expect(periodBounds({ kind: 'month', month: '2028-02' }, TODAY).end).toBe('2028-02-29');
     expect(periodBounds({ kind: 'month', month: '2026-02' }, TODAY).end).toBe('2026-02-28');

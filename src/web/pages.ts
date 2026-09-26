@@ -25,6 +25,7 @@ import { areaChart, chartRuntime, groupedColumns, hBars, stackedBar } from './ch
 import { renderMarkdown } from './markdown.ts';
 import type { ChatRow, StoredMessage } from '../llm/store.ts';
 import type { PeriodReport } from '../report.ts';
+import type { PlaidRedirect } from './oauth.ts';
 import type { SyncProgress } from '../sync.ts';
 
 const sign = (n: number): SafeHtml =>
@@ -722,6 +723,8 @@ export function connectionsPage(opts: {
   wiseReady: boolean;
   plaidReady: boolean;
   redirectUri: string;
+  /** Where the redirect URI came from, so a mismatch with .env is explained. */
+  redirect?: PlaidRedirect;
   plaidEnv: string;
   products: string[];
   optionalProducts: string[];
@@ -762,7 +765,18 @@ export function connectionsPage(opts: {
       <div class="table-wrap"><table class="kv"><tbody>
         <tr>
           <td>Allowed redirect URI<div class="sub-line">Team Settings → API (or Developers → API). Required for OAuth banks — Chase, Amex, Bank of America.</div></td>
-          <td><div class="code-block">${opts.redirectUri}</div>${
+          <td><div class="code-block">${opts.redirectUri}</div>
+          <p class="hint mt-xs">${
+            opts.redirect?.source === 'env'
+              ? html`From <code>PLAID_REDIRECT_URI</code>.`
+              : html`Built from the address this page was opened on. Set <code>PLAID_REDIRECT_URI</code>
+                  to the URI you registered to use that instead.`
+          }${
+            opts.redirect?.ignored
+              ? html` <span class="pill warn">check</span> <code>PLAID_REDIRECT_URI</code> is set to
+                  <code>${opts.redirect.ignored.value}</code> but not used: ${opts.redirect.ignored.reason}.`
+              : raw('')
+          }</p>${
             // Behind a TLS-terminating proxy that does not pass the scheme on,
             // the server believes it is on http, sends that to Plaid, and it
             // never matches the https URI registered in the dashboard.
@@ -1415,6 +1429,12 @@ function currentQuery(f: TxFilters): string {
 
 // --- merchants --------------------------------------------------------------
 
+/**
+ * The bulk picker's explicit "Uncategorised". A blank value there means nothing
+ * was chosen, and must never be read as "clear the category of all of these".
+ */
+export const UNCATEGORISE = '__uncategorised__';
+
 export type MerchantFilters = {
   start: string;
   end: string;
@@ -1422,6 +1442,8 @@ export type MerchantFilters = {
   account_id: string;
   search: string;
   uncategorized: boolean;
+  /** Only merchants filed under this category. */
+  category: string;
 };
 
 function merchantQuery(f: MerchantFilters): string {
@@ -1432,6 +1454,7 @@ function merchantQuery(f: MerchantFilters): string {
   if (f.account_id) q.set('account_id', f.account_id);
   if (f.search) q.set('search', f.search);
   if (f.uncategorized) q.set('uncategorized', '1');
+  if (f.category) q.set('category', f.category);
   const s = q.toString();
   return s ? `/merchants?${s}` : '/merchants';
 }
@@ -1507,6 +1530,12 @@ export function merchantsPage(opts: {
             </label>`
           : raw('')
       }
+      <label>Category
+        <select name="category">
+          ${opt('', 'All categories', f.category === '')}
+          ${join(opts.categories.map((c) => opt(c, prettyCategory(c), c === f.category)))}
+        </select>
+      </label>
       <label>Show
         <select name="uncategorized">
           ${opt('', 'All merchants', !f.uncategorized)}
@@ -1582,11 +1611,25 @@ export function merchantsPage(opts: {
       ${
         opts.merchants.length === 0
           ? html`<p class="muted">No merchants match these filters.</p>`
-          : html`<div class="table-wrap"><table>
-              <thead><tr><th>Merchant</th><th>Category</th><th class="num">Spend</th><th class="num">Count</th><th>Cards used</th><th>Seen</th></tr></thead>
+          : html`
+            <form method="post" action="/merchants/category/bulk" id="bulk-category" class="bulk-bar">
+              ${csrfField(opts.csrf)}
+              <input type="hidden" name="back" value="${back}">
+              <span class="muted" id="bulk-count">Select merchants to file several at once</span>
+              <select name="category" aria-label="Category for the selected merchants" required>
+                <option value="" disabled selected>Choose a category…</option>
+                ${opt(UNCATEGORISE, 'Uncategorised', false)}
+                ${join(opts.categories.map((c) => opt(c, prettyCategory(c), false)))}
+              </select>
+              <button type="submit" id="bulk-apply" class="secondary">Set category for selected</button>
+            </form>
+            <div class="table-wrap"><table>
+              <thead><tr><th class="check"><input type="checkbox" id="bulk-all" aria-label="Select every merchant shown"></th><th>Merchant</th><th>Category</th><th class="num">Spend</th><th class="num">Count</th><th>Cards used</th><th>Seen</th></tr></thead>
               <tbody>${join(
                 opts.merchants.map(
                   (m) => html`<tr>
+                    <td class="check"><input type="checkbox" name="merchant" value="${m.merchant}" form="bulk-category"
+                      aria-label="Select ${m.merchant}"></td>
                     <td>${m.merchant}${m.corrected ? html` <span class="pill">rule</span>` : raw('')}</td>
                     <td>${categoryCell(m)}</td>
                     <td class="num neg">${m.spend_cad ? money(-m.spend_cad) : html`<span class="muted">—</span>`}</td>
@@ -1596,7 +1639,22 @@ export function merchantsPage(opts: {
                   </tr>`,
                 ),
               )}</tbody>
-            </table></div>`
+            </table></div>
+            ${raw(
+              `<script nonce="${opts.nonce}">(()=>{` +
+                `const all=document.getElementById('bulk-all'),c=document.getElementById('bulk-count'),` +
+                `b=document.getElementById('bulk-apply'),f=document.getElementById('bulk-category');` +
+                `const boxes=()=>[...document.querySelectorAll('input[name=merchant][form=bulk-category]')];` +
+                `const sync=()=>{const n=boxes().filter(x=>x.checked).length;` +
+                `c.textContent=n?n+' selected':'Select merchants to file several at once';` +
+                `b.toggleAttribute('disabled',n===0);all.checked=n>0&&n===boxes().length;` +
+                `all.indeterminate=n>0&&n<boxes().length};` +
+                `all.addEventListener('change',()=>{for(const x of boxes())x.checked=all.checked;sync()});` +
+                `for(const x of boxes())x.addEventListener('change',sync);` +
+                `f.addEventListener('submit',e=>{if(!boxes().some(x=>x.checked))e.preventDefault()});sync()})();` +
+                `</scr` +
+                `ipt>`,
+            )}`
       }
     </section>
 
@@ -1834,6 +1892,21 @@ export function chatPage(opts: {
 const pct = (share: number, value = share): string =>
   share < 0.005 && value > 0 ? '<1%' : `${String(Math.round(share * 100))}%`;
 const MONTH_SHORT = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+const MONTH_LONG = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September',
+  'October', 'November', 'December'];
+
+/**
+ * The years the Year picker offers: this one and the nine before it, plus
+ * whichever year is showing if a link asked for one outside that range.
+ * A native month picker was used before, and browsers without one rendered it
+ * as a bare "2026-08" text box beside a Year box that looked redundant.
+ */
+function reportYears(showing: number): number[] {
+  const now = new Date().getUTCFullYear();
+  const years = Array.from({ length: 10 }, (_, i) => now - i);
+  if (!years.includes(showing)) years.push(showing);
+  return years.sort((a, b) => b - a);
+}
 
 /**
  * One month or one year, laid out to print. "Save as PDF" is the browser's own
@@ -1861,8 +1934,19 @@ export function reportPage(opts: {
         ${opt('year', 'Year', r.period === 'year')}
       </select>
     </label>
-    <label>Month <input type="month" name="month" value="${r.start.slice(0, 7)}"></label>
-    <label>Year <input type="number" name="year" value="${r.start.slice(0, 4)}" min="2000" max="2100" class="w-sm"></label>
+    <label class="month-field">Month
+      <select name="month">
+        ${join(MONTH_LONG.map((name, i) => {
+          const mm = String(i + 1).padStart(2, '0');
+          return opt(mm, name, r.start.slice(5, 7) === mm);
+        }))}
+      </select>
+    </label>
+    <label>Year
+      <select name="year">
+        ${join(reportYears(Number(r.start.slice(0, 4))).map((y) => opt(String(y), String(y), String(y) === r.start.slice(0, 4))))}
+      </select>
+    </label>
     ${
       opts.profiles.length > 1
         ? html`<label>Profile

@@ -87,6 +87,11 @@ export function parsePeriod(
   }
   const m = typeof input.month === 'string' ? input.month : '';
   if (MONTH_RE.test(m)) return { kind: 'month', month: m };
+  // The Reports page sends the month and the year as two fields.
+  const y = Number(input.year);
+  if (/^(0[1-9]|1[0-2])$/.test(m) && Number.isInteger(y) && y >= 2000 && y <= 2100) {
+    return { kind: 'month', month: `${String(y)}-${m}` };
+  }
   const last = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth() - 1, 1));
   return { kind: 'month', month: last.toISOString().slice(0, 7) };
 }

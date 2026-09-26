@@ -27,6 +27,11 @@ export function nowISO(d = new Date()): string {
   return d.toISOString();
 }
 
+/** The 1st of the month `today` falls in: the default start of a month-to-date view. */
+export function monthStartISO(d = new Date()): string {
+  return `${todayISO(d).slice(0, 8)}01`;
+}
+
 export function daysAgoISO(days: number, from = new Date()): string {
   const d = new Date(from.getTime() - days * 86400_000);
   return todayISO(d);

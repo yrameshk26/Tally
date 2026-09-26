@@ -3,6 +3,7 @@
  * what stops a source from inventing its own sign convention or clobbering the
  * owner tag the user set by hand.
  */
+import { refineCategory } from './lib/category.ts';
 import type { DB } from './db.ts';
 import { nowISO, round2 } from './lib/money.ts';
 import type { RegisteredType } from './lib/registered.ts';
@@ -180,6 +181,7 @@ export function upsertTransactions(db: DB, rows: TransactionRow[]): number {
     for (const r of items) {
       stmt.run({
         ...r,
+        category: refineCategory(r.category, r.category_detailed),
         amount: round2(r.amount),
         amount_cad: round2(r.amount_cad),
         pending: r.pending ? 1 : 0,

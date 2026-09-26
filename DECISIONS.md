@@ -3,6 +3,31 @@
 Dated, append-only. Each entry says what was chosen, what it was chosen over,
 and why.
 
+## 2026-09-26 — Six changes from a user running their own copy
+
+- **PLAID_REDIRECT_URI is honoured by the web UI** when its path is
+  `/connections/oauth`. The page built the URI from the address it was opened
+  on and ignored the variable, so someone who registered one address and used
+  another saw a mismatch that would only bite on the next OAuth bank. The
+  helper's localhost address is still ignored there, with the reason shown.
+- **Rent and Utilities are split** at write time using Plaid's detailed
+  category, with a one-off migration for stored rows. A row with no detailed
+  category keeps the combined label rather than being guessed into one side.
+  Done in the store, not on read, so every total, rule and tool sees one value;
+  hand corrections still win because they apply on read.
+- **Bulk recategorise on Merchants** writes exactly what the single-row picker
+  writes (merchant-match rules) for each ticked merchant, in one transaction.
+  Its picker has no default: an empty choice is refused rather than read as
+  "clear the category of everything selected".
+- **A theme switch** (system, light, dark). Stored per browser in
+  localStorage: it is a viewing preference, not household data, and two people
+  on two devices can reasonably want different ones. Applied from `<head>` so
+  there is no flash; print still forces light, now with a selector that
+  outranks the theme rules.
+- **Month to date** is the default window on Transactions and Merchants.
+- **Reports uses Month and Year dropdowns** instead of a native month input,
+  which some browsers render as a bare "2026-08" text box.
+
 ## 2026-09-25 — Merchants stops double counting card payments
 
 Found while screenshotting the redesign: the Merchants page listed "Loan

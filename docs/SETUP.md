@@ -208,8 +208,17 @@ and card half will not work — everything else still will.
    `http://localhost:8788/oauth-return`
    For the web UI it is `https://your-host/connections/oauth`, and you do not
    have to work it out: **Connections → Plaid dashboard setup** shows the exact
-   value this server sends. Copy that. Plaid rejects Link with `INVALID_FIELD`
-   unless it matches a registered URI character for character.
+   value this server sends, and whether it came from your settings or was built
+   from the address you opened the page on. Copy that. Plaid rejects Link with
+   `INVALID_FIELD` unless it matches a registered URI character for character.
+
+   If you registered one address and reach the UI through another (a local
+   name at home, a public one away), set `PLAID_REDIRECT_URI` to the registered
+   one, e.g. `https://money.example.com/connections/oauth`, and the web UI uses
+   it whatever address you are on. It is only honoured when its path is
+   `/connections/oauth`: the helper's `http://localhost:8788/oauth-return` is
+   ignored by the web UI, and the page says so, because sending Link back to a
+   helper that is not running would return to nothing.
 
    **If Link fails with `INVALID_FIELD` on the first bank**, compare the two
    strings and look for:

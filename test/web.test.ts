@@ -246,6 +246,17 @@ describe('sign-out', () => {
   });
 });
 
+describe('default date range', () => {
+  it('opens Transactions and Merchants on the first of this month', async () => {
+    const { cookie } = await login();
+    const first = `${new Date().toISOString().slice(0, 8)}01`;
+    for (const path of ['/transactions', '/merchants']) {
+      const body = await (await fetch(`${base}${path}`, { headers: { cookie } })).text();
+      expect(body, path).toContain(`name="start" value="${first}"`);
+    }
+  });
+});
+
 describe('transfers on the Transactions tab', () => {
   // A card paid off from chequing: 250 of purchases, and 250 moving between
   // two accounts the household owns. Only the purchases are spending.
@@ -320,6 +331,67 @@ describe('transfers on the Transactions tab', () => {
     expect(body).toContain('-$250.00');
     expect(body).not.toContain('-$500.00');
     expect(body).toMatch(/2 transfers and card\s+payments are left out/);
+  });
+
+  it('files several merchants at once, and filters the directory by category', async () => {
+    seed();
+    upsertTransactions(getDb(), [
+      {
+        id: 'web-film',
+        account_id: 'plaid:tx-card',
+        date: '2031-04-11',
+        name: 'LUMIERE CINEMA',
+        merchant: 'Lumiere Cinema',
+        amount: 30,
+        currency: 'CAD',
+        amount_cad: 30,
+        category: 'GENERAL_MERCHANDISE',
+        category_detailed: null,
+        pending: false,
+      },
+    ]);
+    const { cookie, csrf } = await login();
+    const form = new URLSearchParams({ _csrf: csrf, category: 'ENTERTAINMENT', back: '/merchants' });
+    form.append('merchant', 'Northgate Grocery');
+    form.append('merchant', 'Lumiere Cinema');
+    const res = await fetch(`${base}/merchants/category/bulk`, {
+      method: 'POST',
+      headers: { cookie, 'content-type': 'application/x-www-form-urlencoded' },
+      body: form,
+      redirect: 'manual',
+    });
+    expect(decodeURIComponent(res.headers.get('location') ?? '')).toMatch(/2 merchants filed under Entertainment/);
+
+    const page = await (
+      await fetch(`${base}/merchants?start=2031-04-01&end=2031-04-30&category=ENTERTAINMENT`, { headers: { cookie } })
+    ).text();
+    expect(page).toContain('value="Northgate Grocery"');
+    expect(page).toContain('value="Lumiere Cinema"');
+    expect(inlineHandlers(page)).toEqual([]);
+  });
+
+  it('refuses a bulk change with nothing selected', async () => {
+    const { cookie, csrf } = await login();
+    const res = await fetch(`${base}/merchants/category/bulk`, {
+      method: 'POST',
+      headers: { cookie, 'content-type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({ _csrf: csrf, category: 'ENTERTAINMENT' }),
+      redirect: 'manual',
+    });
+    expect(decodeURIComponent(res.headers.get('location') ?? '')).toMatch(/err=Select at least one merchant/);
+  });
+
+  it('never reads an unchosen category as "clear them all"', async () => {
+    const { cookie, csrf } = await login();
+    const form = new URLSearchParams({ _csrf: csrf, category: '' });
+    form.append('merchant', 'Northgate Grocery');
+    const res = await fetch(`${base}/merchants/category/bulk`, {
+      method: 'POST',
+      headers: { cookie, 'content-type': 'application/x-www-form-urlencoded' },
+      body: form,
+      redirect: 'manual',
+    });
+    expect(decodeURIComponent(res.headers.get('location') ?? '')).toMatch(/err=Choose a category/);
   });
 
   it('steps aside when you ask for a transfer category by name', async () => {

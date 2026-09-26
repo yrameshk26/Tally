@@ -49,6 +49,13 @@ const MERCHANTS: Array<[string, string, number, number]> = [
   ['Bluewater Insurance Company', 'GENERAL_SERVICES', 188.4, 0.5],
 ];
 
+/** Plaid's detailed category, where the demo has one: rent versus the bills. */
+const DETAILED: Record<string, string> = {
+  'Meridian Apartments': 'RENT_AND_UTILITIES_RENT',
+  'Lumen Electric': 'RENT_AND_UTILITIES_GAS_AND_ELECTRICITY',
+  'Vista Internet': 'RENT_AND_UTILITIES_INTERNET_AND_CABLE',
+};
+
 function dayISO(daysAgo: number): string {
   return new Date(Date.now() - daysAgo * 86_400_000).toISOString().slice(0, 10);
 }
@@ -223,7 +230,7 @@ function main(): void {
         currency: 'CAD',
         amount_cad: value,
         category,
-        category_detailed: null,
+        category_detailed: DETAILED[merchant] ?? null,
         pending: day <= 2,
       });
     }

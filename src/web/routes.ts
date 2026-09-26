@@ -29,6 +29,8 @@ import {
   settingsPage,
   transactionsPage,
   merchantsPage,
+  prettyCategory,
+  UNCATEGORISE,
   reportPage,
   chatPage,
   type MerchantFilters,
@@ -109,7 +111,7 @@ import {
   setMerchantCategory,
   setTransactionOverride,
 } from '../overrides.ts';
-import { daysAgoISO, todayISO } from '../lib/money.ts';
+import { monthStartISO, todayISO } from '../lib/money.ts';
 import {
   createLinkToken,
   PLAID_ITEM_CAP,
@@ -142,14 +144,14 @@ import { failedSources, lastSyncReport, runSync, syncProgress } from '../sync.ts
 import { MAX_LOGO_BYTES, deleteLogo, getLogo, logoUrl, setLogo } from '../brand.ts';
 import { loadRates } from '../fx.ts';
 import { createFailureLimiter } from '../ratelimit.ts';
-import { originOf, safeNext } from './oauth.ts';
+import { originOf, plaidRedirectFor, safeNext } from './oauth.ts';
 import { listClients, revokeClient } from '../oauth.ts';
 
 type Ctx = Request & { session?: Session; nonce?: string };
 
 /** Shown on the Connections page, so what to register in Plaid is never a guess. */
 function redirectUriFor(req: Request): string {
-  return `${originOf(req)}/connections/oauth`;
+  return plaidRedirectFor(req, config.plaid.redirectUri).uri;
 }
 
 export function createWebRouter(db: DB): express.Router {
@@ -715,6 +717,7 @@ export function createWebRouter(db: DB): express.Router {
         plaidReady: plaidReady(db, profile.id),
         wiseReady: wiseReady(db, profile.id),
         redirectUri: redirectUriFor(req),
+        redirect: plaidRedirectFor(req, config.plaid.redirectUri),
         plaidEnv: plaidCreds(db, profile.id).env,
         products: plaidProducts().map(String),
         optionalProducts: plaidOptionalProducts().map(String),
@@ -877,7 +880,8 @@ export function createWebRouter(db: DB): express.Router {
     return {
       // Hidden unless asked for, so the totals on this page match the Overview.
       transfers: str('transfers') === 'show' ? 'show' : 'hide',
-      start: date('start', daysAgoISO(90)),
+      // Month to date: the view people open this page to check.
+      start: date('start', monthStartISO()),
       end: date('end', todayISO()),
       profile: str('profile'),
       account_id: str('account_id'),
@@ -1040,12 +1044,13 @@ export function createWebRouter(db: DB): express.Router {
     const date = (k: string, fallback: string): string =>
       /^\d{4}-\d{2}-\d{2}$/.test(str(k)) ? str(k) : fallback;
     return {
-      start: date('start', daysAgoISO(365)),
+      start: date('start', monthStartISO()),
       end: date('end', todayISO()),
       profile: str('profile'),
       account_id: str('account_id'),
       search: str('search'),
       uncategorized: str('uncategorized') === '1',
+      category: str('category'),
     };
   };
 
@@ -1072,9 +1077,9 @@ export function createWebRouter(db: DB): express.Router {
     // and the total. Same exclusion as cashflow and the Transactions tab.
     const { counted: rows, transfers } = splitTransfers(window);
     const all = groupByMerchant(rows);
-    const merchants = f.uncategorized
-      ? all.filter((m) => !m.category || m.category === 'UNCATEGORIZED')
-      : all;
+    const merchants = all
+      .filter((m) => !f.uncategorized || !m.category || m.category === 'UNCATEGORIZED')
+      .filter((m) => !f.category || m.category === f.category);
 
     render(
       req,
@@ -1109,6 +1114,34 @@ export function createWebRouter(db: DB): express.Router {
           body,
           category ? `${merchant} filed under ${category}.` : `${merchant} uncategorised.`,
         ),
+      );
+    } catch (e) {
+      res.redirect(303, backToMerchants(body, errMessage(e), 'err'));
+    }
+  });
+
+  /**
+   * Several merchants at once. Each gets exactly what the single-row picker
+   * would write (a merchant-match rule, CLAUDE.md rule 7), in one transaction,
+   * so a failure part way leaves none of them changed rather than some.
+   */
+  router.post('/merchants/category/bulk', requireAuth, requireCsrf, (req: Ctx, res: Response) => {
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    try {
+      const picked = ([] as unknown[]).concat(body['merchant'] ?? []);
+      const merchants = [...new Set(picked.map((m) => String(m)).filter((m) => m.trim() !== ''))];
+      if (merchants.length === 0) throw new Error('Select at least one merchant.');
+      if (merchants.length > 500) throw new Error('That is more than 500 merchants; narrow the filter first.');
+      const chosen = String(body['category'] ?? '').trim();
+      if (!chosen) throw new Error('Choose a category for the selected merchants.');
+      const category = chosen === UNCATEGORISE ? '' : chosen;
+      db.transaction(() => {
+        for (const m of merchants) setMerchantCategory(db, m, category || null);
+      })();
+      const n = `${String(merchants.length)} merchant${merchants.length === 1 ? '' : 's'}`;
+      res.redirect(
+        303,
+        backToMerchants(body, category ? `${n} filed under ${prettyCategory(category)}.` : `${n} uncategorised.`),
       );
     } catch (e) {
       res.redirect(303, backToMerchants(body, errMessage(e), 'err'));

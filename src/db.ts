@@ -357,6 +357,23 @@ export function migrate(db: DB): void {
   migrateProfiles(db);
   encryptExistingTokens(db);
   pruneEmptySnapshots(db);
+  splitRentAndUtilities(db);
+}
+
+/**
+ * Rows stored before rent and utilities were split (src/lib/category.ts).
+ * New and re-synced rows are refined as they are written; this catches the
+ * history, and matches nothing on every start after the first.
+ */
+function splitRentAndUtilities(db: DB): void {
+  const changed = db
+    .prepare(
+      `UPDATE transactions
+         SET category = CASE WHEN category_detailed = 'RENT_AND_UTILITIES_RENT' THEN 'RENT' ELSE 'UTILITIES' END
+       WHERE category = 'RENT_AND_UTILITIES' AND category_detailed LIKE 'RENT\\_AND\\_UTILITIES\\_%' ESCAPE '\\'`,
+    )
+    .run().changes;
+  if (changed > 0) log.info(`split ${String(changed)} rent-and-utilities transaction(s) into rent and utilities`);
 }
 
 /**

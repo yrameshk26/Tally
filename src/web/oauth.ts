@@ -55,6 +55,49 @@ export function originOf(req: Request): string {
   return `${proto}://${req.get('host') ?? 'localhost'}`;
 }
 
+/** Where the web UI's Plaid Link returns after an OAuth bank. */
+export const PLAID_RETURN_PATH = '/connections/oauth';
+
+export type PlaidRedirect = {
+  uri: string;
+  /** "env" when PLAID_REDIRECT_URI supplied it, "request" when built from the address. */
+  source: 'env' | 'request';
+  /** A PLAID_REDIRECT_URI that was set but not used, and why it was not. */
+  ignored?: { value: string; reason: string };
+};
+
+/**
+ * The redirect URI the web UI sends to Plaid. An explicit PLAID_REDIRECT_URI
+ * wins, because it is what the operator registered in the dashboard, and a
+ * built value that differs from the registered one only fails later, on the
+ * first OAuth bank. It is used only when it points at this app's own return
+ * path: the variable's documented default is the local Link helper's address,
+ * and sending Link back there from a server would return to nothing.
+ */
+export function plaidRedirectFor(req: Request, configured: string): PlaidRedirect {
+  const built = `${originOf(req)}${PLAID_RETURN_PATH}`;
+  const value = configured.trim();
+  if (!value) return { uri: built, source: 'request' };
+  let path = '';
+  try {
+    const u = new URL(value);
+    path = /^https?:$/.test(u.protocol) ? u.pathname.replace(/\/+$/, '') : '';
+  } catch {
+    path = '';
+  }
+  if (path === PLAID_RETURN_PATH) return { uri: value, source: 'env' };
+  return {
+    uri: built,
+    source: 'request',
+    ignored: {
+      value,
+      reason: path
+        ? `it returns to ${path}, which is the local Link helper, not this server`
+        : 'it is not an http(s) address',
+    },
+  };
+}
+
 /** The canonical resource identifier every token is minted for. */
 export function resourceUrl(req: Request): string {
   return `${originOf(req)}/mcp`;

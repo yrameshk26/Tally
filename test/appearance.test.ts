@@ -10,7 +10,7 @@ import { initDb, openDb, type DB } from '../src/db.ts';
 import { appName, cleanAppName, getSetting, setSetting } from '../src/settings.ts';
 import { createProfile } from '../src/profiles.ts';
 import { knownCategories, NOT_SPENDING_CATEGORIES } from '../src/queries.ts';
-import { originOf } from '../src/web/oauth.ts';
+import { originOf, plaidRedirectFor } from '../src/web/oauth.ts';
 import { page } from '../src/web/layout.ts';
 import { connectionsPage, loginPage } from '../src/web/pages.ts';
 import { html } from '../src/lib/html.ts';
@@ -94,6 +94,42 @@ describe('the address the browser used', () => {
   it('ignores a header that is not a scheme, rather than building a URL from it', () => {
     expect(originOf(req('javascript'))).toBe('http://money.example.com');
     expect(originOf(req(undefined, 'https'))).toBe('https://money.example.com');
+  });
+});
+
+describe('the Plaid redirect URI', () => {
+  const req = {
+    headers: { 'x-forwarded-proto': 'https' },
+    protocol: 'http',
+    get: (h: string) => (h.toLowerCase() === 'host' ? 'money.example.com' : undefined),
+  } as unknown as Request;
+
+  it('uses PLAID_REDIRECT_URI when it is set, since that is what was registered', () => {
+    // Reached through one address, registered under another: the registered
+    // one is the one Plaid will accept.
+    expect(plaidRedirectFor(req, 'https://finance.home.example/connections/oauth')).toEqual({
+      uri: 'https://finance.home.example/connections/oauth',
+      source: 'env',
+    });
+    expect(plaidRedirectFor(req, 'https://finance.home.example/connections/oauth/').source).toBe('env');
+  });
+
+  it('builds it from the request when nothing is set', () => {
+    expect(plaidRedirectFor(req, '')).toEqual({
+      uri: 'https://money.example.com/connections/oauth',
+      source: 'request',
+    });
+  });
+
+  it("ignores the local helper's address, and says why", () => {
+    const r = plaidRedirectFor(req, 'http://localhost:8788/oauth-return');
+    expect(r.uri).toBe('https://money.example.com/connections/oauth');
+    expect(r.ignored?.reason).toMatch(/local Link helper/);
+  });
+
+  it('ignores something that is not an address', () => {
+    expect(plaidRedirectFor(req, 'javascript:alert(1)').ignored?.reason).toMatch(/not an http/);
+    expect(plaidRedirectFor(req, 'not a url').source).toBe('request');
   });
 });
 

@@ -113,7 +113,10 @@ const CSS = `
   --step-3:clamp(1.65rem,1.45rem + .8vw,2.1rem);
   --sidebar-w:15.5rem;
 }
-@media (prefers-color-scheme:dark){:root{
+/* Dark, by device setting or by choice. The theme switch in the sidebar sets
+   data-theme on <html>: "light" opts out of a dark device, "dark" opts in
+   on a light one, and no attribute follows the system. Same tokens either way. */
+@media (prefers-color-scheme:dark){:root:not([data-theme=light]){
   --bg:oklch(15.5% .012 var(--hue));
   --bg-sunk:oklch(13.2% .012 var(--hue));
   --panel:oklch(19.5% .014 var(--hue));
@@ -141,11 +144,42 @@ const CSS = `
   --glow:color-mix(in oklch,var(--accent) 9%,transparent);
   --sidebar:oklch(17% .013 var(--hue));
 }}
+:root[data-theme=dark]{color-scheme:dark;
+  --bg:oklch(15.5% .012 var(--hue));
+  --bg-sunk:oklch(13.2% .012 var(--hue));
+  --panel:oklch(19.5% .014 var(--hue));
+  --panel-2:oklch(21.5% .015 var(--hue));
+  --line:oklch(27.5% .016 var(--hue));
+  --line-strong:oklch(34% .02 var(--hue));
+  --fg:oklch(95% .006 var(--hue));
+  --fg-muted:oklch(72% .016 var(--hue));
+  --fg-faint:oklch(58% .014 var(--hue));
+  --accent:oklch(78% .135 var(--accent-hue));
+  --accent-strong:oklch(84% .12 var(--accent-hue));
+  --accent-fg:oklch(18% .04 var(--accent-hue));
+  --accent-soft:color-mix(in oklch,var(--accent) 14%,transparent);
+  --pos:oklch(79% .14 var(--accent-hue));
+  --neg:oklch(73% .16 25);
+  --warn:oklch(81% .13 78);
+  --hero-a:oklch(44% .1 168);
+  --hero-b:oklch(34% .08 225);
+  /* Re-stepped for the dark surface, not dimmed: the light jade fails the dark
+     lightness band outright. Same six hues, same order. */
+  --s1:#25a37e; --s2:#d95926; --s3:#3987e5;
+  --s4:#c98500; --s5:#d55181; --s6:#9085e9;
+  --shadow:0 1px 2px oklch(0% 0 0/.3),inset 0 1px 0 oklch(100% 0 0/.03);
+  --shadow-lift:0 6px 16px -4px oklch(0% 0 0/.45),0 22px 44px -16px oklch(0% 0 0/.5),inset 0 1px 0 oklch(100% 0 0/.04);
+  --glow:color-mix(in oklch,var(--accent) 9%,transparent);
+  --sidebar:oklch(17% .013 var(--hue));
+}
+:root[data-theme=light]{color-scheme:light}
 
 /* Paper is white whatever the screen is set to. Printing from a dark-mode
    browser otherwise produces light text on a page the printer leaves blank, or
    a PDF that is a black rectangle. The light values, restated. */
-@media print{:root{
+/* :not(#print) matches the root and nothing else, and its id-level
+   specificity outranks every theme rule above, dark by device included. */
+@media print{:root:not(#print){
   color-scheme:light;
   --bg:#fff; --bg-sunk:#fff; --panel:#fff; --panel-2:#fff;
   --line:oklch(91.5% .006 var(--hue));
@@ -241,6 +275,12 @@ a{color:inherit}
 .sidebar nav a[aria-current=page]::before{content:"";position:absolute;left:-.85rem;top:22%;bottom:22%;
   width:3px;border-radius:0 3px 3px 0;background:var(--accent)}
 .side-foot{grid-area:foot;display:flex;flex-direction:column;gap:.5rem}
+.theme-switch{display:flex;gap:.15rem;padding:.2rem;border-radius:11px;background:var(--bg-sunk);
+  border:1px solid var(--line);width:fit-content}
+.side-foot .theme-switch button{width:auto;min-height:0;padding:.35rem .5rem;border-radius:8px;background:transparent;
+  color:var(--fg-faint);border:0;box-shadow:none}
+.side-foot .theme-switch button:hover{color:var(--fg);background:transparent;filter:none;box-shadow:none}
+.side-foot .theme-switch button[aria-pressed=true]{background:var(--panel);color:var(--accent-strong);box-shadow:var(--shadow)}
 .side-foot button{width:100%;justify-content:flex-start;gap:.7rem;background:transparent;
   color:var(--fg-muted);border-color:transparent;box-shadow:none;padding:.5rem .65rem;font-weight:540}
 .side-foot button:hover{background:var(--hover);color:var(--fg);filter:none}
@@ -363,6 +403,15 @@ tbody tr{transition:background .13s ease}
 tbody tr:hover{background:var(--hover)}
 tbody tr:last-child td{border-bottom:0}
 td.num,th.num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+/* The Reports controls: a month only means something when the period is one. */
+.filters:has(select[name=period] option[value=year]:checked) .month-field{display:none}
+/* Bulk selection: a bar of actions above the table, checkboxes in the first column. */
+.bulk-bar{display:flex;align-items:center;gap:.6rem;flex-wrap:wrap;margin:0 0 .9rem;padding:.6rem .75rem;
+  border:1px solid var(--line);border-radius:var(--radius-md);background:var(--panel-2)}
+.bulk-bar select{width:auto;min-width:12rem}
+.bulk-bar #bulk-count{flex:1;min-width:10rem;font-size:var(--step--1)}
+th.check,td.check{width:2.2rem;padding-right:0}
+input[type=checkbox]{width:1.05rem;height:1.05rem;accent-color:var(--accent);cursor:pointer;margin:0;vertical-align:middle}
 /* A select in a table cell keeps enough width to read its value; the table
    scrolls sideways before a profile name is crushed to its first letter. */
 td select{min-width:7.5rem}
@@ -755,6 +804,11 @@ export function page(opts: {
         <a class="brand" href="/" title="${name}">${brandMark(opts.logoUrl ?? null, 24)}<span class="brand-name">${name}</span></a>
         <nav aria-label="Main">${raw(links)}</nav>
         <div class="side-foot">
+          <div class="theme-switch" role="group" aria-label="Theme">
+            <button type="button" data-theme-choice="system" aria-pressed="true" title="Match the device">${raw(icon('system', 16))}<span class="sr-only">System</span></button>
+            <button type="button" data-theme-choice="light" aria-pressed="false" title="Light">${raw(icon('sun', 16))}<span class="sr-only">Light</span></button>
+            <button type="button" data-theme-choice="dark" aria-pressed="false" title="Dark">${raw(icon('moon', 16))}<span class="sr-only">Dark</span></button>
+          </div>
           <form method="post" action="/logout"><button class="secondary" type="submit">${raw(icon('logout'))}<span>Sign out</span></button></form>
         </div>
       </div></aside>`
@@ -777,6 +831,25 @@ export function page(opts: {
           },
         ],
       })}</scr` + `ipt>`
+    : '';
+
+  // The theme choice is a per-browser convenience, so it lives in this
+  // browser's storage, not on the server. Applied from <head>, before the body
+  // paints, so a dark choice never flashes light first. Storage can be
+  // unavailable (private windows, blocked site data); the page then simply
+  // follows the system.
+  const themeHead =
+    `<script nonce="${nonce}">try{const t=localStorage.getItem('tally-theme');` +
+    `if(t==='light'||t==='dark')document.documentElement.dataset.theme=t}catch(_){}</scr` + `ipt>`;
+  const themeSwitch = chrome
+    ? `<script nonce="${nonce}">(()=>{const root=document.documentElement;` +
+      `const btns=[...document.querySelectorAll('[data-theme-choice]')];` +
+      `const show=()=>{const cur=root.dataset.theme||'system';` +
+      `for(const b of btns)b.setAttribute('aria-pressed',String(b.dataset.themeChoice===cur))};` +
+      `for(const b of btns)b.addEventListener('click',()=>{const v=b.dataset.themeChoice;` +
+      `if(v==='system')delete root.dataset.theme;else root.dataset.theme=v;` +
+      `try{if(v==='system')localStorage.removeItem('tally-theme');else localStorage.setItem('tally-theme',v)}catch(_){}` +
+      `show()});show()})();</scr` + `ipt>`
     : '';
 
   // Destructive forms confirm first. One handler in the shell rather than one
@@ -814,9 +887,10 @@ export function page(opts: {
 <meta name="color-scheme" content="light dark">
 ${opts.logoUrl ? `<link rel="icon" href="${esc(opts.logoUrl)}">` : '<link rel="icon" type="image/svg+xml" href="/favicon.svg">'}
 <title>${title} · ${esc(name)}</title>
+${themeHead}
 <style nonce="${nonce}">${CSS}</style>
 ${speculation}
-</head><body class="${chrome ? 'app' : 'bare'}">${nav.value}<div class="content"><main>${body.value}</main>${footer(name)}</div>${confirmScript}${idleScript}</body></html>`;
+</head><body class="${chrome ? 'app' : 'bare'}">${nav.value}<div class="content"><main>${body.value}</main>${footer(name)}</div>${confirmScript}${idleScript}${themeSwitch}</body></html>`;
 }
 
 const NOTICE_ICON: Record<string, string> = {

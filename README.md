@@ -331,7 +331,9 @@ TOKEN_ENC_KEY=...              # required: encrypts stored secrets and the TOTP 
 A sidebar on desktop, grouped into Money (Overview, Transactions, Merchants,
 Reports), Ask (Assistant) and Manage (Connections, Profiles, Settings,
 Security); below 1060px the same links become a top bar with one scrolling row
-of pills. Light and dark follow the system, and every page prints cleanly.
+of pills. Light and dark follow the system unless you pick one with the switch
+at the foot of the sidebar (remembered per browser), and every page prints
+cleanly, always in light.
 Server-rendered, no framework, no webfonts, no inline styles under a strict CSP.
 
 - **Overview** — net worth as a hero card with its change over the history
@@ -347,8 +349,8 @@ Server-rendered, no framework, no webfonts, no inline styles under a strict CSP.
   or which sources could not be read. A refresh during the nightly job, or
   while Claude is running `sync_now`, joins that run rather than starting a
   second.
-- **Transactions** — filter by date, account, category, profile, direction,
-  minimum and free text; money out / in / net for the filtered set; group by
+- **Transactions** — opens on this month to date; filter by date, account,
+  category, profile, direction, minimum and free text; money out / in / net for the filtered set; group by
   merchant or category. Transfers between your own accounts and card payments
   are hidden by default, and the page says how many, so paying a card from
   chequing is not counted as spending on top of the purchases it paid for and
@@ -361,12 +363,16 @@ Server-rendered, no framework, no webfonts, no inline styles under a strict CSP.
   a view is a URL you can bookmark. Categories display as ordinary text
   (`Food and drink`, not `FOOD_AND_DRINK`); the stored value is unchanged.
 - **Merchants** — every merchant seen on your cards, the category its spend is
-  filed under, which cards paid it, and when. Set a category per merchant from a
-  picker, filter to uncategorised only, and add categories of your own. Above it,
+  filed under, which cards paid it, and when; opens on this month to date. Set a
+  category per merchant from a picker, or tick several and set it for all of
+  them at once; filter by category or to uncategorised only; add categories of
+  your own. Plaid's combined "Rent and utilities" is split into **Rent** and
+  **Utilities** using the detailed category it sends, when it sends one. Above it,
   expenses by category as a ranked bar chart plus a totals table with each
   category's share. Transfers and card payments are left out of the directory
   and the totals, with a count and a link to them on the Transactions tab.
-- **Reports** — one month or one calendar year: net worth at the start and end
+- **Reports** — one month or one calendar year, picked from Month and Year
+  dropdowns: net worth at the start and end
   and the change, income, spending, net saved and savings rate, income and
   spending by month (for a year), spending by category with each share, top
   merchants, and the ten largest expenses. **Save as PDF** uses the browser's
@@ -456,7 +462,7 @@ Read [SECURITY.md](SECURITY.md) before deploying. The short version:
 |---|---|
 | `npm run demo` | Seed a fictional database to try it without credentials |
 | `npm run dev` | Run the server from TypeScript |
-| `npm run check` | Typecheck + 388 tests |
+| `npm run check` | Typecheck + 404 tests |
 | `npm run sync` | One-shot sync; exits non-zero if a source errored |
 | `npm run db:init` | Create the database, seeding `room.json` if present |
 | `npm run hash-password` | Print an `ADMIN_PASSWORD_HASH` |
