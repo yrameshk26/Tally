@@ -63,6 +63,7 @@ import {
 import { lastSyncReport, runSync } from '../sync.ts';
 import { buildPeriodReport, parsePeriod } from '../report.ts';
 import { pruneBackups, writeBackup } from '../backup.ts';
+import { categoryDetail } from '../settings.ts';
 
 /** Profiles are user-defined, so this is a free-form id rather than an enum. */
 const PROFILE = z.string().min(1).max(32);
@@ -221,7 +222,13 @@ export function toolDefs(db: DB): ToolDef[] {
       account_id: z.string().optional(),
       profile: PROFILE.optional(),
       search: z.string().optional().describe('substring of merchant or description'),
-      category: z.string().optional().describe('Plaid personal finance category, e.g. TRAVEL'),
+      category: z
+        .string()
+        .optional()
+        .describe(
+          'A category from list_categories. A Plaid primary such as FOOD_AND_DRINK also matches ' +
+            'every detailed category under it (FOOD_AND_DRINK_GROCERIES, FOOD_AND_DRINK_COFFEE).',
+        ),
       min_amount_cad: z.number().min(0).optional(),
       limit: z.number().int().min(1).max(1000).optional(),
     },
@@ -243,7 +250,9 @@ export function toolDefs(db: DB): ToolDef[] {
     description:
       'Income vs spend for a period, by month, category, merchant and owner. Transfers between ' +
       'the household’s own accounts and card/loan payments are excluded by default so ' +
-      'spending is not double counted.',
+      'spending is not double counted. by_category uses detailed categories (groceries, ' +
+      'coffee) unless the install is set to broad ones; by_category_group totals the same ' +
+      'spending by Plaid primary (food and drink), for questions about a whole area.',
     inputSchema: {
       start: DATE,
       end: DATE,
@@ -678,12 +687,15 @@ export function toolDefs(db: DB): ToolDef[] {
     description:
       'Every category available to file spending under: the ones institutions sent, the ones ' +
       'rules and overrides use, and the ones added by hand. The hand-added ones are listed ' +
-      'separately because they exist whether or not anything is filed under them yet.',
+      'separately because they exist whether or not anything is filed under them yet. ' +
+      '`detail` says whether bank categories are read detailed (FOOD_AND_DRINK_GROCERIES) or ' +
+      'broad (FOOD_AND_DRINK).',
     annotations: READ_ONLY,
     handler: () => {
       try {
         const custom = customCategories(db);
-        return ok({ count: knownCategories(db).length, categories: knownCategories(db), custom });
+        const categories = knownCategories(db);
+        return ok({ count: categories.length, detail: categoryDetail(db), categories, custom });
       } catch (e) {
         return fail(e);
       }

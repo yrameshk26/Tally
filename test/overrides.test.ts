@@ -6,6 +6,7 @@
  */
 import { beforeEach, describe, expect, it } from 'vitest';
 import { initDb, openDb, type DB } from '../src/db.ts';
+import { setSetting } from '../src/settings.ts';
 import {
   addMerchantRule,
   deleteMerchantRule,
@@ -50,6 +51,9 @@ let db: DB;
 
 beforeEach(() => {
   db = initDb(openDb(':memory:'));
+  // These fixtures are about how corrections apply, written against Plaid's
+  // primaries. Detailed mode is covered in category.test.ts.
+  setSetting(db, 'CATEGORY_DETAIL', 'broad');
   db.prepare("INSERT INTO fx_rates (pair, rate, as_of, fetched_at) VALUES ('USDCAD', 1.4, '2026-09-17', '2026-09-17')").run();
 
   upsertAccount(db, acct({ id: 'plaid:card', currency: 'USD', balance: -100, balance_cad: -140 }));

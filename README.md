@@ -65,7 +65,7 @@ place a trade or move money, and that is enforced as a project rule rather than
 an intention.
 
 It is also a genuinely small program: no ORM, no charting library, no auth
-framework, ~340 tests, and a dependency list you can read in one screen.
+framework, ~420 tests, and a dependency list you can read in one screen.
 
 **If this is useful to you, a ⭐ on the repo helps more people find it** — that is
 the only distribution this project has.
@@ -118,7 +118,7 @@ question:
 | `get_holdings` | Positions by symbol with concentration % and unrealized P&L, or `by_account` |
 | `get_transactions` | Bank and card transactions — negative is money out |
 | `get_activities` | Brokerage movements: dividends, interest, buys, sells, fees, contributions |
-| `get_cashflow` | Income vs spend by month, category, merchant, profile |
+| `get_cashflow` | Income vs spend by month, category (detailed, plus `by_category_group` by Plaid primary), merchant, profile |
 | `get_period_report` | One month or one year: net worth at each end and the change, income, spending, savings rate, categories with their share, top merchants, largest expenses. The same data the Reports page prints |
 | `get_contribution_room` | Remaining RRSP/TFSA/FHSA room per person |
 | `set_contributed`, `set_room_limit` | Correct the room figures by hand |
@@ -361,7 +361,18 @@ Server-rendered, no framework, no webfonts, no inline styles under a strict CSP.
   as something else can be hidden by recategorising it, for one row or as a
   rule for every future one. Filters live in the query string, so
   a view is a URL you can bookmark. Categories display as ordinary text
-  (`Food and drink`, not `FOOD_AND_DRINK`); the stored value is unchanged.
+  (`Groceries`, not `FOOD_AND_DRINK_GROCERIES`); the stored value is unchanged.
+  Category pickers group detailed categories under their Plaid primary, and a
+  filter offers "All food and drink" to match everything under one.
+- **Detailed categories** — by default a transaction is read under Plaid's
+  detailed category (Groceries, Coffee, Fuel, Restaurant, Flights) wherever the
+  bank sent one, rather than the sixteen broad ones (Food and drink,
+  Transportation). Settings → Appearance → Categories switches back to broad, or
+  set `CATEGORY_DETAIL=broad`. It is chosen on read, so switching rewrites
+  nothing, your own corrections win in either mode, and the totals are the same
+  in both: a detailed transfer or card payment is excluded exactly like its
+  primary. `get_cashflow` also returns `by_category_group`, the same spending
+  by primary, for questions about a whole area.
 - **Merchants** — every merchant seen on your cards, the category its spend is
   filed under, which cards paid it, and when; opens on this month to date. Set a
   category per merchant from a picker, or tick several and set it for all of
@@ -462,7 +473,7 @@ Read [SECURITY.md](SECURITY.md) before deploying. The short version:
 |---|---|
 | `npm run demo` | Seed a fictional database to try it without credentials |
 | `npm run dev` | Run the server from TypeScript |
-| `npm run check` | Typecheck + 404 tests |
+| `npm run check` | Typecheck + 416 tests |
 | `npm run sync` | One-shot sync; exits non-zero if a source errored |
 | `npm run db:init` | Create the database, seeding `room.json` if present |
 | `npm run hash-password` | Print an `ADMIN_PASSWORD_HASH` |

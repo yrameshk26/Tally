@@ -95,6 +95,7 @@ import {
   groupByMerchant,
   isTransferLike,
   knownCategories,
+  matchesCategory,
   ROLLUP_ROW_LIMIT,
   splitTransfers,
   listAccounts,
@@ -1079,7 +1080,7 @@ export function createWebRouter(db: DB): express.Router {
     const all = groupByMerchant(rows);
     const merchants = all
       .filter((m) => !f.uncategorized || !m.category || m.category === 'UNCATEGORIZED')
-      .filter((m) => !f.category || m.category === f.category);
+      .filter((m) => !f.category || matchesCategory(m.category, f.category));
 
     render(
       req,

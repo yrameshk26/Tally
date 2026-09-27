@@ -88,7 +88,12 @@ history is public too.
    paying a card from chequing counted alongside the purchases it paid for is
    the double count this exists to prevent. The report's figures come from
    `getCashflow` unchanged, and `test/report.test.ts` pins that they agree to
-   the cent. A rollup reads its whole window (`ROLLUP_ROW_LIMIT`), never a page
+   the cent. A detailed category belongs to its primary for this purpose
+   (`TRANSFER_OUT_ACCOUNT_TRANSFER` is a transfer), so `isTransferLike` goes
+   through `familyOf`, never an exact match, and detailed and broad mode must
+   give the same totals; `test/category.test.ts` pins that. Detailed or broad
+   (`CATEGORY_DETAIL`) is settled on read in `corrector`, before rules and
+   overrides, and never written back. A rollup reads its whole window (`ROLLUP_ROW_LIMIT`), never a page
    of rows: a total over the newest thousand transactions is wrong, not partial.
    The report's PDF is the browser's print dialog, not a PDF library; keep it
    that way (see DECISIONS.md).
@@ -183,7 +188,8 @@ src/
   auth/           password, TOTP, sessions
   lib/            logger, money, registered-type classifier, token crypto, html,
                   category (Plaid's RENT_AND_UTILITIES split into RENT and
-                  UTILITIES at write time, from its detailed category)
+                  UTILITIES at write time, from its detailed category; the
+                  detailed-vs-broad read, primary families and labels)
 scripts/          db-init, sync, backup, demo (fictional data, no network)
 test/             vitest — pure logic, fixtures, and the HTTP endpoint
 .github/          CI, dependabot, issue templates, FUNDING.yml

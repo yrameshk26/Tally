@@ -12,6 +12,8 @@ import { round2, todayISO } from './lib/money.ts';
 import { computeTotals, type NetWorthTotals } from './snapshots.ts';
 import { moveAccount } from './profiles.ts';
 import { corrector, effectiveCurrency } from './overrides.ts';
+import { categoryGroup, effectiveCategory, familyOf } from './lib/category.ts';
+import { categoryDetail } from './settings.ts';
 
 export type AccountView = {
   id: string;
@@ -325,10 +327,9 @@ export function getTransactions(
     where.push('a.profile_id = ?');
     args.push(opts.profile);
   }
-  if (opts.category) {
-    where.push('t.category = ?');
-    args.push(opts.category);
-  }
+  // The category filter is applied after corrections, below: the stored
+  // column is the bank's primary, which is neither what a rule filed the row
+  // under nor the detailed category it is read as.
   if (opts.search) {
     where.push('(t.name LIKE ? OR t.merchant LIKE ?)');
     args.push(`%${opts.search}%`, `%${opts.search}%`);
@@ -347,10 +348,10 @@ export function getTransactions(
        ORDER BY t.date DESC, t.id
        LIMIT ?`,
     )
-    .all(...args, opts.limit ?? 200) as Array<Record<string, unknown>>;
+    .all(...args, opts.category ? ROLLUP_ROW_LIMIT : (opts.limit ?? 200)) as Array<Record<string, unknown>>;
 
   const correct = corrector(db);
-  return rows.map((r) =>
+  const out = rows.map((r) =>
     correct({
       id: String(r['id']),
       date: String(r['date']),
@@ -367,6 +368,19 @@ export function getTransactions(
       pending: Boolean(r['pending']),
     }),
   );
+  if (!opts.category) return out;
+  const wanted = opts.category;
+  return out.filter((t) => matchesCategory(t.category, wanted)).slice(0, opts.limit ?? 200);
+}
+
+/**
+ * A category filter: the category itself, or, for a Plaid primary, every
+ * detailed category under it. Asking for FOOD_AND_DRINK finds the groceries
+ * and the coffee in detailed mode, and the same rows in broad mode.
+ */
+export function matchesCategory(category: string | null, wanted: string): boolean {
+  if (!category) return false;
+  return category === wanted || familyOf(category) === wanted;
 }
 
 export type ActivityView = {
@@ -584,9 +598,19 @@ export const PAYMENT_CATEGORIES = ['LOAN_PAYMENTS'];
  */
 export const NOT_SPENDING_CATEGORIES = [...TRANSFER_CATEGORIES, ...PAYMENT_CATEGORIES];
 
-/** Read after corrections, so a rule that recategorises a row moves it in or out. */
+/**
+ * Read after corrections, so a rule that recategorises a row moves it in or out.
+ * A detailed category counts with its primary (TRANSFER_OUT_ACCOUNT_TRANSFER is
+ * a transfer), so detailed and broad mode exclude exactly the same rows.
+ */
 export function isTransferLike(category: string | null | undefined): boolean {
-  return NOT_SPENDING_CATEGORIES.includes(category ?? '');
+  return inCategories(category, NOT_SPENDING_CATEGORIES);
+}
+
+function inCategories(category: string | null | undefined, list: readonly string[]): boolean {
+  if (!category) return false;
+  const family = familyOf(category);
+  return list.includes(category) || (family !== null && list.includes(family));
 }
 
 /**
@@ -614,6 +638,12 @@ export type CashflowResult = {
   net_cad: number;
   by_month: Array<{ month: string; income_cad: number; spend_cad: number; net_cad: number }>;
   by_category: Array<{ category: string; spend_cad: number }>;
+  /**
+   * Spending by Plaid primary (Food and drink, not Groceries and Coffee). The
+   * same as by_category in broad mode; in detailed mode it answers "how much
+   * on food" without adding up the detailed rows by hand.
+   */
+  by_category_group: Array<{ category: string; spend_cad: number }>;
   top_merchants: Array<{ merchant: string; spend_cad: number; count: number }>;
   by_profile: Array<{ profile: string; income_cad: number; spend_cad: number }>;
   excluded_categories: string[];
@@ -644,7 +674,8 @@ export function getCashflow(
   // rule that rescues a row out of TRANSFER_OUT has to bring it back in.
   const raw = db
     .prepare(
-      `SELECT t.id, t.date, t.amount_cad, t.category, t.merchant, t.name, a.profile_id AS profile
+      `SELECT t.id, t.date, t.amount_cad, t.category, t.category_detailed, t.merchant, t.name,
+              a.profile_id AS profile
        FROM transactions t
        LEFT JOIN accounts a ON a.id = t.account_id
        WHERE ${where.join(' AND ')}`,
@@ -654,6 +685,7 @@ export function getCashflow(
     date: string;
     amount_cad: number;
     category: string | null;
+    category_detailed: string | null;
     merchant: string | null;
     name: string | null;
     profile: string | null;
@@ -662,13 +694,11 @@ export function getCashflow(
   // Corrections apply here too: a merchant rule that only fixed the transaction
   // list while cashflow kept the bank's spelling would be worse than no rule.
   const correct = corrector(db);
-  const excludedSet = new Set(excluded);
-  const rows = raw
-    .map((r) => correct(r))
-    .filter((r) => !excludedSet.has(r.category ?? ''));
+  const rows = raw.map((r) => correct(r)).filter((r) => !inCategories(r.category, excluded));
 
   const months = new Map<string, { income: number; spend: number }>();
   const categories = new Map<string, number>();
+  const groups = new Map<string, number>();
   const merchants = new Map<string, { spend: number; count: number }>();
   const profilesSeen = new Map<string, { income: number; spend: number }>();
   let income = 0;
@@ -690,6 +720,8 @@ export function getCashflow(
     if (out > 0) {
       const cat = r.category ?? 'UNCATEGORIZED';
       categories.set(cat, round2((categories.get(cat) ?? 0) + out));
+      const group = categoryGroup(cat);
+      groups.set(group, round2((groups.get(group) ?? 0) + out));
       const key = r.merchant ?? r.name ?? 'unknown';
       const mer = merchants.get(key) ?? { spend: 0, count: 0 };
       mer.spend = round2(mer.spend + out);
@@ -719,6 +751,9 @@ export function getCashflow(
         net_cad: round2(v.income - v.spend),
       })),
     by_category: [...categories.entries()]
+      .sort((a, b) => b[1] - a[1])
+      .map(([category, spend_cad]) => ({ category, spend_cad })),
+    by_category_group: [...groups.entries()]
       .sort((a, b) => b[1] - a[1])
       .map(([category, spend_cad]) => ({ category, spend_cad })),
     top_merchants: [...merchants.entries()]
@@ -949,10 +984,20 @@ export function groupByCategory(rows: TransactionView[]): CategoryGroup[] {
 
 /** Every category currently in use, for populating a picker. */
 export function knownCategories(db: DB): string[] {
+  // What the bank sent, read the way the rest of the app reads it: in
+  // detailed mode that is FOOD_AND_DRINK_GROCERIES, not FOOD_AND_DRINK.
+  const detail = categoryDetail(db);
+  const bank = (
+    db
+      .prepare(
+        `SELECT DISTINCT category, category_detailed FROM transactions
+         WHERE category IS NOT NULL AND category != ''`,
+      )
+      .all() as Array<{ category: string; category_detailed: string | null }>
+  ).map((r) => effectiveCategory(r.category, r.category_detailed, detail) ?? r.category);
   const rows = db
     .prepare(
-      `SELECT DISTINCT category AS c FROM transactions WHERE category IS NOT NULL AND category != ''
-       UNION SELECT DISTINCT category FROM tx_overrides WHERE category IS NOT NULL AND category != ''
+      `SELECT DISTINCT category AS c FROM tx_overrides WHERE category IS NOT NULL AND category != ''
        UNION SELECT DISTINCT category FROM merchant_rules WHERE category IS NOT NULL AND category != ''
        UNION SELECT name FROM categories
        ORDER BY c`,
@@ -962,7 +1007,7 @@ export function knownCategories(db: DB): string[] {
   // before any row carries one. A card payment the bank filed as something
   // else can only be hidden by choosing one of these, and nobody should have
   // to know to type "TRANSFER_OUT" in by hand.
-  return [...new Set([...rows.map((r) => r.c), ...NOT_SPENDING_CATEGORIES])].sort();
+  return [...new Set([...bank, ...rows.map((r) => r.c), ...NOT_SPENDING_CATEGORIES])].sort();
 }
 
 export function setAccountProfile(db: DB, accountId: string, profileId: string): boolean {

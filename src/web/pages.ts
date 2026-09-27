@@ -16,6 +16,7 @@ import {
 } from '../queries.ts';
 import type { MerchantRule } from '../overrides.ts';
 import { round2 } from '../lib/money.ts';
+import { categoryLabel, familyOf, sentenceCase } from '../lib/category.ts';
 import { PLAID_ITEM_CAP } from '../sources/plaid.ts';
 import type { NetWorthTotals } from '../snapshots.ts';
 import type { ManagedKey } from '../settings.ts';
@@ -466,6 +467,10 @@ const LABELS: Record<string, { label: string; hint: string }> = {
     label: 'App name',
     hint: 'What the sign-in screen, the navigation and the browser tab call this, up to 40 characters. Clear it to go back to “tally”.',
   },
+  CATEGORY_DETAIL: {
+    label: 'Categories',
+    hint: 'Detailed uses Plaid’s finer categories (Groceries, Coffee, Fuel) wherever the bank sent one; broad keeps the sixteen top-level ones (Food and drink, Transportation). Read on the fly, so switching changes nothing stored, and your own corrections win either way.',
+  },
 };
 
 export function settingsPage(opts: {
@@ -498,6 +503,19 @@ export function settingsPage(opts: {
         ? '•••••••• (unchanged)'
         : ''
       : (s.source === 'default' ? `${s.effective} (default)` : '');
+    if (s.key === 'CATEGORY_DETAIL') {
+      const current = s.effective ?? 'detailed';
+      const choice = (v: string, label: string): SafeHtml =>
+        html`<option value="${v}"${v === current ? raw(' selected') : raw('')}>${label}</option>`;
+      return html`<div class="field">
+        <label for="${s.key}">${meta.label} ${badge}</label>
+        <select id="${s.key}" name="${s.key}">
+          ${choice('detailed', 'Detailed: Groceries, Coffee, Fuel')}
+          ${choice('broad', 'Broad: Food and drink, Transportation')}
+        </select>
+        <div class="hint">${meta.hint}</div>
+      </div>`;
+    }
     return html`<div class="field">
       <label for="${s.key}">${meta.label} ${badge}</label>
       <input id="${s.key}" name="${s.key}"
@@ -536,7 +554,7 @@ export function settingsPage(opts: {
         // profile, so offering these fields elsewhere would silently write a key
         // nothing ever reads.
         opts.isDefaultProfile
-          ? html`${group('Appearance', ['APP_NAME'])}
+          ? html`${group('Appearance', ['APP_NAME', 'CATEGORY_DETAIL'])}
             ${group('Assistant — optional built-in chat', [
               'LLM_PROVIDER',
               'LLM_API_KEY',
@@ -1114,12 +1132,54 @@ export function securityPage(opts: {
 /**
  * Plaid ships categories as UPPER_SNAKE_CASE, which is both shouty and wide —
  * GENERAL_MERCHANDISE does not fit a select in a table cell, while "General
- * merchandise" does. Only the label changes; every form value stays the raw
- * category, so nothing downstream has to know about this.
+ * merchandise" does, and FOOD_AND_DRINK_GROCERIES is just "Groceries". Only
+ * the label changes; every form value stays the raw category, so nothing
+ * downstream has to know about this.
  */
 export function prettyCategory(category: string): string {
-  const words = category.trim().replace(/_+/g, ' ').toLowerCase();
-  return words.charAt(0).toUpperCase() + words.slice(1);
+  return categoryLabel(category);
+}
+
+/**
+ * Category <option>s. Detailed categories sit in an <optgroup> under their
+ * Plaid primary, so forty-odd of them stay findable. A filter also gets an
+ * "All food and drink" entry per group, which matches every detailed category
+ * under it; a picker for filing offers the primary itself only when it is in
+ * use, since filing a row as "Food and drink" is still a valid choice.
+ */
+export function categoryOptions(
+  categories: string[],
+  selected: string | null,
+  purpose: 'filter' | 'assign' = 'assign',
+): SafeHtml {
+  const opt = (value: string, label: string): SafeHtml =>
+    html`<option value="${value}"${value === selected ? raw(' selected') : raw('')}>${label}</option>`;
+  const members = new Map<string, string[]>();
+  for (const c of categories) {
+    const family = familyOf(c);
+    if (family && family !== c) members.set(family, [...(members.get(family) ?? []), c]);
+  }
+  const entries: Array<{ label: string; out: SafeHtml }> = [];
+  for (const c of categories) {
+    const family = familyOf(c);
+    if ((family && family !== c) || members.has(c)) continue;
+    entries.push({ label: categoryLabel(c), out: opt(c, categoryLabel(c)) });
+  }
+  for (const [family, codes] of members) {
+    const name = sentenceCase(family);
+    const head =
+      purpose === 'filter'
+        ? opt(family, `All ${name.toLowerCase()}`)
+        : categories.includes(family)
+          ? opt(family, `${name}, general`)
+          : raw('');
+    const items = codes
+      .map((c) => ({ c, label: categoryLabel(c) }))
+      .sort((a, b) => a.label.localeCompare(b.label))
+      .map(({ c, label }) => opt(c, label));
+    entries.push({ label: name, out: html`<optgroup label="${name}">${head}${join(items)}</optgroup>` });
+  }
+  return join(entries.sort((a, b) => a.label.localeCompare(b.label)).map((e) => e.out));
 }
 
 // --- transactions -----------------------------------------------------------
@@ -1157,7 +1217,7 @@ function filterBar(f: TxFilters, accounts: AccountView[], categories: string[], 
     <label>Category
       <select name="category">
         ${opt('', 'All categories', f.category === '')}
-        ${join(categories.map((c) => opt(c, prettyCategory(c), c === f.category)))}
+        ${categoryOptions(categories, f.category, 'filter')}
       </select>
     </label>
     ${
@@ -1231,12 +1291,7 @@ export function transactionsPage(opts: {
     <div class="cell-edit-row">
       <select name="category" aria-label="Category for ${t.name ?? t.id}">
         <option value="">uncategorised</option>
-        ${join(
-          opts.categories.map(
-            (c) =>
-              html`<option value="${c}"${c === (t.category ?? '') ? raw(' selected') : raw('')}>${prettyCategory(c)}</option>`,
-          ),
-        )}
+        ${categoryOptions(opts.categories, t.category)}
       </select>
       <button class="secondary" type="submit">Save</button>
     </div>
@@ -1249,11 +1304,7 @@ export function transactionsPage(opts: {
     <input type="text" name="merchant" value="${merchant}" aria-label="Rename every match to" class="cell-input">
     <select name="category" aria-label="Category for every match">
       <option value="">keep category</option>
-      ${join(
-        opts.categories.map(
-          (c) => html`<option value="${c}"${c === category ? raw(' selected') : raw('')}>${prettyCategory(c)}</option>`,
-        ),
-      )}
+      ${categoryOptions(opts.categories, category)}
     </select>
     <button class="secondary" type="submit">Apply to all</button>
   </form>`;
@@ -1492,7 +1543,7 @@ export function merchantsPage(opts: {
     <input type="hidden" name="back" value="${back}">
     <select name="category" data-autosubmit aria-label="Category for ${m.merchant}">
       ${opt('', 'uncategorised', !m.category || m.category === 'UNCATEGORIZED')}
-      ${join(opts.categories.map((c) => opt(c, prettyCategory(c), c === m.category)))}
+      ${categoryOptions(opts.categories, m.category)}
     </select>
     <noscript><button class="secondary" type="submit">Set</button></noscript>
   </form>`;
@@ -1533,7 +1584,7 @@ export function merchantsPage(opts: {
       <label>Category
         <select name="category">
           ${opt('', 'All categories', f.category === '')}
-          ${join(opts.categories.map((c) => opt(c, prettyCategory(c), c === f.category)))}
+          ${categoryOptions(opts.categories, f.category, 'filter')}
         </select>
       </label>
       <label>Show
@@ -1619,7 +1670,7 @@ export function merchantsPage(opts: {
               <select name="category" aria-label="Category for the selected merchants" required>
                 <option value="" disabled selected>Choose a category…</option>
                 ${opt(UNCATEGORISE, 'Uncategorised', false)}
-                ${join(opts.categories.map((c) => opt(c, prettyCategory(c), false)))}
+                ${categoryOptions(opts.categories, null)}
               </select>
               <button type="submit" id="bulk-apply" class="secondary">Set category for selected</button>
             </form>

@@ -3,6 +3,32 @@
 Dated, append-only. Each entry says what was chosen, what it was chosen over,
 and why.
 
+## 2026-09-27 — Plaid's detailed categories, read on the fly
+
+A user comparing with Fidelity found the categories too coarse: "Food and
+drink" cannot answer "how much on groceries". Plaid already sends a detailed
+category for every row (`FOOD_AND_DRINK_GROCERIES`), stored since day one.
+
+- **Chosen on read, not written.** `corrector` swaps in the detailed code
+  before rules and overrides, per the install-wide `CATEGORY_DETAIL` setting
+  (default detailed). Rewriting the stored column would have made the choice
+  one-way and fought with the Rent/Utilities split; on read, switching back is
+  free and a hand correction wins in either mode.
+- **Exclusion by family.** `isTransferLike` and `getCashflow` treat a detailed
+  code as its primary, so the two modes exclude the same rows and produce the
+  same totals. An exact-match list would have silently counted every detailed
+  transfer and card payment as spending.
+- **Filtering by a primary matches its family**, only for Plaid's primaries: a
+  hand-made category `FOOD` must not capture `FOOD_AND_DRINK_*`. The
+  Transactions filter now runs after corrections, so it finds what a rule
+  filed, which the old SQL filter on the stored column did not.
+- **`by_category_group`** added to cashflow rather than a second tool, so a
+  model can answer "how much on food" without summing detailed rows.
+- **Labels drop the primary** ("Groceries"), except transfers, which keep the
+  direction, and `TRANSPORTATION_GAS`, labelled "Fuel" so it does not read as
+  the gas bill. Legacy "A > B" paths from old Items are not codes and are left
+  alone.
+
 ## 2026-09-26 — Six changes from a user running their own copy
 
 - **PLAID_REDIRECT_URI is honoured by the web UI** when its path is

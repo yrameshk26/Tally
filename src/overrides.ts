@@ -17,6 +17,8 @@ import type { DB } from './db.ts';
 import { config } from './config.ts';
 import { loadRates, tryConvert } from './fx.ts';
 import { nowISO, round2 } from './lib/money.ts';
+import { effectiveCategory, type CategoryDetail } from './lib/category.ts';
+import { categoryDetail } from './settings.ts';
 
 export type TxOverride = { merchant: string | null; category: string | null; note: string | null };
 
@@ -269,6 +271,8 @@ export type Correctable = {
   name: string | null;
   merchant: string | null;
   category: string | null;
+  /** Plaid's detailed category, read instead of `category` in detailed mode. */
+  category_detailed?: string | null;
 };
 
 export type Corrected<T> = T & {
@@ -280,12 +284,23 @@ export type Corrected<T> = T & {
 /**
  * Apply overrides and rules to a batch of rows. Built once per query rather
  * than per row, because a rule list is read for every transaction.
+ *
+ * The bank's category is settled first (detailed or broad, per the install's
+ * setting) and corrections are applied on top, so a hand choice wins in
+ * either mode and switching modes never undoes one.
  */
-export function corrector(db: DB): <T extends Correctable>(row: T) => Corrected<T> {
+export function corrector(
+  db: DB,
+  detail: CategoryDetail = categoryDetail(db),
+): <T extends Correctable>(row: T) => Corrected<T> {
   const overrides = txOverrides(db);
   const rules = listMerchantRules(db);
 
-  return <T extends Correctable>(row: T): Corrected<T> => {
+  return <T extends Correctable>(input: T): Corrected<T> => {
+    const row = {
+      ...input,
+      category: effectiveCategory(input.category, input.category_detailed, detail),
+    } as T;
     const over = overrides.get(row.id);
     if (over && (over.merchant !== null || over.category !== null)) {
       return {

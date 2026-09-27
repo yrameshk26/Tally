@@ -49,11 +49,22 @@ const MERCHANTS: Array<[string, string, number, number]> = [
   ['Bluewater Insurance Company', 'GENERAL_SERVICES', 188.4, 0.5],
 ];
 
-/** Plaid's detailed category, where the demo has one: rent versus the bills. */
+/** Plaid's detailed category for each merchant, as a real Item sends one. */
 const DETAILED: Record<string, string> = {
-  'Meridian Apartments': 'RENT_AND_UTILITIES_RENT',
+  'Northgate Grocery': 'FOOD_AND_DRINK_GROCERIES',
+  'Corner Coffee': 'FOOD_AND_DRINK_COFFEE',
+  'Rosewood Diner': 'FOOD_AND_DRINK_RESTAURANT',
+  'Metro Transit': 'TRANSPORTATION_PUBLIC_TRANSIT',
+  'Harbour Fuel': 'TRANSPORTATION_GAS',
   'Lumen Electric': 'RENT_AND_UTILITIES_GAS_AND_ELECTRICITY',
   'Vista Internet': 'RENT_AND_UTILITIES_INTERNET_AND_CABLE',
+  'Meridian Apartments': 'RENT_AND_UTILITIES_RENT',
+  'Atlas Outfitters': 'GENERAL_MERCHANDISE_CLOTHING_AND_ACCESSORIES',
+  'Pinewood Pharmacy': 'MEDICAL_PHARMACIES_AND_SUPPLEMENTS',
+  'Skyline Air': 'TRAVEL_FLIGHTS',
+  'Cedar Cinema': 'ENTERTAINMENT_TV_AND_MOVIES',
+  'Bluewater Insurance Co': 'GENERAL_SERVICES_INSURANCE',
+  'Bluewater Insurance Company': 'GENERAL_SERVICES_INSURANCE',
 };
 
 function dayISO(daysAgo: number): string {
@@ -259,9 +270,9 @@ function main(): void {
       }
     }
     if (day % 30 === 16) {
-      for (const [account, name, amount, category] of [
-        ['demo:chq', 'TRANSFER TO RAINY DAY SAVINGS', 1_000, 'TRANSFER_OUT'],
-        ['demo:save', 'TRANSFER FROM EVERYDAY CHEQUING', -1_000, 'TRANSFER_IN'],
+      for (const [account, name, amount, category, detailed] of [
+        ['demo:chq', 'TRANSFER TO RAINY DAY SAVINGS', 1_000, 'TRANSFER_OUT', 'TRANSFER_OUT_SAVINGS'],
+        ['demo:save', 'TRANSFER FROM EVERYDAY CHEQUING', -1_000, 'TRANSFER_IN', 'TRANSFER_IN_ACCOUNT_TRANSFER'],
       ] as const) {
         n += 1;
         txs.push({
@@ -274,7 +285,7 @@ function main(): void {
           currency: 'CAD',
           amount_cad: amount,
           category,
-          category_detailed: null,
+          category_detailed: detailed,
           pending: false,
         });
       }
@@ -303,7 +314,7 @@ function main(): void {
   addMerchantRule(db, {
     pattern: 'bluewater insurance',
     merchant: 'Bluewater Insurance',
-    category: 'GENERAL_SERVICES',
+    category: 'GENERAL_SERVICES_INSURANCE',
   });
 
   setRoomLimit(db, 'me', 'RRSP', new Date().getUTCFullYear(), 31_500, 'demo figure');
