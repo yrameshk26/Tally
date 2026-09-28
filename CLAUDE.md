@@ -90,10 +90,13 @@ history is public too.
    `getCashflow` unchanged, and `test/report.test.ts` pins that they agree to
    the cent. A detailed category belongs to its primary for this purpose
    (`TRANSFER_OUT_ACCOUNT_TRANSFER` is a transfer), so `isTransferLike` goes
-   through `familyOf`, never an exact match, and detailed and broad mode must
-   give the same totals; `test/category.test.ts` pins that. Detailed or broad
-   (`CATEGORY_DETAIL`) is settled on read in `corrector`, before rules and
-   overrides, and never written back. A rollup reads its whole window (`ROLLUP_ROW_LIMIT`), never a page
+   through `familyOf`, never an exact match, and all three modes must
+   give the same totals; `test/category.test.ts` pins that. The mode
+   (`CATEGORY_DETAIL`: grouped, detailed or broad) is settled on read in
+   `corrector` and never written back: Plaid's detailed or broad code before
+   rules and overrides, then, in grouped mode, `toGrouped` after them. The
+   grouped list (`src/lib/taxonomy.ts`) never maps an income, transfer or
+   payment code: a mortgage payment filed under Home would become spending. A rollup reads its whole window (`ROLLUP_ROW_LIMIT`), never a page
    of rows: a total over the newest thousand transactions is wrong, not partial.
    The report's PDF is the browser's print dialog, not a PDF library; keep it
    that way (see DECISIONS.md).
@@ -189,7 +192,9 @@ src/
   lib/            logger, money, registered-type classifier, token crypto, html,
                   category (Plaid's RENT_AND_UTILITIES split into RENT and
                   UTILITIES at write time, from its detailed category; the
-                  detailed-vs-broad read, primary families and labels)
+                  grouped/detailed/broad read, families and labels),
+                  taxonomy (the grouped list and the Plaid codes that map
+                  into it)
 scripts/          db-init, sync, backup, demo (fictional data, no network)
 test/             vitest — pure logic, fixtures, and the HTTP endpoint
 .github/          CI, dependabot, issue templates, FUNDING.yml

@@ -3,6 +3,38 @@
 Dated, append-only. Each entry says what was chosen, what it was chosen over,
 and why.
 
+## 2026-09-28 — A grouped category list, modelled on Fidelity's
+
+The same user sent Fidelity's full list: eighteen parents a household thinks
+in (Family care, Bills & utilities, Home, Pets, Taxes) with subcategories.
+Plaid's detailed codes answer "what kind of merchant", not "what part of the
+budget", so childcare sat under General services and a phone bill under Rent
+and utilities.
+
+- **A third mode, `grouped`, and the new default.** `src/lib/taxonomy.ts`
+  declares the list and which Plaid codes land in each entry. It is applied in
+  `corrector` after rules and overrides, so a correction made in Plaid's terms
+  (FOOD_AND_DRINK) lands in the group too. Detailed and broad stay as options.
+- **Only known codes move.** A hand-made category, an income or transfer code,
+  or a Plaid code newer than the table stays as it is rather than being guessed
+  into a group.
+- **Income, transfers and loan or card payments are not mapped.** Fidelity puts
+  mortgage, HELOC, student loan and car payments under Home, Education and
+  Auto; here they are LOAN_PAYMENTS and excluded from spending in every mode,
+  and mapping them would make the grouped totals disagree with the other two.
+  Whether a mortgage payment is spending is a separate decision.
+- **Entries with no Plaid source are kept** (insurance kinds, pet grooming,
+  condo fees, fun money), because a fixed list to choose from is most of what
+  the user was asking for. Plaid says "insurance" and never which kind, so a
+  bank row lands on the Insurance parent.
+- **Adapted, not copied.** US-only entries (Medicare, Social Security, HOA)
+  became Canadian ones (income tax, property tax, condo fees); cash
+  withdrawals stay transfers, so Cash & ATM is for filing by hand.
+- **Codes keep Plaid's PARENT_CHILD shape** so the same family matching serves
+  filters and group totals; a test checks no child starts with a longer
+  parent's code (HOME_IMPROVEMENT is Plaid's), and the table refuses a Plaid
+  code listed twice.
+
 ## 2026-09-27 — Plaid's detailed categories, read on the fly
 
 A user comparing with Fidelity found the categories too coarse: "Food and

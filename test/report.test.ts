@@ -167,8 +167,9 @@ describe('income and spending', () => {
   it('ranks categories with their share, and the largest expenses first', () => {
     const r = buildPeriodReport(db, { period: { kind: 'month', month: '2026-08' } }, TODAY);
     expect(r.by_category).toEqual([
-      { category: 'FOOD_AND_DRINK', spend_cad: 200, share: 0.67 },
-      { category: 'TRANSPORTATION', spend_cad: 100, share: 0.33 },
+      // Grouped categories, the default: Plaid's primaries mapped into the list.
+      { category: 'FOOD', spend_cad: 200, share: 0.67 },
+      { category: 'AUTO_AND_TRANSPORT', spend_cad: 100, share: 0.33 },
     ]);
     expect(r.largest_expenses.map((e) => e.amount_cad)).toEqual([-120, -100, -80]);
     // A transfer is never one of the largest expenses, however large.

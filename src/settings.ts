@@ -23,7 +23,7 @@ import { DEFAULT_PROFILE_ID } from './profiles.ts';
 import { decryptToken, encryptToken } from './lib/crypto.ts';
 import { nowISO } from './lib/money.ts';
 import { errMessage, log } from './lib/logger.ts';
-import { CATEGORY_DETAILS, type CategoryDetail } from './lib/category.ts';
+import { CATEGORY_DETAILS, DEFAULT_CATEGORY_DETAIL, type CategoryDetail } from './lib/category.ts';
 
 /** Keys that must never be stored or returned in the clear. */
 export const SECRET_KEYS = new Set([
@@ -63,7 +63,7 @@ export const DEFAULTS: Partial<Record<ManagedKey, string>> = {
   PLAID_ENV: 'production',
   LLM_PROVIDER: 'anthropic',
   APP_NAME: 'tally',
-  CATEGORY_DETAIL: 'detailed',
+  CATEGORY_DETAIL: DEFAULT_CATEGORY_DETAIL,
 };
 
 /**
@@ -99,16 +99,17 @@ export function appName(db: DB): string {
 }
 
 /**
- * Detailed (Groceries, Coffee) or broad (Food and drink) categories, for the
- * whole install: cashflow, the report and every picker read the same one, so
- * a total and the list it came from never use different taxonomies.
+ * Grouped (Food › Groceries), detailed (Plaid's Groceries, Coffee) or broad
+ * (Food and drink) categories, for the whole install: cashflow, the report and
+ * every picker read the same one, so a total and the list it came from never
+ * use different taxonomies.
  */
 export function categoryDetail(db: DB): CategoryDetail {
   try {
     const v = getSetting(db, 'CATEGORY_DETAIL').trim().toLowerCase();
-    return v === 'broad' ? 'broad' : 'detailed';
+    return (CATEGORY_DETAILS as readonly string[]).includes(v) ? (v as CategoryDetail) : DEFAULT_CATEGORY_DETAIL;
   } catch {
-    return 'detailed';
+    return DEFAULT_CATEGORY_DETAIL;
   }
 }
 
@@ -161,7 +162,7 @@ export function setSetting(
   if (key === 'CATEGORY_DETAIL') {
     value = value.trim().toLowerCase();
     if (!(CATEGORY_DETAILS as readonly string[]).includes(value)) {
-      throw new Error('Categories are either "detailed" or "broad".');
+      throw new Error('Categories are "grouped", "detailed" or "broad".');
     }
   }
   const secret = SECRET_KEYS.has(key);

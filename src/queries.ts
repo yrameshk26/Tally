@@ -14,6 +14,7 @@ import { moveAccount } from './profiles.ts';
 import { corrector, effectiveCurrency } from './overrides.ts';
 import { categoryGroup, effectiveCategory, familyOf } from './lib/category.ts';
 import { categoryDetail } from './settings.ts';
+import { GROUPED_CATEGORIES, toGrouped } from './lib/taxonomy.ts';
 
 export type AccountView = {
   id: string;
@@ -369,7 +370,9 @@ export function getTransactions(
     }),
   );
   if (!opts.category) return out;
-  const wanted = opts.category;
+  // Asked in Plaid's terms while reading grouped (FOOD_AND_DRINK), the filter
+  // is translated like the rows were, or it would match nothing.
+  const wanted = categoryDetail(db) === 'grouped' ? (toGrouped(opts.category) ?? opts.category) : opts.category;
   return out.filter((t) => matchesCategory(t.category, wanted)).slice(0, opts.limit ?? 200);
 }
 
@@ -987,6 +990,7 @@ export function knownCategories(db: DB): string[] {
   // What the bank sent, read the way the rest of the app reads it: in
   // detailed mode that is FOOD_AND_DRINK_GROCERIES, not FOOD_AND_DRINK.
   const detail = categoryDetail(db);
+  const read = (c: string): string => (detail === 'grouped' ? (toGrouped(c) ?? c) : c);
   const bank = (
     db
       .prepare(
@@ -994,7 +998,7 @@ export function knownCategories(db: DB): string[] {
          WHERE category IS NOT NULL AND category != ''`,
       )
       .all() as Array<{ category: string; category_detailed: string | null }>
-  ).map((r) => effectiveCategory(r.category, r.category_detailed, detail) ?? r.category);
+  ).map((r) => read(effectiveCategory(r.category, r.category_detailed, detail) ?? r.category));
   const rows = db
     .prepare(
       `SELECT DISTINCT category AS c FROM tx_overrides WHERE category IS NOT NULL AND category != ''
@@ -1007,7 +1011,12 @@ export function knownCategories(db: DB): string[] {
   // before any row carries one. A card payment the bank filed as something
   // else can only be hidden by choosing one of these, and nobody should have
   // to know to type "TRANSFER_OUT" in by hand.
-  return [...new Set([...bank, ...rows.map((r) => r.c), ...NOT_SPENDING_CATEGORIES])].sort();
+  // Grouped mode offers its whole list, including the entries nothing has
+  // been filed under yet: choosing "Pets › Grooming" by hand is the point.
+  const offered = detail === 'grouped' ? GROUPED_CATEGORIES : [];
+  return [
+    ...new Set([...bank, ...rows.map((r) => read(r.c)), ...offered, ...NOT_SPENDING_CATEGORIES]),
+  ].sort();
 }
 
 export function setAccountProfile(db: DB, accountId: string, profileId: string): boolean {

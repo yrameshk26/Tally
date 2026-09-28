@@ -226,8 +226,8 @@ export function toolDefs(db: DB): ToolDef[] {
         .string()
         .optional()
         .describe(
-          'A category from list_categories. A Plaid primary such as FOOD_AND_DRINK also matches ' +
-            'every detailed category under it (FOOD_AND_DRINK_GROCERIES, FOOD_AND_DRINK_COFFEE).',
+          'A category from list_categories. A parent such as FOOD (or Plaid’s FOOD_AND_DRINK) ' +
+            'also matches every category under it (FOOD_GROCERIES, FOOD_DINING).',
         ),
       min_amount_cad: z.number().min(0).optional(),
       limit: z.number().int().min(1).max(1000).optional(),
@@ -250,9 +250,11 @@ export function toolDefs(db: DB): ToolDef[] {
     description:
       'Income vs spend for a period, by month, category, merchant and owner. Transfers between ' +
       'the household’s own accounts and card/loan payments are excluded by default so ' +
-      'spending is not double counted. by_category uses detailed categories (groceries, ' +
-      'coffee) unless the install is set to broad ones; by_category_group totals the same ' +
-      'spending by Plaid primary (food and drink), for questions about a whole area.',
+      'spending is not double counted. by_category is the finest level the install uses ' +
+      '(by default grouped: FOOD_GROCERIES, FAMILY_CARE_CHILDCARE, BILLS_AND_UTILITIES_' +
+      'PHONE_INTERNET); by_category_group totals the same spending by parent (FOOD, ' +
+      'FAMILY_CARE), for questions about a whole area. Income, transfers and payments keep ' +
+      'Plaid’s codes (INCOME_SALARY, LOAN_PAYMENTS_MORTGAGE_PAYMENT).',
     inputSchema: {
       start: DATE,
       end: DATE,
@@ -688,8 +690,10 @@ export function toolDefs(db: DB): ToolDef[] {
       'Every category available to file spending under: the ones institutions sent, the ones ' +
       'rules and overrides use, and the ones added by hand. The hand-added ones are listed ' +
       'separately because they exist whether or not anything is filed under them yet. ' +
-      '`detail` says whether bank categories are read detailed (FOOD_AND_DRINK_GROCERIES) or ' +
-      'broad (FOOD_AND_DRINK).',
+      '`detail` says how bank categories are read: grouped (the default, a budgeting-app list: ' +
+      'FOOD_GROCERIES, HOME_RENT, PETS_VETERINARY), detailed (Plaid’s FOOD_AND_DRINK_GROCERIES) ' +
+      'or broad (FOOD_AND_DRINK). In grouped mode the whole list is offered, including ' +
+      'entries nothing is filed under yet.',
     annotations: READ_ONLY,
     handler: () => {
       try {

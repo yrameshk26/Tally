@@ -16,7 +16,7 @@ import {
 } from '../queries.ts';
 import type { MerchantRule } from '../overrides.ts';
 import { round2 } from '../lib/money.ts';
-import { categoryLabel, familyOf, sentenceCase } from '../lib/category.ts';
+import { categoryLabel, familyLabel, familyOf } from '../lib/category.ts';
 import { PLAID_ITEM_CAP } from '../sources/plaid.ts';
 import type { NetWorthTotals } from '../snapshots.ts';
 import type { ManagedKey } from '../settings.ts';
@@ -469,7 +469,7 @@ const LABELS: Record<string, { label: string; hint: string }> = {
   },
   CATEGORY_DETAIL: {
     label: 'Categories',
-    hint: 'Detailed uses Plaid’s finer categories (Groceries, Coffee, Fuel) wherever the bank sent one; broad keeps the sixteen top-level ones (Food and drink, Transportation). Read on the fly, so switching changes nothing stored, and your own corrections win either way.',
+    hint: 'Grouped files spending the way a budgeting app does: Food, Bills & utilities, Family care, Home, Pets and so on, each with its own subcategories, including ones to choose by hand. Plaid detailed uses Plaid’s finer categories as they come; Plaid broad keeps its sixteen top-level ones. Read on the fly, so switching changes nothing stored, your own corrections win in every mode, and the totals are the same in all three.',
   },
 };
 
@@ -504,14 +504,15 @@ export function settingsPage(opts: {
         : ''
       : (s.source === 'default' ? `${s.effective} (default)` : '');
     if (s.key === 'CATEGORY_DETAIL') {
-      const current = s.effective ?? 'detailed';
+      const current = s.effective ?? 'grouped';
       const choice = (v: string, label: string): SafeHtml =>
         html`<option value="${v}"${v === current ? raw(' selected') : raw('')}>${label}</option>`;
       return html`<div class="field">
         <label for="${s.key}">${meta.label} ${badge}</label>
         <select id="${s.key}" name="${s.key}">
-          ${choice('detailed', 'Detailed: Groceries, Coffee, Fuel')}
-          ${choice('broad', 'Broad: Food and drink, Transportation')}
+          ${choice('grouped', 'Grouped: Food › Groceries, Family care › Childcare & daycare')}
+          ${choice('detailed', 'Plaid detailed: Groceries, Coffee, Fuel')}
+          ${choice('broad', 'Plaid broad: Food and drink, Transportation')}
         </select>
         <div class="hint">${meta.hint}</div>
       </div>`;
@@ -1166,7 +1167,7 @@ export function categoryOptions(
     entries.push({ label: categoryLabel(c), out: opt(c, categoryLabel(c)) });
   }
   for (const [family, codes] of members) {
-    const name = sentenceCase(family);
+    const name = familyLabel(family);
     const head =
       purpose === 'filter'
         ? opt(family, `All ${name.toLowerCase()}`)

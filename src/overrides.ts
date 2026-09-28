@@ -18,6 +18,7 @@ import { config } from './config.ts';
 import { loadRates, tryConvert } from './fx.ts';
 import { nowISO, round2 } from './lib/money.ts';
 import { effectiveCategory, type CategoryDetail } from './lib/category.ts';
+import { toGrouped } from './lib/taxonomy.ts';
 import { categoryDetail } from './settings.ts';
 
 export type TxOverride = { merchant: string | null; category: string | null; note: string | null };
@@ -285,9 +286,10 @@ export type Corrected<T> = T & {
  * Apply overrides and rules to a batch of rows. Built once per query rather
  * than per row, because a rule list is read for every transaction.
  *
- * The bank's category is settled first (detailed or broad, per the install's
- * setting) and corrections are applied on top, so a hand choice wins in
- * either mode and switching modes never undoes one.
+ * The bank's category is settled first (Plaid's detailed or broad, per the
+ * install's setting) and corrections are applied on top, so a hand choice wins
+ * in every mode and switching modes never undoes one. Grouped mode then maps
+ * the result into its own list.
  */
 export function corrector(
   db: DB,
@@ -296,7 +298,7 @@ export function corrector(
   const overrides = txOverrides(db);
   const rules = listMerchantRules(db);
 
-  return <T extends Correctable>(input: T): Corrected<T> => {
+  const correct = <T extends Correctable>(input: T): Corrected<T> => {
     const row = {
       ...input,
       category: effectiveCategory(input.category, input.category_detailed, detail),
@@ -321,6 +323,13 @@ export function corrector(
       };
     }
     return { ...row, corrected_by: null };
+  };
+  if (detail !== 'grouped') return correct;
+  // Grouped maps last, so a rule written in Plaid's terms (FOOD_AND_DRINK)
+  // lands in the group like the bank's own rows do.
+  return <T extends Correctable>(input: T): Corrected<T> => {
+    const out = correct(input);
+    return { ...out, category: toGrouped(out.category) };
   };
 }
 

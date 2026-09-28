@@ -8,6 +8,8 @@
  * combined label stays: guessing "utilities" for an unlabelled row would be a
  * made-up answer presented as the bank's.
  */
+import { GROUPED_PARENTS, groupedLabel } from './taxonomy.ts';
+
 export const RENT = 'RENT';
 export const UTILITIES = 'UTILITIES';
 const COMBINED = 'RENT_AND_UTILITIES';
@@ -46,13 +48,15 @@ export const PFC_PRIMARIES = [
 ] as const;
 
 /**
- * How finely spending is categorised. Detailed reads Plaid's detailed category
- * (Groceries, Coffee, Gas) where it sent one; broad keeps the primary (Food and
- * drink, Transportation). It is chosen on read, so switching back and forth
- * rewrites nothing.
+ * How spending is categorised. Grouped is a budgeting app's list (Food ›
+ * Groceries, Family care › Childcare & daycare; see lib/taxonomy.ts), built
+ * from Plaid's detailed category. Detailed is Plaid's detailed category as it
+ * comes (Groceries, Coffee, Gas); broad is Plaid's primary (Food and drink,
+ * Transportation). It is chosen on read, so switching rewrites nothing.
  */
-export type CategoryDetail = 'detailed' | 'broad';
-export const CATEGORY_DETAILS: readonly CategoryDetail[] = ['detailed', 'broad'];
+export type CategoryDetail = 'grouped' | 'detailed' | 'broad';
+export const CATEGORY_DETAILS: readonly CategoryDetail[] = ['grouped', 'detailed', 'broad'];
+export const DEFAULT_CATEGORY_DETAIL: CategoryDetail = 'grouped';
 
 const UPPER_SNAKE = /^[A-Z0-9]+(?:_[A-Z0-9]+)*$/;
 
@@ -62,15 +66,18 @@ export function inFamily(category: string | null | undefined, family: string): b
   return category === family || category.startsWith(`${family}_`);
 }
 
+/** Plaid's primaries and the grouped parents: every code a category can belong to. */
+const FAMILIES: readonly string[] = [...new Set([...PFC_PRIMARIES, ...GROUPED_PARENTS])];
+
 /**
- * The Plaid primary a category belongs to, or null for one that is not
- * Plaid's (a hand-added category, RENT, UTILITIES). The longest match wins, so
- * a future primary that extends another is not swallowed by it.
+ * The Plaid primary or grouped parent a category belongs to, or null for one
+ * that is neither (a hand-added category, RENT, UTILITIES). The longest match
+ * wins, so HOME_IMPROVEMENT_HARDWARE is Plaid's HOME_IMPROVEMENT, not HOME.
  */
 export function familyOf(category: string | null | undefined): string | null {
   if (!category) return null;
   let best: string | null = null;
-  for (const p of PFC_PRIMARIES) {
+  for (const p of FAMILIES) {
     if (inFamily(category, p) && (!best || p.length > best.length)) best = p;
   }
   return best;
@@ -89,6 +96,8 @@ export function effectiveCategory(
   mode: CategoryDetail,
 ): string | null {
   if (mode === 'broad' || !detailed || !UPPER_SNAKE.test(detailed)) return category;
+  // Grouped starts from the detailed code too; lib/taxonomy.ts maps it after
+  // corrections, so a hand choice made in Plaid's terms is mapped as well.
   const family = familyOf(detailed) ?? (category && detailed.startsWith(`${category}_`) ? category : null);
   return family && detailed !== family ? detailed : category;
 }
@@ -105,6 +114,11 @@ const LABELS: Record<string, string> = {
   // "Gas" beside "Gas and electricity" reads as the same bill.
   TRANSPORTATION_GAS: 'Fuel',
 };
+
+/** The heading a family's categories are listed under in a picker. */
+export function familyLabel(family: string): string {
+  return groupedLabel(family) ?? sentenceCase(family);
+}
 
 /** UPPER_SNAKE_CASE as a sentence: GENERAL_MERCHANDISE is "General merchandise". */
 export function sentenceCase(code: string): string {
@@ -124,7 +138,7 @@ export function sentenceCase(code: string): string {
  * direction is the whole point: "Transfer out: savings".
  */
 export function categoryLabel(category: string): string {
-  const own = LABELS[category];
+  const own = LABELS[category] ?? groupedLabel(category);
   if (own) return own;
   const family = familyOf(category);
   if (!family || family === category) return sentenceCase(category);

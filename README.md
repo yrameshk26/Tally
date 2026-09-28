@@ -118,7 +118,7 @@ question:
 | `get_holdings` | Positions by symbol with concentration % and unrealized P&L, or `by_account` |
 | `get_transactions` | Bank and card transactions — negative is money out |
 | `get_activities` | Brokerage movements: dividends, interest, buys, sells, fees, contributions |
-| `get_cashflow` | Income vs spend by month, category (detailed, plus `by_category_group` by Plaid primary), merchant, profile |
+| `get_cashflow` | Income vs spend by month, category (plus `by_category_group` by parent), merchant, profile |
 | `get_period_report` | One month or one year: net worth at each end and the change, income, spending, savings rate, categories with their share, top merchants, largest expenses. The same data the Reports page prints |
 | `get_contribution_room` | Remaining RRSP/TFSA/FHSA room per person |
 | `set_contributed`, `set_room_limit` | Correct the room figures by hand |
@@ -364,15 +364,22 @@ Server-rendered, no framework, no webfonts, no inline styles under a strict CSP.
   (`Groceries`, not `FOOD_AND_DRINK_GROCERIES`); the stored value is unchanged.
   Category pickers group detailed categories under their Plaid primary, and a
   filter offers "All food and drink" to match everything under one.
-- **Detailed categories** — by default a transaction is read under Plaid's
-  detailed category (Groceries, Coffee, Fuel, Restaurant, Flights) wherever the
-  bank sent one, rather than the sixteen broad ones (Food and drink,
-  Transportation). Settings → Appearance → Categories switches back to broad, or
-  set `CATEGORY_DETAIL=broad`. It is chosen on read, so switching rewrites
-  nothing, your own corrections win in either mode, and the totals are the same
-  in both: a detailed transfer or card payment is excluded exactly like its
-  primary. `get_cashflow` also returns `by_category_group`, the same spending
-  by primary, for questions about a whole area.
+- **Categories** — by default spending is filed the way a budgeting app does it,
+  in eighteen groups with their own subcategories: Auto & transport, Bills &
+  utilities, Business & services, Cash & ATM, Charity & gifts, Education,
+  Entertainment, Family care, Fees & charges, Food, Home, Insurance premiums,
+  Medical, Personal care, Pets, Shopping, Taxes, and Travel & vacation. So
+  "Family care › Childcare & daycare" and "Bills & utilities › Phone, internet,
+  cable & security" rather than Plaid's `GENERAL_SERVICES_CHILDCARE`. Plaid's
+  detailed category decides where a row lands; subcategories Plaid cannot tell
+  apart (which kind of insurance, pet grooming, condo fees) are in the picker to
+  choose by hand. Income, transfers and loan or card payments keep Plaid's
+  names and stay out of spending. Settings → Appearance → Categories switches to
+  Plaid detailed (Groceries, Coffee, Fuel) or Plaid broad (Food and drink), or
+  set `CATEGORY_DETAIL=detailed|broad`. It is chosen on read, so switching
+  rewrites nothing, your own corrections win in every mode, and the totals are
+  the same in all three. `get_cashflow` also returns `by_category_group`, the
+  same spending by parent, for questions about a whole area.
 - **Merchants** — every merchant seen on your cards, the category its spend is
   filed under, which cards paid it, and when; opens on this month to date. Set a
   category per merchant from a picker, or tick several and set it for all of
@@ -473,7 +480,7 @@ Read [SECURITY.md](SECURITY.md) before deploying. The short version:
 |---|---|
 | `npm run demo` | Seed a fictional database to try it without credentials |
 | `npm run dev` | Run the server from TypeScript |
-| `npm run check` | Typecheck + 416 tests |
+| `npm run check` | Typecheck + 426 tests |
 | `npm run sync` | One-shot sync; exits non-zero if a source errored |
 | `npm run db:init` | Create the database, seeding `room.json` if present |
 | `npm run hash-password` | Print an `ADMIN_PASSWORD_HASH` |

@@ -5,7 +5,8 @@
  */
 import { beforeEach, describe, expect, it } from 'vitest';
 import { initDb, openDb, type DB } from '../src/db.ts';
-import { categoryLabel, effectiveCategory, familyOf, refineCategory } from '../src/lib/category.ts';
+import { categoryLabel, effectiveCategory, familyLabel, familyOf, refineCategory } from '../src/lib/category.ts';
+import { FROM_PLAID, GROUPED_CATEGORIES, GROUPED_PARENT_OF, toGrouped } from '../src/lib/taxonomy.ts';
 import { getCashflow, getTransactions, isTransferLike, knownCategories, matchesCategory } from '../src/queries.ts';
 import { categoryOptions } from '../src/web/pages.ts';
 import { createProfile } from '../src/profiles.ts';
@@ -104,6 +105,7 @@ describe('rows stored before the split', () => {
 
 describe('detailed categories', () => {
   const month = { start: '2026-08-01', end: '2026-08-31' };
+  beforeEach(() => setSetting(db, 'CATEGORY_DETAIL', 'detailed'));
   const seed = (): number =>
     upsertTransactions(db, [
       row('g', 'FreshCo', 'FOOD_AND_DRINK', 'FOOD_AND_DRINK_GROCERIES', 120),
@@ -116,7 +118,7 @@ describe('detailed categories', () => {
       row('l', 'Old Diner', 'FOOD_AND_DRINK', 'Food and Drink > Restaurants', 30),
     ]);
 
-  it('reads the detailed category by default, and the primary in broad mode', () => {
+  it('reads the detailed category, and the primary in broad mode', () => {
     seed();
     const cat = (id: string): string | null | undefined => getTransactions(db).find((t) => t.id === id)?.category;
     expect(cat('g')).toBe('FOOD_AND_DRINK_GROCERIES');
@@ -165,7 +167,7 @@ describe('detailed categories', () => {
     const ids = (category: string): string[] => getTransactions(db, { category }).map((t) => t.id).sort();
     expect(ids('FOOD_AND_DRINK')).toEqual(['c', 'g', 'l']);
     expect(ids('FOOD_AND_DRINK_COFFEE')).toEqual(['c']);
-    // A hand-made category that happens to prefix a Plaid code is not a family.
+    // A shorter family (the grouped FOOD) does not capture a longer one's codes.
     expect(ids('FOOD')).toEqual([]);
     expect(matchesCategory('FOOD_AND_DRINK_COFFEE', 'FOOD')).toBe(false);
   });
@@ -185,11 +187,12 @@ describe('detailed categories', () => {
     expect(knownCategories(db)).toContain('FOOD_AND_DRINK');
   });
 
-  it('is an install-wide choice between two values', () => {
-    expect(categoryDetail(db)).toBe('detailed');
+  it('is an install-wide choice between three values, grouped by default', () => {
+    db.prepare("DELETE FROM settings WHERE key = 'CATEGORY_DETAIL'").run();
+    expect(categoryDetail(db)).toBe('grouped');
     setSetting(db, 'CATEGORY_DETAIL', ' Broad ');
     expect(categoryDetail(db)).toBe('broad');
-    expect(() => setSetting(db, 'CATEGORY_DETAIL', 'fine')).toThrow(/detailed" or "broad/);
+    expect(() => setSetting(db, 'CATEGORY_DETAIL', 'fine')).toThrow(/"grouped", "detailed" or "broad"/);
     createProfile(db, 'Partner');
     expect(() => setSetting(db, 'CATEGORY_DETAIL', 'broad', 'partner')).toThrow(/whole install/);
   });
@@ -229,5 +232,138 @@ describe('category labels', () => {
     expect(assign).not.toContain('All food and drink');
     expect(assign).toContain('<option value="FOOD_AND_DRINK_GROCERIES" selected>Groceries</option>');
     expect(assign).toContain('<option value="TRANSFER_OUT">Transfer out</option>');
+  });
+});
+
+describe('grouped categories', () => {
+  const month = { start: '2026-08-01', end: '2026-08-31' };
+  const seed = (): number =>
+    upsertTransactions(db, [
+      row('g', 'FreshCo', 'FOOD_AND_DRINK', 'FOOD_AND_DRINK_GROCERIES', 120),
+      row('c', 'Cafe Uno', 'FOOD_AND_DRINK', 'FOOD_AND_DRINK_COFFEE', 6),
+      row('k', 'Little Steps Daycare', 'GENERAL_SERVICES', 'GENERAL_SERVICES_CHILDCARE', 800),
+      row('t', 'Telus', 'RENT_AND_UTILITIES', 'RENT_AND_UTILITIES_TELEPHONE', 74),
+      row('r', 'Landlord', 'RENT_AND_UTILITIES', 'RENT_AND_UTILITIES_RENT', 1_500),
+      row('p', 'Card payment', 'LOAN_PAYMENTS', 'LOAN_PAYMENTS_CREDIT_CARD_PAYMENT', 500),
+      row('m', 'Mortgage', 'LOAN_PAYMENTS', 'LOAN_PAYMENTS_MORTGAGE_PAYMENT', 2_100),
+      row('s', 'To savings', 'TRANSFER_OUT', 'TRANSFER_OUT_ACCOUNT_TRANSFER', 300),
+      row('w', 'Payroll', 'INCOME', 'INCOME_SALARY', -4_000),
+    ]);
+  const cat = (id: string): string | null | undefined => getTransactions(db).find((t) => t.id === id)?.category;
+
+  it('is the default, and files the bank rows into the list', () => {
+    seed();
+    expect(categoryDetail(db)).toBe('grouped');
+    expect(cat('g')).toBe('FOOD_GROCERIES');
+    expect(cat('c')).toBe('FOOD_DINING');
+    expect(cat('k')).toBe('FAMILY_CARE_CHILDCARE');
+    expect(cat('t')).toBe('BILLS_AND_UTILITIES_PHONE_INTERNET');
+    expect(cat('r')).toBe('HOME_RENT');
+    expect(categoryLabel('FAMILY_CARE_CHILDCARE')).toBe('Childcare & daycare');
+    expect(familyLabel('BILLS_AND_UTILITIES')).toBe('Bills & utilities');
+  });
+
+  it('leaves income, transfers and payments in Plaid’s terms', () => {
+    seed();
+    expect(cat('w')).toBe('INCOME_SALARY');
+    expect(cat('p')).toBe('LOAN_PAYMENTS_CREDIT_CARD_PAYMENT');
+    // A mortgage payment stays out of spending, as it is in the other modes.
+    expect(cat('m')).toBe('LOAN_PAYMENTS_MORTGAGE_PAYMENT');
+    expect(cat('s')).toBe('TRANSFER_OUT_ACCOUNT_TRANSFER');
+  });
+
+  it('gives the same totals as Plaid’s categories, in every mode', () => {
+    seed();
+    const totals = (): number[] => {
+      const c = getCashflow(db, month);
+      return [c.spend_cad, c.income_cad, c.net_cad];
+    };
+    const grouped = totals();
+    expect(grouped).toEqual([2_500, 4_000, 1_500]);
+    setSetting(db, 'CATEGORY_DETAIL', 'detailed');
+    expect(totals()).toEqual(grouped);
+    setSetting(db, 'CATEGORY_DETAIL', 'broad');
+    expect(totals()).toEqual(grouped);
+  });
+
+  it('totals by group and filters by group', () => {
+    seed();
+    expect(getCashflow(db, month).by_category_group).toEqual([
+      { category: 'HOME', spend_cad: 1_500 },
+      { category: 'FAMILY_CARE', spend_cad: 800 },
+      { category: 'FOOD', spend_cad: 126 },
+      { category: 'BILLS_AND_UTILITIES', spend_cad: 74 },
+    ]);
+    expect(getTransactions(db, { category: 'FOOD' }).map((t) => t.id).sort()).toEqual(['c', 'g']);
+    // Asked in Plaid's terms, as a model used to them might.
+    expect(getTransactions(db, { category: 'FOOD_AND_DRINK' }).map((t) => t.id).sort()).toEqual(['c', 'g']);
+  });
+
+  it('maps a correction made in Plaid’s terms, and leaves your own categories alone', () => {
+    seed();
+    addMerchantRule(db, { pattern: 'Telus', match_type: 'merchant', category: 'FOOD_AND_DRINK' });
+    addMerchantRule(db, { pattern: 'FreshCo', match_type: 'merchant', category: 'HOUSEHOLD' });
+    expect(cat('t')).toBe('FOOD');
+    expect(cat('g')).toBe('HOUSEHOLD');
+  });
+
+  it('offers the whole list in the picker, including what nothing is filed under yet', () => {
+    seed();
+    const cats = knownCategories(db);
+    expect(cats).toContain('PETS_GROOMING');
+    expect(cats).toContain('FOOD_GROCERIES');
+    expect(cats).toContain('INCOME_SALARY');
+    expect(cats).not.toContain('FOOD_AND_DRINK_COFFEE');
+    const picker = categoryOptions(cats, 'FOOD_GROCERIES').value;
+    expect(picker).toContain('<optgroup label="Food">');
+    expect(picker).toContain('<option value="FOOD_GROCERIES" selected>Groceries</option>');
+  });
+});
+
+describe('the grouped list itself', () => {
+  it('files every entry under the parent it is declared in', () => {
+    // A child starting with a longer parent's code (HOME_IMPROVEMENT_...)
+    // would be counted under that parent instead.
+    for (const [code, parent] of GROUPED_PARENT_OF) expect(familyOf(code), code).toBe(parent);
+  });
+
+  it('never moves a row into or out of spending', () => {
+    for (const [src, dst] of FROM_PLAID) {
+      expect(isTransferLike(src), src).toBe(false);
+      expect(isTransferLike(dst), dst).toBe(false);
+    }
+  });
+
+  it('only maps Plaid codes, into its own list', () => {
+    for (const [src, dst] of FROM_PLAID) {
+      expect(familyOf(src) !== null || ['RENT', 'UTILITIES'].includes(src), src).toBe(true);
+      expect(GROUPED_CATEGORIES, src).toContain(dst);
+    }
+  });
+
+  it('covers every spending code seen on a live install', () => {
+    const seen = [
+      'BANK_FEES_CASH_ADVANCE', 'BANK_FEES_FOREIGN_TRANSACTION_FEES', 'BANK_FEES_INTEREST_CHARGE',
+      'BANK_FEES_OTHER_BANK_FEES', 'ENTERTAINMENT_CASINOS_AND_GAMBLING', 'ENTERTAINMENT_OTHER_ENTERTAINMENT',
+      'ENTERTAINMENT_SPORTING_EVENTS_AMUSEMENT_PARKS_AND_MUSEUMS', 'ENTERTAINMENT_TV_AND_MOVIES',
+      'FOOD_AND_DRINK_BEER_WINE_AND_LIQUOR', 'FOOD_AND_DRINK_COFFEE', 'FOOD_AND_DRINK_FAST_FOOD',
+      'FOOD_AND_DRINK_GROCERIES', 'FOOD_AND_DRINK_OTHER_FOOD_AND_DRINK', 'FOOD_AND_DRINK_RESTAURANT',
+      'GENERAL_MERCHANDISE_CLOTHING_AND_ACCESSORIES', 'GENERAL_MERCHANDISE_CONVENIENCE_STORES',
+      'GENERAL_MERCHANDISE_DISCOUNT_STORES', 'GENERAL_MERCHANDISE_ELECTRONICS',
+      'GENERAL_MERCHANDISE_GIFTS_AND_NOVELTIES', 'GENERAL_MERCHANDISE_ONLINE_MARKETPLACES',
+      'GENERAL_MERCHANDISE_OTHER_GENERAL_MERCHANDISE', 'GENERAL_MERCHANDISE_SPORTING_GOODS',
+      'GENERAL_MERCHANDISE_SUPERSTORES', 'GENERAL_SERVICES_ACCOUNTING_AND_FINANCIAL_PLANNING',
+      'GENERAL_SERVICES_AUTOMOTIVE', 'GENERAL_SERVICES_CHILDCARE', 'GENERAL_SERVICES_EDUCATION',
+      'GENERAL_SERVICES_INSURANCE', 'GENERAL_SERVICES_OTHER_GENERAL_SERVICES',
+      'GENERAL_SERVICES_POSTAGE_AND_SHIPPING', 'GOVERNMENT_AND_NON_PROFIT', 'HOME_IMPROVEMENT_HARDWARE',
+      'HOME_IMPROVEMENT_REPAIR_AND_MAINTENANCE', 'KIDS_ENTERTAINMENT', 'MEDICAL_OTHER_MEDICAL',
+      'MEDICAL_PHARMACIES_AND_SUPPLEMENTS', 'PERSONAL_CARE_HAIR_AND_BEAUTY',
+      'PERSONAL_CARE_LAUNDRY_AND_DRY_CLEANING', 'RENT_AND_UTILITIES_GAS_AND_ELECTRICITY',
+      'RENT_AND_UTILITIES_OTHER_UTILITIES', 'RENT_AND_UTILITIES_TELEPHONE', 'TRANSPORTATION',
+      'TRANSPORTATION_GAS', 'TRANSPORTATION_OTHER_TRANSPORTATION', 'TRANSPORTATION_PARKING',
+      'TRANSPORTATION_PUBLIC_TRANSIT', 'TRAVEL', 'TRAVEL_FLIGHTS', 'TRAVEL_LODGING', 'TRAVEL_OTHER_TRAVEL',
+      'TRAVEL_RENTAL_CARS',
+    ];
+    for (const code of seen) expect(GROUPED_CATEGORIES, code).toContain(toGrouped(code));
   });
 });
