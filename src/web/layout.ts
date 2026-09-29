@@ -405,10 +405,14 @@ tbody tr:last-child td{border-bottom:0}
 td.num,th.num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
 /* The Reports controls: a month only means something when the period is one. */
 .filters:has(select[name=period] option[value=year]:checked) .month-field{display:none}
+.filters .tag-field{display:none}
+.filters:has(select[name=period] option[value=tag]:checked) .tag-field{display:flex}
+.filters:has(select[name=period] option[value=tag]:checked) :is(.month-field,.year-field){display:none}
 /* Bulk selection: a bar of actions above the table, checkboxes in the first column. */
 .bulk-bar{display:flex;align-items:center;gap:.6rem;flex-wrap:wrap;margin:0 0 .9rem;padding:.6rem .75rem;
   border:1px solid var(--line);border-radius:var(--radius-md);background:var(--panel-2)}
 .bulk-bar select{width:auto;min-width:12rem}
+.bulk-bar input[name=tag]{width:auto;flex:0 1 14rem;min-width:9rem}
 .bulk-bar #bulk-count{flex:1;min-width:10rem;font-size:var(--step--1)}
 th.check,td.check{width:2.2rem;padding-right:0}
 input[type=checkbox]{width:1.05rem;height:1.05rem;accent-color:var(--accent);cursor:pointer;margin:0;vertical-align:middle}
@@ -475,6 +479,9 @@ button[aria-disabled=true]{opacity:.65;cursor:progress}
   border:1px solid var(--line);color:var(--fg-muted);background:var(--bg-sunk);
 }
 .pill.ok,.pill.bad,.pill.warn{border-color:transparent}
+.pill.tag{color:var(--accent-strong);background:var(--accent-soft);border-color:transparent;text-decoration:none}
+.pill.tag:hover{text-decoration:underline}
+.tags{display:flex;flex-wrap:wrap;gap:.25rem;margin-top:.3rem}
 .pill.ok::before,.pill.bad::before,.pill.warn::before{content:"";width:.4rem;height:.4rem;border-radius:50%;background:currentColor}
 .pill.ok{color:var(--pos);background:color-mix(in oklch,var(--pos) 12%,transparent)}
 .pill.bad{color:var(--neg);background:color-mix(in oklch,var(--neg) 11%,transparent)}

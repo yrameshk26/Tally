@@ -96,7 +96,13 @@ history is public too.
    `corrector` and never written back: Plaid's detailed or broad code before
    rules and overrides, then, in grouped mode, `toGrouped` after them. The
    grouped list (`src/lib/taxonomy.ts`) never maps an income, transfer or
-   payment code: a mortgage payment filed under Home would become spending. A rollup reads its whole window (`ROLLUP_ROW_LIMIT`), never a page
+   payment code: a mortgage payment filed under Home would become spending.
+   Tags (`src/tags.ts`) narrow a view and never decide what is spending: a
+   tagged or untagged cashflow runs the same exclusion, and bulk tagging a
+   range skips transfers and card payments. A tag or override on a pending
+   charge moves to the posted one through `replaces` (Plaid's
+   `pending_transaction_id`) in `upsertTransactions`; a new source adapter that
+   has pending rows sets it too. A rollup reads its whole window (`ROLLUP_ROW_LIMIT`), never a page
    of rows: a total over the newest thousand transactions is wrong, not partial.
    The report's PDF is the browser's print dialog, not a PDF library; keep it
    that way (see DECISIONS.md).
@@ -179,6 +185,8 @@ src/
   oauth.ts        OAuth 2.1 AS: DCR, PKCE, code/token issuance and rotation
   credentials.ts  provider secrets, encrypted at rest, per profile
   profiles.ts     up to 5 profiles; create/rename/delete, move an account
+  tags.ts         your own labels on transactions (a trip, business); never
+                  part of what counts as spending
   settings.ts     DB-stored settings that override the environment; APP_NAME
                   is install-wide and display-only (the MCP server, cookies and
                   code stay "tally")

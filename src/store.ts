@@ -57,6 +57,12 @@ export type TransactionRow = {
   category: string | null;
   category_detailed: string | null;
   pending: boolean;
+  /**
+   * The pending transaction this posted one replaces (Plaid's
+   * pending_transaction_id). A charge gets a new id when it posts; without
+   * this its tags and hand corrections would stay on the deleted pending row.
+   */
+  replaces?: string | null;
 };
 
 /**
@@ -177,8 +183,17 @@ export function upsertTransactions(db: DB, rows: TransactionRow[]): number {
        pending           = excluded.pending,
        updated_at        = excluded.updated_at`,
   );
+  const moveTags = db.prepare(
+    'INSERT OR IGNORE INTO tx_tags (transaction_id, tag, created_at) SELECT ?, tag, created_at FROM tx_tags WHERE transaction_id = ?',
+  );
+  const dropTags = db.prepare('DELETE FROM tx_tags WHERE transaction_id = ?');
+  // An override already on the posted row wins; otherwise the pending one's moves.
+  const moveOverride = db.prepare(
+    `UPDATE tx_overrides SET transaction_id = ? WHERE transaction_id = ?
+       AND NOT EXISTS (SELECT 1 FROM tx_overrides WHERE transaction_id = ?)`,
+  );
   const tx = db.transaction((items: TransactionRow[]) => {
-    for (const r of items) {
+    for (const { replaces, ...r } of items) {
       stmt.run({
         ...r,
         category: refineCategory(r.category, r.category_detailed),
@@ -187,6 +202,11 @@ export function upsertTransactions(db: DB, rows: TransactionRow[]): number {
         pending: r.pending ? 1 : 0,
         ts,
       });
+      if (replaces && replaces !== r.id) {
+        moveTags.run(r.id, replaces);
+        dropTags.run(replaces);
+        moveOverride.run(r.id, replaces, r.id);
+      }
     }
   });
   tx(rows);
@@ -196,8 +216,12 @@ export function upsertTransactions(db: DB, rows: TransactionRow[]): number {
 export function removeTransactions(db: DB, ids: string[]): number {
   if (ids.length === 0) return 0;
   const stmt = db.prepare('DELETE FROM transactions WHERE id = ?');
+  const tags = db.prepare('DELETE FROM tx_tags WHERE transaction_id = ?');
   db.transaction(() => {
-    for (const id of ids) stmt.run(id);
+    for (const id of ids) {
+      stmt.run(id);
+      tags.run(id);
+    }
   })();
   return ids.length;
 }

@@ -28,6 +28,7 @@ process.env['ADMIN_PASSWORD_HASH'] = await hashPassword(PASSWORD);
 const { createApp } = await import('../src/index.ts');
 const { getDb } = await import('../src/db.ts');
 const { upsertAccount, upsertTransactions } = await import('../src/store.ts');
+const { getTransactions } = await import('../src/queries.ts');
 
 let server: Server;
 let base: string;
@@ -368,6 +369,43 @@ describe('transfers on the Transactions tab', () => {
     expect(page).toContain('value="Northgate Grocery"');
     expect(page).toContain('value="Lumiere Cinema"');
     expect(inlineHandlers(page)).toEqual([]);
+  });
+
+  it('tags exactly the transactions a filtered view shows, and untags them', async () => {
+    seed();
+    const { cookie, csrf } = await login();
+    const post = (path: string, fields: Record<string, string>): Promise<Response> =>
+      fetch(`${base}${path}`, {
+        method: 'POST',
+        headers: { cookie, 'content-type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams({ _csrf: csrf, ...fields }),
+        redirect: 'manual',
+      });
+    // One card, one week: the purchase is shown, the card payment is hidden.
+    const back = '/transactions?start=2031-04-08&end=2031-04-14&account_id=plaid%3Atx-card';
+    const res = await post('/transactions/tags', { back, tag: ' Lisbon  2031 ', action: 'add' });
+    const tagged = getTransactions(getDb(), { tag: 'Lisbon 2031' }).map((t) => t.id);
+    expect(tagged).toContain('web-buy');
+    expect(tagged).not.toContain('web-pay-card');
+    expect(tagged).not.toContain('web-pay-chq');
+    expect(decodeURIComponent(res.headers.get('location') ?? '')).toContain(
+      `Tagged ${String(tagged.length)} transaction(s) “Lisbon 2031”`,
+    );
+
+    const view = await (await fetch(`${base}/transactions?start=2031-04-01&end=2031-04-30&tag=Lisbon%202031`, { headers: { cookie } })).text();
+    expect(view).toContain('Showing only what is tagged');
+    expect(inlineHandlers(view)).toEqual([]);
+    const report = await (await fetch(`${base}/report?period=tag&tag=Lisbon%202031`, { headers: { cookie } })).text();
+    expect(report).toContain('Tag summary: Lisbon 2031');
+
+    // One row's field replaces its tags; the form carries merchant and category too.
+    await post('/transactions/override', { transaction_id: 'web-buy', merchant: '', category: '', tags: 'Lisbon 2031, Business', back });
+    expect(getTransactions(getDb(), { tag: 'business' }).map((t) => t.id)).toEqual(['web-buy']);
+
+    const off = await post('/transactions/tags', { back, tag: 'lisbon 2031', action: 'remove' });
+    expect(decodeURIComponent(off.headers.get('location') ?? '')).toContain(`Removed “lisbon 2031” from ${String(tagged.length)}`);
+    expect(getTransactions(getDb(), { tag: 'Lisbon 2031' })).toEqual([]);
+    expect(await post('/transactions/tags', { back, tag: '  ' }).then((r) => r.headers.get('location'))).toMatch(/err=/);
   });
 
   it('refuses a bulk change with nothing selected', async () => {

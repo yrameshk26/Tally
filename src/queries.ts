@@ -15,6 +15,7 @@ import { corrector, effectiveCurrency } from './overrides.ts';
 import { categoryGroup, effectiveCategory, familyOf } from './lib/category.ts';
 import { categoryDetail } from './settings.ts';
 import { GROUPED_CATEGORIES, toGrouped } from './lib/taxonomy.ts';
+import { cleanTag, tagsByTransaction } from './tags.ts';
 
 export type AccountView = {
   id: string;
@@ -292,6 +293,8 @@ export type TransactionView = {
   category: string | null;
   category_detailed: string | null;
   pending: boolean;
+  /** Your own labels ("Italy 2026", "Business"); empty for most rows. */
+  tags: string[];
   /** 'override' or 'rule' when the merchant/category below are not the bank's. */
   corrected_by?: 'override' | 'rule' | null;
   rule_id?: number;
@@ -308,10 +311,11 @@ export function getTransactions(
     category?: string;
     min_amount_cad?: number;
     limit?: number;
-  } = {},
+  } & TagFilter = {},
 ): TransactionView[] {
   const where: string[] = [];
   const args: unknown[] = [];
+  tagWhere(opts, where, args);
   if (opts.start) {
     where.push('t.date >= ?');
     args.push(opts.start);
@@ -352,6 +356,7 @@ export function getTransactions(
     .all(...args, opts.category ? ROLLUP_ROW_LIMIT : (opts.limit ?? 200)) as Array<Record<string, unknown>>;
 
   const correct = corrector(db);
+  const tags = tagsByTransaction(db);
   const out = rows.map((r) =>
     correct({
       id: String(r['id']),
@@ -367,6 +372,7 @@ export function getTransactions(
       category: (r['category'] as string) ?? null,
       category_detailed: (r['category_detailed'] as string) ?? null,
       pending: Boolean(r['pending']),
+      tags: tags.get(String(r['id'])) ?? [],
     }),
   );
   if (!opts.category) return out;
@@ -374,6 +380,22 @@ export function getTransactions(
   // is translated like the rows were, or it would match nothing.
   const wanted = categoryDetail(db) === 'grouped' ? (toGrouped(opts.category) ?? opts.category) : opts.category;
   return out.filter((t) => matchesCategory(t.category, wanted)).slice(0, opts.limit ?? 200);
+}
+
+/**
+ * Narrow to one tag, or to untagged rows only (the ordinary spending, with
+ * trips and business set aside). Tags do not depend on corrections, so this
+ * is plain SQL and a page limit still means what it says.
+ */
+export type TagFilter = { tag?: string; untagged?: boolean };
+
+function tagWhere(opts: TagFilter, where: string[], args: unknown[]): void {
+  if (opts.tag) {
+    where.push('t.id IN (SELECT transaction_id FROM tx_tags WHERE tag = ?)');
+    args.push(cleanTag(opts.tag));
+  } else if (opts.untagged) {
+    where.push('t.id NOT IN (SELECT transaction_id FROM tx_tags)');
+  }
 }
 
 /**
@@ -660,7 +682,7 @@ export function getCashflow(
     profile?: string;
     include_transfers?: boolean;
     include_loan_payments?: boolean;
-  },
+  } & TagFilter,
 ): CashflowResult {
   const excluded: string[] = [];
   if (!opts.include_transfers) excluded.push(...TRANSFER_CATEGORIES);
@@ -672,6 +694,7 @@ export function getCashflow(
     where.push('a.profile_id = ?');
     args.push(opts.profile);
   }
+  tagWhere(opts, where, args);
   // The exclusion is applied AFTER corrections, below — a rule that
   // recategorises something as a transfer has to actually exclude it, and a
   // rule that rescues a row out of TRANSFER_OUT has to bring it back in.

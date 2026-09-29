@@ -244,6 +244,17 @@ CREATE TABLE IF NOT EXISTS tx_overrides (
   updated_at     TEXT NOT NULL
 );
 
+-- Labels on top of a transaction's category: a trip ("Italy 2026"), or
+-- business spending on a personal card. Untagged is the ordinary case. Never
+-- part of what counts as spending: a tag narrows a view, it does not move money.
+CREATE TABLE IF NOT EXISTS tx_tags (
+  transaction_id TEXT NOT NULL,
+  tag            TEXT NOT NULL COLLATE NOCASE,
+  created_at     TEXT NOT NULL,
+  PRIMARY KEY (transaction_id, tag)
+);
+CREATE INDEX IF NOT EXISTS idx_tx_tags_tag ON tx_tags(tag);
+
 -- "Everything matching this pattern is really <merchant>, category <category>."
 -- Ordered by position; the first match wins.
 CREATE TABLE IF NOT EXISTS merchant_rules (

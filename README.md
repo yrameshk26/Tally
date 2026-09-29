@@ -65,7 +65,7 @@ place a trade or move money, and that is enforced as a project rule rather than
 an intention.
 
 It is also a genuinely small program: no ORM, no charting library, no auth
-framework, ~420 tests, and a dependency list you can read in one screen.
+framework, ~440 tests, and a dependency list you can read in one screen.
 
 **If this is useful to you, a ⭐ on the repo helps more people find it** — that is
 the only distribution this project has.
@@ -119,7 +119,7 @@ question:
 | `get_transactions` | Bank and card transactions — negative is money out |
 | `get_activities` | Brokerage movements: dividends, interest, buys, sells, fees, contributions |
 | `get_cashflow` | Income vs spend by month, category (plus `by_category_group` by parent), merchant, profile |
-| `get_period_report` | One month or one year: net worth at each end and the change, income, spending, savings rate, categories with their share, top merchants, largest expenses. The same data the Reports page prints |
+| `get_period_report` | One month, one year, or one tag (a trip across months): net worth at each end and the change, income, spending, savings rate, categories with their share, top merchants, largest expenses. The same data the Reports page prints |
 | `get_contribution_room` | Remaining RRSP/TFSA/FHSA room per person |
 | `set_contributed`, `set_room_limit` | Correct the room figures by hand |
 | `list_profiles`, `create_profile`, `rename_profile`, `delete_profile` | Manage profiles |
@@ -129,6 +129,9 @@ question:
 | `set_merchant_rule`, `list_merchant_rules`, `delete_merchant_rule` | Rewrite every match, past and future |
 | `set_merchant_category` | File one merchant under a category, creating it if needed |
 | `list_categories`, `add_category`, `delete_category` | Categories beyond the bank's taxonomy |
+| `list_tags` | Tags in use, with count, first and last date, and spending |
+| `tag_transactions` | Add or remove a tag by transaction id, or over a date range narrowed to an account, profile or search (a trip on the travel card) |
+| `rename_tag`, `delete_tag` | Rename (or merge) a tag, or take it off everything |
 | `set_account_currency` | Reinterpret an account a bank labelled in the wrong currency |
 | `plaid_status`, `plaid_relink_url` | Item health, per-profile Item allowance, one-click repair |
 | `sync_now`, `sync_report` | Refresh on demand (joining a run already in progress); tell the user how stale data is |
@@ -380,6 +383,16 @@ Server-rendered, no framework, no webfonts, no inline styles under a strict CSP.
   rewrites nothing, your own corrections win in every mode, and the totals are
   the same in all three. `get_cashflow` also returns `by_category_group`, the
   same spending by parent, for questions about a whole area.
+- **Tags** — a label on top of a transaction's category, for a trip ("Italy
+  2026") or business spending on a personal card. Untagged is the ordinary
+  case. On Transactions, set the dates and the card, then **Tag the
+  transactions shown** in one go (transfers and card payments are skipped while
+  they are hidden), or type tags on a single row. The **Tag** filter shows one
+  tag, or **Untagged only** for the ordinary month with trips and business set
+  aside. Each tag links to its own report under **Reports → Tag**: spending by
+  category, merchant and month, over the tag's own dates however many months it
+  spans, printable like any other report. A tag never changes a total or what
+  counts as spending, and follows a pending charge when it posts.
 - **Merchants** — every merchant seen on your cards, the category its spend is
   filed under, which cards paid it, and when; opens on this month to date. Set a
   category per merchant from a picker, or tick several and set it for all of
@@ -480,7 +493,7 @@ Read [SECURITY.md](SECURITY.md) before deploying. The short version:
 |---|---|
 | `npm run demo` | Seed a fictional database to try it without credentials |
 | `npm run dev` | Run the server from TypeScript |
-| `npm run check` | Typecheck + 426 tests |
+| `npm run check` | Typecheck + 441 tests |
 | `npm run sync` | One-shot sync; exits non-zero if a source errored |
 | `npm run db:init` | Create the database, seeding `room.json` if present |
 | `npm run hash-password` | Print an `ADMIN_PASSWORD_HASH` |

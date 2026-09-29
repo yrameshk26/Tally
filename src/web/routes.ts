@@ -31,6 +31,7 @@ import {
   merchantsPage,
   prettyCategory,
   UNCATEGORISE,
+  UNTAGGED,
   reportPage,
   chatPage,
   type MerchantFilters,
@@ -144,6 +145,7 @@ import {
 import { failedSources, lastSyncReport, runSync, syncProgress } from '../sync.ts';
 import { MAX_LOGO_BYTES, deleteLogo, getLogo, logoUrl, setLogo } from '../brand.ts';
 import { loadRates } from '../fx.ts';
+import { addTag, cleanTag, listTags, parseTags, removeTag, setTags } from '../tags.ts';
 import { createFailureLimiter } from '../ratelimit.ts';
 import { originOf, plaidRedirectFor, safeNext } from './oauth.ts';
 import { listClients, revokeClient } from '../oauth.ts';
@@ -871,9 +873,13 @@ export function createWebRouter(db: DB): express.Router {
    * bookmarkable URL, and so an edit can post back to exactly where the user
    * was. `back` is validated as a same-site path before any redirect.
    */
-  const readFilters = (req: Ctx): TxFilters => {
-    const q = req.query as Record<string, string | undefined>;
-    const str = (k: string): string => (typeof q[k] === 'string' ? q[k].slice(0, 120) : '');
+  const readFilters = (req: Ctx): TxFilters => filtersFrom(req.query as Record<string, unknown>);
+
+  const filtersFrom = (q: Record<string, unknown>): TxFilters => {
+    const str = (k: string): string => {
+      const v = q[k];
+      return typeof v === 'string' ? v.slice(0, 120) : '';
+    };
     const date = (k: string, fallback: string): string =>
       /^\d{4}-\d{2}-\d{2}$/.test(str(k)) ? str(k) : fallback;
     const dir = str('direction');
@@ -891,6 +897,7 @@ export function createWebRouter(db: DB): express.Router {
       direction: dir === 'out' || dir === 'in' ? dir : 'all',
       min_amount: /^\d+(\.\d+)?$/.test(str('min_amount')) ? str('min_amount') : '',
       group: grp === 'merchant' || grp === 'category' ? grp : 'none',
+      tag: str('tag') === UNTAGGED ? UNTAGGED : cleanTag(str('tag')),
     };
   };
 
@@ -905,8 +912,11 @@ export function createWebRouter(db: DB): express.Router {
   /** Above this, the totals stop describing the filter and start lying about it. */
   const TX_PAGE_LIMIT = 1000;
 
-  router.get('/transactions', requireAuth, (req: Ctx, res: Response) => {
-    const f = readFilters(req);
+  /**
+   * The rows a Transactions view shows. Shared by the page and by "tag the
+   * transactions shown", so a bulk tag lands on exactly what the person saw.
+   */
+  const matchTransactions = (f: TxFilters): { matched: TransactionView[]; rows: TransactionView[] } => {
     const matched = getTransactions(db, {
       start: f.start,
       end: f.end,
@@ -915,6 +925,7 @@ export function createWebRouter(db: DB): express.Router {
       ...(f.category ? { category: f.category } : {}),
       ...(f.search ? { search: f.search } : {}),
       ...(f.min_amount ? { min_amount_cad: Number(f.min_amount) } : {}),
+      ...(f.tag === UNTAGGED ? { untagged: true } : f.tag ? { tag: f.tag } : {}),
       limit: TX_PAGE_LIMIT,
     }).filter((t) =>
       f.direction === 'out' ? t.amount_cad < 0 : f.direction === 'in' ? t.amount_cad > 0 : true,
@@ -923,7 +934,12 @@ export function createWebRouter(db: DB): express.Router {
     // otherwise both count as money out. Asking for a transfer category by
     // name is asking to see them, so the filter steps aside.
     const hiding = f.transfers === 'hide' && !isTransferLike(f.category);
-    const rows = hiding ? matched.filter((t) => !isTransferLike(t.category)) : matched;
+    return { matched, rows: hiding ? matched.filter((t) => !isTransferLike(t.category)) : matched };
+  };
+
+  router.get('/transactions', requireAuth, (req: Ctx, res: Response) => {
+    const f = readFilters(req);
+    const { matched, rows } = matchTransactions(f);
     const hidden = matched.length - rows.length;
 
     render(
@@ -940,6 +956,7 @@ export function createWebRouter(db: DB): express.Router {
         accounts: listAccounts(db, {}),
         categories: knownCategories(db),
         profiles: listProfiles(db),
+        tags: listTags(db),
         rules: listMerchantRules(db).map((r: MerchantRule) => ({
           ...r,
           matching_transactions: ruleImpact(db, r),
@@ -958,7 +975,7 @@ export function createWebRouter(db: DB): express.Router {
     const q = req.query as Record<string, unknown>;
     const asked = typeof q['profile'] === 'string' ? q['profile'] : '';
     const report = buildPeriodReport(db, {
-      period: parsePeriod({ period: q['period'], month: q['month'], year: q['year'] }),
+      period: parsePeriod({ period: q['period'], month: q['month'], year: q['year'], tag: q['tag'] }),
       profile: asked && getProfile(db, asked) ? asked : null,
     });
     // The title is also the file name the browser offers when saving as PDF.
@@ -966,7 +983,7 @@ export function createWebRouter(db: DB): express.Router {
       req,
       res,
       `Summary ${report.label}`,
-      reportPage({ nonce: req.nonce ?? '', report, profiles: listProfiles(db) }),
+      reportPage({ nonce: req.nonce ?? '', report, profiles: listProfiles(db), tags: listTags(db) }),
       '/report',
     );
   });
@@ -974,11 +991,36 @@ export function createWebRouter(db: DB): express.Router {
   router.post('/transactions/override', requireAuth, requireCsrf, (req: Ctx, res: Response) => {
     const body = (req.body ?? {}) as Record<string, unknown>;
     try {
-      setTransactionOverride(db, String(body['transaction_id'] ?? ''), {
+      const id = String(body['transaction_id'] ?? '');
+      setTransactionOverride(db, id, {
         merchant: String(body['merchant'] ?? '').trim() || null,
         category: String(body['category'] ?? '').trim() || null,
       });
+      if ('tags' in body) setTags(db, id, parseTags(String(body['tags'] ?? '')));
       res.redirect(303, backTo(body, 'Transaction updated.'));
+    } catch (e) {
+      res.redirect(303, backTo(body, errMessage(e), 'err'));
+    }
+  });
+
+  // Tag (or untag) every transaction the posted view shows: set the dates and
+  // the card, then tag the trip in one go. The view is re-read from `back`,
+  // the same query string the page was drawn from.
+  router.post('/transactions/tags', requireAuth, requireCsrf, (req: Ctx, res: Response) => {
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    try {
+      const back = String(body['back'] ?? '/transactions');
+      const query = back.startsWith('/transactions?') ? Object.fromEntries(new URLSearchParams(back.slice(14))) : {};
+      const tag = cleanTag(String(body['tag'] ?? ''));
+      if (!tag) throw new Error('Type a tag first.');
+      const ids = matchTransactions(filtersFrom(query)).rows.map((t) => t.id);
+      if (body['action'] === 'remove') {
+        const n = removeTag(db, ids, tag);
+        res.redirect(303, backTo(body, `Removed “${tag}” from ${String(n)} transaction(s).`));
+      } else {
+        const n = addTag(db, ids, tag);
+        res.redirect(303, backTo(body, `Tagged ${String(n)} transaction(s) “${tag}”.`));
+      }
     } catch (e) {
       res.redirect(303, backTo(body, errMessage(e), 'err'));
     }

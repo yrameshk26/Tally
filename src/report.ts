@@ -8,6 +8,7 @@
  * and card payments are excluded here exactly as they are everywhere else.
  */
 import type { DB } from './db.ts';
+import { cleanTag } from './tags.ts';
 import { nowISO, round2 } from './lib/money.ts';
 import {
   NOT_SPENDING_CATEGORIES,
@@ -17,12 +18,18 @@ import {
   type CashflowResult,
 } from './queries.ts';
 
-export type ReportPeriod = { kind: 'month'; month: string } | { kind: 'year'; year: number };
+export type ReportPeriod =
+  | { kind: 'month'; month: string }
+  | { kind: 'year'; year: number }
+  /** Everything with one tag, over the dates it covers: a trip that crosses a month end. */
+  | { kind: 'tag'; tag: string };
 
 export type PeriodReport = {
-  period: 'month' | 'year';
-  /** "August 2026", or "2026". */
+  period: 'month' | 'year' | 'tag';
+  /** "August 2026", "2026", or the tag's name. */
   label: string;
+  /** Set for a tag report: only transactions with this tag are counted. */
+  tag: string | null;
   start: string;
   end: string;
   /** The period has not finished yet, so its figures are partial. */
@@ -78,9 +85,12 @@ const MONTH_NAMES = [
  * complete month, which is the question people usually mean.
  */
 export function parsePeriod(
-  input: { period?: unknown; month?: unknown; year?: unknown },
+  input: { period?: unknown; month?: unknown; year?: unknown; tag?: unknown },
   today = new Date(),
 ): ReportPeriod {
+  if (input.period === 'tag' && typeof input.tag === 'string' && cleanTag(input.tag)) {
+    return { kind: 'tag', tag: cleanTag(input.tag) };
+  }
   if (input.period === 'year') {
     const y = Number(input.year);
     return { kind: 'year', year: Number.isInteger(y) && y >= 2000 && y <= 2100 ? y : today.getUTCFullYear() };
@@ -97,7 +107,7 @@ export function parsePeriod(
 }
 
 export function periodBounds(
-  p: ReportPeriod,
+  p: Exclude<ReportPeriod, { kind: 'tag' }>,
   today = new Date(),
 ): { start: string; end: string; label: string; to_date: boolean } {
   const todayISO = today.toISOString().slice(0, 10);
@@ -144,6 +154,34 @@ function worth(row: SnapshotRow, profile: string | null): number | null {
   return typeof v === 'number' ? v : null;
 }
 
+const NO_NET_WORTH: PeriodReport['net_worth'] = {
+  start_cad: null,
+  start_date: null,
+  end_cad: null,
+  end_date: null,
+  change_cad: null,
+  end_assets_cad: null,
+  end_liabilities_cad: null,
+  end_by_registered_type: null,
+  history: [],
+};
+
+/** A tag's window: its first to its last tagged transaction. */
+function tagBounds(
+  db: DB,
+  tag: string,
+  today: Date,
+): { start: string; end: string; label: string; to_date: boolean } {
+  const row = db
+    .prepare(
+      `SELECT MIN(t.date) AS first, MAX(t.date) AS last FROM tx_tags g
+       JOIN transactions t ON t.id = g.transaction_id WHERE g.tag = ?`,
+    )
+    .get(tag) as { first: string | null; last: string | null };
+  const todayISO = today.toISOString().slice(0, 10);
+  return { start: row.first ?? todayISO, end: row.last ?? todayISO, label: tag, to_date: false };
+}
+
 const SNAPSHOT_COLUMNS = `substr(ts,1,10) AS date, net_worth_cad, total_assets_cad,
   total_liabilities_cad, by_owner, by_registered_type`;
 
@@ -152,10 +190,13 @@ export function buildPeriodReport(
   opts: { period: ReportPeriod; profile?: string | null },
   today = new Date(),
 ): PeriodReport {
-  const { start, end, label, to_date } = periodBounds(opts.period, today);
+  const period = opts.period;
+  const tag = period.kind === 'tag' ? period.tag : null;
+  const { start, end, label, to_date } = period.kind === 'tag' ? tagBounds(db, period.tag, today) : periodBounds(period, today);
   const profile = opts.profile || null;
+  const scope = { ...(profile ? { profile } : {}), ...(tag ? { tag } : {}) };
 
-  const cashflow = getCashflow(db, { start, end, ...(profile ? { profile } : {}) });
+  const cashflow = getCashflow(db, { start, end, ...scope });
 
   // Net worth at the start is the last snapshot before the period began, which
   // is the closing figure of the day before. With no history that far back,
@@ -192,21 +233,26 @@ export function buildPeriodReport(
 
   // The ledger for the period, for counts, the excluded total and the largest
   // expenses. Same corrections, same exclusions, same pending rule as cashflow.
-  const rows = getTransactions(db, { start, end, ...(profile ? { profile } : {}), limit: 50_000 });
+  const rows = getTransactions(db, { start, end, ...scope, limit: 50_000 });
   const settled = rows.filter((t) => !t.pending);
   const counted = settled.filter((t) => !isTransferLike(t.category));
   const excluded = settled.filter((t) => isTransferLike(t.category));
 
   const spend = cashflow.spend_cad;
+  // A tag is a slice of spending, not of the household: net worth at the
+  // start and end of a trip would describe everything else as well.
+  const worthShown = !tag;
   return {
-    period: opts.period.kind,
+    period: period.kind,
     label,
+    tag,
     start,
     end,
     to_date,
     profile,
     generated_at: nowISO(today),
-    net_worth: {
+    net_worth: worthShown
+      ? {
       start_cad: startWorth,
       start_date: opening?.date ?? null,
       end_cad: endWorth,
@@ -220,7 +266,8 @@ export function buildPeriodReport(
       history: [...(before ? [before] : []), ...history]
         .map((r) => ({ date: r.date, net_worth_cad: worth(r, profile) }))
         .filter((p): p is { date: string; net_worth_cad: number } => p.net_worth_cad !== null),
-    },
+    }
+      : NO_NET_WORTH,
     income_cad: cashflow.income_cad,
     spend_cad: spend,
     net_cad: cashflow.net_cad,

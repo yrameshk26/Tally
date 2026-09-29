@@ -28,6 +28,7 @@ import type { ChatRow, StoredMessage } from '../llm/store.ts';
 import type { PeriodReport } from '../report.ts';
 import type { PlaidRedirect } from './oauth.ts';
 import type { SyncProgress } from '../sync.ts';
+import type { TagInfo } from '../tags.ts';
 
 const sign = (n: number): SafeHtml =>
   html`<span class="${n < 0 ? 'neg' : n > 0 ? 'pos' : 'muted'}">${money(n)}</span>`;
@@ -1197,10 +1198,31 @@ export type TxFilters = {
   direction: 'all' | 'out' | 'in';
   min_amount: string;
   group: 'none' | 'merchant' | 'category';
+  /** '' for everything, a tag's name, or UNTAGGED for untagged rows only. */
+  tag: string;
 };
 
+/** The Tag filter's "untagged only": the ordinary spending, trips and business set aside. */
+export const UNTAGGED = '__untagged__';
+
+/** Days from start to end, both counted. */
+function daysBetween(start: string, end: string): number {
+  return Math.round((Date.parse(end) - Date.parse(start)) / 86_400_000) + 1;
+}
+
+/** A tag as a link to its own report: the trip, start to finish. */
+function tagChip(tag: string): SafeHtml {
+  return html`<a class="pill tag" href="/report?period=tag&amp;tag=${encodeURIComponent(tag)}" title="Report for ${tag}">${tag}</a>`;
+}
+
 /** The filter bar. One row of controls above the results, per the viz method. */
-function filterBar(f: TxFilters, accounts: AccountView[], categories: string[], profiles: Profile[]): SafeHtml {
+function filterBar(
+  f: TxFilters,
+  accounts: AccountView[],
+  categories: string[],
+  profiles: Profile[],
+  tags: TagInfo[],
+): SafeHtml {
   const opt = (value: string, label: string, selected: boolean): SafeHtml =>
     html`<option value="${value}"${selected ? raw(' selected') : raw('')}>${label}</option>`;
   return html`<form method="get" action="/transactions" class="filters">
@@ -1227,6 +1249,17 @@ function filterBar(f: TxFilters, accounts: AccountView[], categories: string[], 
             <select name="profile">
               ${opt('', 'All profiles', f.profile === '')}
               ${join(profiles.map((p) => opt(p.id, p.name, p.id === f.profile)))}
+            </select>
+          </label>`
+        : raw('')
+    }
+    ${
+      tags.length > 0
+        ? html`<label>Tag
+            <select name="tag">
+              ${opt('', 'All transactions', f.tag === '')}
+              ${opt(UNTAGGED, 'Untagged only', f.tag === UNTAGGED)}
+              ${join(tags.map((t) => opt(t.tag, t.tag, t.tag.toLowerCase() === f.tag.toLowerCase())))}
             </select>
           </label>`
         : raw('')
@@ -1267,6 +1300,7 @@ export function transactionsPage(opts: {
   accounts: AccountView[];
   categories: string[];
   profiles: Profile[];
+  tags?: TagInfo[];
   rules: Array<MerchantRule & { matching_transactions: number }>;
   /** Rows the transfers filter took out, so the page can say so. */
   hiddenTransfers: number;
@@ -1296,6 +1330,8 @@ export function transactionsPage(opts: {
       </select>
       <button class="secondary" type="submit">Save</button>
     </div>
+    <input type="text" name="tags" value="${t.tags.join(', ')}" list="tag-list" autocomplete="off"
+      aria-label="Tags for ${t.name ?? t.id}" placeholder="Tags, e.g. Italy 2026">
   </form>`;
 
   const ruleForm = (merchant: string, category: string): SafeHtml => html`<form method="post" action="/transactions/rule" class="row tight">
@@ -1318,7 +1354,8 @@ export function transactionsPage(opts: {
     </p>
     ${opts.flash ?? raw('')}
 
-    ${filterBar(f, opts.accounts, opts.categories, opts.profiles)}
+    ${filterBar(f, opts.accounts, opts.categories, opts.profiles, opts.tags ?? [])}
+    <datalist id="tag-list">${join((opts.tags ?? []).map((t) => html`<option value="${t.tag}"></option>`))}</datalist>
 
     <div class="kpis">
       <div class="kpi"><div class="label">Money out</div><div class="value neg">${money(-spend)}</div></div>
@@ -1344,6 +1381,31 @@ export function transactionsPage(opts: {
             appear here, so money out counts that spending twice.
             <a href="${currentQuery({ ...f, transfers: 'hide' })}">Hide them</a>
           </p>`
+    }
+
+    ${
+      f.tag && f.tag !== UNTAGGED
+        ? html`<p class="hint">Showing only what is tagged ${tagChip(f.tag)} in these dates.
+            <a href="/report?period=tag&amp;tag=${encodeURIComponent(f.tag)}">Report for the whole tag</a>,
+            start to finish, by category.</p>`
+        : f.tag === UNTAGGED
+          ? html`<p class="hint">Showing untagged transactions only: your ordinary spending, with
+              trips and business set aside.</p>`
+          : raw('')
+    }
+
+    ${
+      opts.rows.length > 0
+        ? html`<form method="post" action="/transactions/tags" class="bulk-bar">
+            ${csrfField(opts.csrf)}
+            <input type="hidden" name="back" value="${currentQuery(f)}">
+            <span class="muted">Tag the ${String(opts.rows.length)} transaction${opts.rows.length === 1 ? '' : 's'} shown</span>
+            <input type="text" name="tag" list="tag-list" required maxlength="40" autocomplete="off"
+              aria-label="Tag" placeholder="e.g. Italy 2026 or Business">
+            <button type="submit" name="action" value="add" class="secondary">Add tag</button>
+            <button type="submit" name="action" value="remove" class="secondary">Remove tag</button>
+          </form>`
+        : raw('')
     }
 
     ${
@@ -1417,6 +1479,7 @@ export function transactionsPage(opts: {
                     <td class="cell-merchant">
                       <span class="clip" title="${t.merchant ?? t.name ?? ''}">${t.merchant ?? t.name ?? '—'}</span>
                       ${t.corrected_by ? html`<span class="pill">${t.corrected_by === 'rule' ? 'rule' : 'edited'}</span>` : raw('')}
+                      ${t.tags.length ? html`<div class="tags">${join(t.tags.map(tagChip))}</div>` : raw('')}
                       ${
                         t.merchant && t.name && t.merchant !== t.name
                           ? html`<div class="sub-line clip" title="${t.name}">${t.name}</div>`
@@ -1970,7 +2033,9 @@ export function reportPage(opts: {
   nonce: string;
   report: PeriodReport;
   profiles: Profile[];
+  tags?: TagInfo[];
 }): SafeHtml {
+  const tags = opts.tags ?? [];
   const r = opts.report;
   const nw = r.net_worth;
   const profileName = r.profile ? (opts.profiles.find((p) => p.id === r.profile)?.name ?? r.profile) : null;
@@ -1984,8 +2049,22 @@ export function reportPage(opts: {
       <select name="period">
         ${opt('month', 'Month', r.period === 'month')}
         ${opt('year', 'Year', r.period === 'year')}
+        ${tags.length || r.tag ? opt('tag', 'Tag', r.period === 'tag') : raw('')}
       </select>
     </label>
+    ${
+      tags.length || r.tag
+        ? html`<label class="tag-field">Tag
+            <select name="tag">
+              ${join(
+                (tags.some((t) => t.tag === r.tag) || !r.tag ? tags.map((t) => t.tag) : [r.tag, ...tags.map((t) => t.tag)]).map(
+                  (t) => opt(t, t, t === r.tag),
+                ),
+              )}
+            </select>
+          </label>`
+        : raw('')
+    }
     <label class="month-field">Month
       <select name="month">
         ${join(MONTH_LONG.map((name, i) => {
@@ -1994,7 +2073,7 @@ export function reportPage(opts: {
         }))}
       </select>
     </label>
-    <label>Year
+    <label class="year-field">Year
       <select name="year">
         ${join(reportYears(Number(r.start.slice(0, 4))).map((y) => opt(String(y), String(y), String(y) === r.start.slice(0, 4))))}
       </select>
@@ -2060,8 +2139,9 @@ export function reportPage(opts: {
     }
   </section>`;
 
+  // A tag that crosses a month end (a trip, most often) shows its months too.
   const monthly =
-    r.period === 'year'
+    r.period === 'year' || (r.period === 'tag' && r.by_month.length > 1)
       ? html`<section>
           <h2>Income and spending by month</h2>
           ${groupedColumns({
@@ -2144,16 +2224,26 @@ export function reportPage(opts: {
     }
   </section>`;
 
+  const tagged = r.period === 'tag';
   return html`<div class="report">
-    <h1>Financial summary</h1>
+    <h1>${tagged ? html`Tag summary: ${r.label}` : 'Financial summary'}</h1>
     <p class="sub">
-      ${r.label}${r.to_date ? ' (to date)' : ''} · ${profileName ?? 'Everyone'} ·
+      ${tagged ? 'Everything tagged' : r.label}${r.to_date ? ' (to date)' : ''} · ${profileName ?? 'Everyone'} ·
       ${r.start} to ${r.to_date ? r.generated_at.slice(0, 10) : r.end} · All figures in CAD ·
       Generated ${r.generated_at.slice(0, 10)}
     </p>
     ${controls}
 
-    <div class="kpis">
+    ${
+      tagged
+        ? html`<div class="kpis">
+            <div class="kpi"><div class="label">Spending</div><div class="value neg">${money(-r.spend_cad)}</div></div>
+            <div class="kpi"><div class="label">Transactions</div><div class="value">${String(r.transactions_counted)}</div></div>
+            <div class="kpi"><div class="label">Days</div><div class="value">${String(daysBetween(r.start, r.end))}</div></div>
+            <div class="kpi"><div class="label">Money in</div><div class="value pos">${money(r.income_cad)}</div>
+              <div class="sub-line">refunds and reimbursements tagged the same</div></div>
+          </div>`
+        : html`<div class="kpis">
       <div class="kpi"><div class="label">Net worth</div>
         <div class="value">${nw.end_cad === null ? '—' : money(nw.end_cad)}</div>
         ${nw.change_cad === null ? raw('') : html`<div class="sub-line">${signed(nw.change_cad)} this period</div>`}</div>
@@ -2162,9 +2252,11 @@ export function reportPage(opts: {
       <div class="kpi"><div class="label">Net saved</div>
         <div class="value ${r.net_cad >= 0 ? 'pos' : 'neg'}">${money(r.net_cad)}</div>
         ${r.savings_rate === null ? raw('') : html`<div class="sub-line">${pct(r.savings_rate)} of income</div>`}</div>
-    </div>
+    </div>`
+    }
 
-    ${netWorth}
+    ${tagged ? html`<p class="hint"><a href="/transactions?tag=${encodeURIComponent(r.label)}&amp;start=${r.start}&amp;end=${r.end}">See every
+      transaction tagged ${r.label}</a> to add or remove some.</p>` : netWorth}
     ${monthly}
     ${categories}
     ${merchants}
@@ -2172,11 +2264,15 @@ export function reportPage(opts: {
 
     <p class="hint report-notes">
       Counts ${String(r.transactions_counted)} settled transaction${r.transactions_counted === 1 ? '' : 's'}.
-      Transfers between your own accounts and card or loan payments are not income or spending, so
+      ${
+        tagged && r.excluded.count === 0
+          ? raw('')
+          : html`Transfers between your own accounts and card or loan payments are not income or spending, so
       ${String(r.excluded.count)} of them are left out (${money(r.excluded.out_cad)} out,
       ${money(r.excluded.in_cad)} in)${
         r.excluded.pending ? `, as are ${String(r.excluded.pending)} still pending` : ''
-      }. Net worth comes from the daily snapshot nearest each end of the period.
+      }.`
+      }${tagged ? (r.excluded.pending ? ` ${String(r.excluded.pending)} still pending are not counted yet.` : '') : ' Net worth comes from the daily snapshot nearest each end of the period.'}
     </p>
   </div>
   ${raw(chartRuntime(opts.nonce))}

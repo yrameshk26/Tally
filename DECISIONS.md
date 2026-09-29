@@ -3,6 +3,32 @@
 Dated, append-only. Each entry says what was chosen, what it was chosen over,
 and why.
 
+## 2026-09-29 — Tags, on top of categories
+
+Asked for by the same user: a vacation looks like ordinary spending (fuel,
+restaurants, tickets) and business charges land on a personal card, so a
+category cannot say which is which. A tag can, without disturbing the category.
+
+- **Free-text tags, many per transaction, compared without case.** Chosen over
+  a fixed "vacation / business / personal" field: one tag per trip ("Italy
+  2026") keeps trips apart, and untagged already means personal, so nothing
+  has to be tagged to be counted.
+- **Tag what a filter shows**, rather than row by row: dates plus a card is how
+  a trip is found. The bulk POST re-reads the view from the same query string
+  the page was drawn from, so it lands on exactly what the person saw,
+  including the hidden-transfers rule. MCP's `tag_transactions` requires dates
+  for the same reason and skips transfers.
+- **A tag report is a report period**, not a new page: the same by-category,
+  by-merchant and largest-expense sections, over the tag's first to last date,
+  with the months shown when it crosses one. Net worth is left out; a tag is a
+  slice of spending, not of the household.
+- **Tags never change a total.** Filtering by a tag or to untagged goes through
+  the same cashflow and exclusion as everything else.
+- **Pending to posted.** Plaid gives a posted charge a new id. Its
+  `pending_transaction_id` is now carried as `replaces`, and the store moves
+  tags, and a hand override when the posted row has none, before the pending
+  row is removed. Overrides were being lost this way before tags existed.
+
 ## 2026-09-28 — A grouped category list, modelled on Fidelity's
 
 The same user sent Fidelity's full list: eighteen parents a household thinks

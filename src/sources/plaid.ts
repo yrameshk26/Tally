@@ -429,6 +429,7 @@ export function mapTransaction(
     category: pf?.primary ?? (t.category?.[0] ?? null),
     category_detailed: pf?.detailed ?? (t.category?.join(' > ') ?? null),
     pending: Boolean(t.pending),
+    replaces: t.pending_transaction_id ? `plaid:${t.pending_transaction_id}` : null,
   };
 }
 

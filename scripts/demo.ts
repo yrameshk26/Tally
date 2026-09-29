@@ -17,6 +17,7 @@ import { createProfile } from '../src/profiles.ts';
 import { replaceHoldings, upsertAccount, upsertActivities, upsertTransactions } from '../src/store.ts';
 import { setAccountProfile, setRoomLimit } from '../src/queries.ts';
 import { addMerchantRule } from '../src/overrides.ts';
+import { addTag } from '../src/tags.ts';
 import { writeSnapshot } from '../src/snapshots.ts';
 import { nowISO } from '../src/lib/money.ts';
 import type { RegisteredType } from '../src/lib/registered.ts';
@@ -308,6 +309,36 @@ function main(): void {
     }
   }
   upsertTransactions(db, txs);
+
+  // A week away on the travel card, tagged, so the tag filter and a tag
+  // report have something to show. It crosses nothing but its own week, and
+  // the everyday spending that week stays untagged.
+  const trip: Array<[number, string, number, string, string]> = [
+    [27, 'Skyline Air', 684.2, 'TRAVEL', 'TRAVEL_FLIGHTS'],
+    [26, 'Aurora Taxi', 38.5, 'TRANSPORTATION', 'TRANSPORTATION_TAXIS_AND_RIDE_SHARES'],
+    [26, 'Casa do Rio Hotel', 912.0, 'TRAVEL', 'TRAVEL_LODGING'],
+    [25, 'Taberna Azul', 71.3, 'FOOD_AND_DRINK', 'FOOD_AND_DRINK_RESTAURANT'],
+    [24, 'Pastelaria Sol', 14.6, 'FOOD_AND_DRINK', 'FOOD_AND_DRINK_COFFEE'],
+    [24, 'Museu da Costa', 42.0, 'ENTERTAINMENT', 'ENTERTAINMENT_SPORTING_EVENTS_AMUSEMENT_PARKS_AND_MUSEUMS'],
+    [23, 'Mercado Central', 56.9, 'FOOD_AND_DRINK', 'FOOD_AND_DRINK_GROCERIES'],
+    [22, 'Taberna Azul', 88.4, 'FOOD_AND_DRINK', 'FOOD_AND_DRINK_RESTAURANT'],
+    [21, 'Aurora Taxi', 41.2, 'TRANSPORTATION', 'TRANSPORTATION_TAXIS_AND_RIDE_SHARES'],
+  ];
+  const tripRows = trip.map(([daysAgo, merchant, amount, category, detailed], i) => ({
+    id: `demo:trip:${String(i)}`,
+    account_id: 'demo:visa',
+    date: dayISO(daysAgo),
+    name: merchant.toUpperCase(),
+    merchant,
+    amount,
+    currency: 'CAD',
+    amount_cad: amount,
+    category,
+    category_detailed: detailed,
+    pending: false,
+  }));
+  upsertTransactions(db, tripRows);
+  addTag(db, tripRows.map((t) => t.id), 'Lisbon trip');
 
   // One rule already in place, so the Merchants tab shows what a rule does
   // rather than only describing it.

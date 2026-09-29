@@ -64,10 +64,12 @@ import { lastSyncReport, runSync } from '../sync.ts';
 import { buildPeriodReport, parsePeriod } from '../report.ts';
 import { pruneBackups, writeBackup } from '../backup.ts';
 import { categoryDetail } from '../settings.ts';
+import { addTag, deleteTag, listTags, removeTag, renameTag } from '../tags.ts';
 
 /** Profiles are user-defined, so this is a free-form id rather than an enum. */
 const PROFILE = z.string().min(1).max(32);
 const DATE = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'expected YYYY-MM-DD');
+const TAG = z.string().min(1).max(60);
 
 function ok(data: unknown): CallToolResult {
   return { content: [{ type: 'text', text: JSON.stringify(data, null, 2) }] };
@@ -215,7 +217,7 @@ export function toolDefs(db: DB): ToolDef[] {
     title: 'Transactions',
     description:
       'Bank and card transactions. Amounts are signed the intuitive way: negative is money ' +
-      'out, positive is money in. Defaults to the last 30 days.',
+      'out, positive is money in. Defaults to the last 30 days. Each row carries its `tags`.',
     inputSchema: {
       start: DATE.optional(),
       end: DATE.optional(),
@@ -230,6 +232,8 @@ export function toolDefs(db: DB): ToolDef[] {
             'also matches every category under it (FOOD_GROCERIES, FOOD_DINING).',
         ),
       min_amount_cad: z.number().min(0).optional(),
+      tag: TAG.optional().describe('only transactions with this tag (see list_tags)'),
+      untagged: z.boolean().optional().describe('only untagged transactions: ordinary spending, trips and business set aside'),
       limit: z.number().int().min(1).max(1000).optional(),
     },
     annotations: READ_ONLY,
@@ -254,13 +258,16 @@ export function toolDefs(db: DB): ToolDef[] {
       '(by default grouped: FOOD_GROCERIES, FAMILY_CARE_CHILDCARE, BILLS_AND_UTILITIES_' +
       'PHONE_INTERNET); by_category_group totals the same spending by parent (FOOD, ' +
       'FAMILY_CARE), for questions about a whole area. Income, transfers and payments keep ' +
-      'Plaid’s codes (INCOME_SALARY, LOAN_PAYMENTS_MORTGAGE_PAYMENT).',
+      'Plaid’s codes (INCOME_SALARY, LOAN_PAYMENTS_MORTGAGE_PAYMENT). Pass `tag` for one ' +
+      'trip or project, or `untagged` for the ordinary month without them.',
     inputSchema: {
       start: DATE,
       end: DATE,
       profile: PROFILE.optional(),
       include_transfers: z.boolean().optional(),
       include_loan_payments: z.boolean().optional(),
+      tag: TAG.optional().describe('only spending with this tag, e.g. one trip'),
+      untagged: z.boolean().optional().describe('only untagged spending: the ordinary month, trips and business set aside'),
     },
     annotations: READ_ONLY,
     handler: (args) => {
@@ -279,9 +286,12 @@ export function toolDefs(db: DB): ToolDef[] {
       'change, income, spending, net saved and savings rate, spending by category with each ' +
       'share, top merchants, and the ten largest expenses. Transfers and card payments are ' +
       'excluded, and the response says how many and how much. The same data the web UI prints ' +
-      'as a PDF. Omit everything for the last complete month.',
+      'as a PDF. Omit everything for the last complete month. period "tag" with `tag` reports ' +
+      'everything with one tag (a trip, business travel) over the dates it covers, however ' +
+      'many months that is; net worth is omitted there, since a tag is a slice of spending.',
     inputSchema: {
-      period: z.enum(['month', 'year']).optional(),
+      period: z.enum(['month', 'year', 'tag']).optional(),
+      tag: TAG.optional().describe('with period "tag": which tag'),
       month: z.string().regex(/^\d{4}-\d{2}$/, 'expected YYYY-MM').optional(),
       year: z.number().int().min(2000).max(2100).optional(),
       profile: PROFILE.optional(),
@@ -591,6 +601,107 @@ export function toolDefs(db: DB): ToolDef[] {
           ...(note !== undefined ? { note: blank(note) ?? null } : {}),
         });
         return ok({ updated: true, transaction_id });
+      } catch (e) {
+        return fail(e);
+      }
+    },
+  }),
+
+  tool({
+    name: 'list_tags',
+    title: 'List tags',
+    description:
+      'Every tag in use (a trip, business spending, a project), with how many transactions ' +
+      'carry it, the first and last date, and its spending. Tags sit on top of categories: ' +
+      'they never change what counts as spending, they narrow a view. Untagged is the ordinary ' +
+      'case. Use get_period_report with period "tag" for one tag by category.',
+    annotations: READ_ONLY,
+    handler: () => {
+      try {
+        const tags = listTags(db).map((t) => ({
+          ...t,
+          spend_cad: getCashflow(db, { start: t.first, end: t.last, tag: t.tag }).spend_cad,
+        }));
+        return ok({ count: tags.length, tags });
+      } catch (e) {
+        return fail(e);
+      }
+    },
+  }),
+
+  tool({
+    name: 'tag_transactions',
+    title: 'Tag transactions',
+    description:
+      'Add or remove a tag on transactions, by id or by a filter. The filter needs start and ' +
+      'end (a trip’s dates), and can narrow to one account, profile, or a merchant or ' +
+      'description search: e.g. everything on the travel card from Jul 3 to Jul 15 tagged ' +
+      '"Italy 2026". Transfers and card payments in the range are skipped, as they are not ' +
+      'spending. Tag names ignore case and are up to 40 characters. Only annotates this ' +
+      'database; nothing is sent to an institution.',
+    inputSchema: {
+      tag: TAG,
+      action: z.enum(['add', 'remove']).optional().describe('default add'),
+      transaction_ids: z.array(z.string()).max(5000).optional(),
+      start: DATE.optional(),
+      end: DATE.optional(),
+      account_id: z.string().optional(),
+      profile: PROFILE.optional(),
+      search: z.string().optional(),
+    },
+    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
+    handler: (args) => {
+      try {
+        let ids = args.transaction_ids ?? [];
+        if (ids.length === 0) {
+          if (!args.start || !args.end) {
+            throw new Error('pass transaction_ids, or start and end to tag a date range');
+          }
+          ids = splitTransfers(
+            getTransactions(db, {
+              start: args.start,
+              end: args.end,
+              ...(args.account_id ? { account_id: args.account_id } : {}),
+              ...(args.profile ? { profile: args.profile } : {}),
+              ...(args.search ? { search: args.search } : {}),
+              limit: ROLLUP_ROW_LIMIT,
+            }),
+          ).counted.map((t) => t.id);
+        }
+        const n = args.action === 'remove' ? removeTag(db, ids, args.tag) : addTag(db, ids, args.tag);
+        return ok({ tag: args.tag, action: args.action ?? 'add', matched: ids.length, changed: n });
+      } catch (e) {
+        return fail(e);
+      }
+    },
+  }),
+
+  tool({
+    name: 'rename_tag',
+    title: 'Rename a tag',
+    description:
+      'Rename a tag on every transaction that has it. Renaming onto an existing tag merges the ' +
+      'two. To remove a tag everywhere, use delete_tag.',
+    inputSchema: { from: TAG, to: TAG },
+    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
+    handler: ({ from, to }) => {
+      try {
+        return ok({ renamed: renameTag(db, from, to), from, to });
+      } catch (e) {
+        return fail(e);
+      }
+    },
+  }),
+
+  tool({
+    name: 'delete_tag',
+    title: 'Delete a tag',
+    description: 'Take a tag off every transaction. The transactions and their categories are untouched.',
+    inputSchema: { tag: TAG },
+    annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: false },
+    handler: ({ tag }) => {
+      try {
+        return ok({ tag, removed_from: deleteTag(db, tag) });
       } catch (e) {
         return fail(e);
       }

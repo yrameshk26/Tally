@@ -104,6 +104,7 @@ describe('tools', () => {
       'delete_category',
       'delete_merchant_rule',
       'delete_profile',
+      'delete_tag',
       'fx_rates',
       'get_activities',
       'get_cashflow',
@@ -121,10 +122,12 @@ describe('tools', () => {
       'list_merchant_rules',
       'list_profiles',
       'list_statements',
+      'list_tags',
       'move_account',
       'plaid_relink_url',
       'plaid_status',
       'rename_profile',
+      'rename_tag',
       'set_account_currency',
       'set_contributed',
       'set_merchant_category',
@@ -133,6 +136,7 @@ describe('tools', () => {
       'set_transaction_category',
       'sync_now',
       'sync_report',
+      'tag_transactions',
     ]);
     expect(names.some((n) => /trade|order|buy|sell|transfer|withdraw|pay/.test(n))).toBe(false);
   });
