@@ -3,6 +3,16 @@
 Dated, append-only. Each entry says what was chosen, what it was chosen over,
 and why.
 
+## 2026-09-30 — The app's own dialogs, never the browser's
+
+`window.confirm` looked like another site had interrupted ("tally.talnt.fit
+says"), ignored the theme, and could not show a title or a red button. One
+`<dialog>` lives in the page shell as `tallyConfirm()`, and every
+`form[data-confirm]` goes through it. Its text is set with textContent (a bank
+or merchant name can never become markup), Esc and a click outside cancel, and
+a destructive action starts with Cancel focused. A source test fails on any
+`confirm(`, `alert(` or `prompt(` under src/web.
+
 ## 2026-09-30 — Two years of history, on demand
 
 A user wanted transactions back to January; every bank had 90 days. Plaid's

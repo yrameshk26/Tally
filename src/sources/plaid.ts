@@ -54,6 +54,9 @@ export type PlaidItemRow = {
   history_days: number | null;
   /** The Item this one is taking over from, until the handover is done. */
   replaces_item_id: string | null;
+  /** Plaid's transactions_update_status at the last check, for a replacement. */
+  history_status: string | null;
+  history_checked_at: string | null;
   created_at: string;
 };
 
@@ -299,6 +302,11 @@ export async function syncPlaid(
         // or its accounts would count next to the ones they replace.
         const probe = await api.transactionsSync({ access_token: token, count: 1 });
         const status = String(probe.data.transactions_update_status ?? '');
+        db.prepare('UPDATE plaid_items SET history_status = ?, history_checked_at = ? WHERE item_id = ?').run(
+          status || null,
+          nowISO(),
+          item.item_id,
+        );
         if (!historyReady(status, item.created_at)) {
           setItemStatus(db, item.item_id, 'ok');
           perItem[label] = { waiting_for_history: true, update_status: status || 'unknown' };
@@ -812,6 +820,8 @@ export function plaidStatus(db: DB, profileId?: string): Array<Record<string, un
     last_synced_at: i.last_synced_at,
     history_days: i.history_days ?? DEFAULT_HISTORY_DAYS,
     replaces_item_id: i.replaces_item_id,
+    history_status: i.replaces_item_id ? i.history_status : null,
+    history_checked_at: i.replaces_item_id ? i.history_checked_at : null,
     replaced_by:
       (db.prepare('SELECT item_id FROM plaid_items WHERE replaces_item_id = ?').get(i.item_id) as
         | { item_id: string }

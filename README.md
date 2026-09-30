@@ -425,7 +425,8 @@ Server-rendered, no framework, no webfonts, no inline styles under a strict CSP.
   and type; tags, hand corrections and each account's profile and currency
   move across; anything older than the new history reaches is kept. Choosing a
   different bank in Link adds it as a new connection instead. It needs one free
-  Item slot while both exist.
+  Item slot while both exist. While it waits, the row says where Plaid is
+  (starting, recent months in, or ready to take over on the next refresh).
 - **Profiles** — up to 5, each with its own provider credentials; move an
   account between them.
 - **Settings** — provider credentials, stored encrypted in the database and
@@ -502,7 +503,7 @@ Read [SECURITY.md](SECURITY.md) before deploying. The short version:
 |---|---|
 | `npm run demo` | Seed a fictional database to try it without credentials |
 | `npm run dev` | Run the server from TypeScript |
-| `npm run check` | Typecheck + 458 tests |
+| `npm run check` | Typecheck + 461 tests |
 | `npm run sync` | One-shot sync; exits non-zero if a source errored |
 | `npm run db:init` | Create the database, seeding `room.json` if present |
 | `npm run hash-password` | Print an `ADMIN_PASSWORD_HASH` |

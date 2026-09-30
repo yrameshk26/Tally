@@ -93,3 +93,22 @@ describe('the page', () => {
     expect(out).not.toContain('<img class="mark');
   });
 });
+
+describe('dialogs', () => {
+  it('are the app’s own, never the browser’s', async () => {
+    const { readFileSync, readdirSync } = await import('node:fs');
+    const dir = new URL('../src/web/', import.meta.url);
+    for (const f of readdirSync(dir).filter((n) => n.endsWith('.ts'))) {
+      const src = readFileSync(new URL(f, dir), 'utf8');
+      expect(src, f).not.toMatch(/(?<![\w.])(window\.)?(confirm|alert|prompt)\(/);
+    }
+  });
+
+  it('confirm through a themed <dialog> built from text, not markup', () => {
+    const out = page({ title: 't', nonce: 'n', body: html`<form data-confirm="Delete it? Really."></form>` });
+    expect(out).toContain('window.tallyConfirm=');
+    expect(out).toContain("el('dialog','modal')");
+    expect(out).toContain('h.textContent=');
+    expect(out).not.toContain('innerHTML');
+  });
+});

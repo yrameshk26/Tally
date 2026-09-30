@@ -873,6 +873,7 @@ export function connectionsPage(opts: {
                   const replacing = Boolean(i['replaces_item_id']);
                   const replaced = Boolean(i['replaced_by']);
                   const history = days >= 730 ? '2 years' : `${String(days)} days`;
+                  const progress = replacing ? handoverProgress(i['history_status'], i['history_checked_at']) : null;
                   return html`<tr>
                     <td>${String(i['institution'] ?? 'unknown')}
                       <div class="sub-line">History: ${history}${
@@ -887,9 +888,11 @@ export function connectionsPage(opts: {
                     <td class="num">${String(i['accounts'] ?? 0)}</td>
                     <td class="num">${money(Number(i['balance_cad'] ?? 0))}</td>
                     <td class="muted">${
-                      i['last_synced_at']
-                        ? String(i['last_synced_at']).slice(0, 16).replace('T', ' ')
-                        : html`<span class="pill warn">never synced</span>`
+                      progress
+                        ? html`<span class="handover-note">${progress}</span>`
+                        : i['last_synced_at']
+                          ? String(i['last_synced_at']).slice(0, 16).replace('T', ' ')
+                          : html`<span class="pill warn">never synced</span>`
                     }</td>
                     <td class="num"><div class="row tight">
                       <button class="secondary" type="button"
@@ -993,9 +996,14 @@ export function connectionsPage(opts: {
       for (const btn of document.querySelectorAll('[data-history]')) {
         btn.addEventListener('click', async () => {
           const bank = btn.dataset.institution;
-          if (!confirm('Link ' + bank + ' again with two years of transactions? Choose ' + bank +
-            ' in the next window and sign in. Your current connection keeps working until Plaid has the full ' +
-            'history (usually within a few hours), then it is removed and your tags and corrections move across.')) return;
+          const go = await tallyConfirm({
+            title: 'Get two years of history for ' + bank + '?',
+            message: 'Choose ' + bank + ' in the next window and sign in. Your current connection keeps working ' +
+              'until Plaid has the full history, usually within a few hours. Then it is removed and your tags ' +
+              'and corrections move across.',
+            ok: 'Continue to ' + bank,
+          });
+          if (!go) return;
           say('Preparing…');
           try { const r = await api('/api/plaid/history-token', { item_id: btn.dataset.history });
                 sessionStorage.setItem('tally_lt', r.link_token);
@@ -1255,6 +1263,24 @@ export type TxFilters = {
 
 /** The Tag filter's "untagged only": the ordinary spending, trips and business set aside. */
 export const UNTAGGED = '__untagged__';
+
+/**
+ * Where a replacement's history pull is, in words. Plaid reports it on each
+ * sync; the handover runs on the first sync after it is complete.
+ */
+export function handoverProgress(status: unknown, checkedAt: unknown): string {
+  const when = typeof checkedAt === 'string' && checkedAt ? ` (checked ${checkedAt.slice(0, 16).replace('T', ' ')})` : '';
+  switch (status) {
+    case 'HISTORICAL_UPDATE_COMPLETE':
+      return `History ready. Takes over on the next refresh${when}.`;
+    case 'INITIAL_UPDATE_COMPLETE':
+      return `Plaid has recent months and is gathering the rest${when}.`;
+    case 'NOT_READY':
+      return `Plaid is starting to gather history${when}.`;
+    default:
+      return checkedAt ? `Waiting on Plaid${when}.` : 'Not checked yet. Press Refresh now on the Overview.';
+  }
+}
 
 /** Days from start to end, both counted. */
 function daysBetween(start: string, end: string): number {

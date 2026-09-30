@@ -457,6 +457,12 @@ export function migrateProfiles(db: DB): void {
   if (!hasColumn('plaid_items', 'replaces_item_id')) {
     db.exec('ALTER TABLE plaid_items ADD COLUMN replaces_item_id TEXT');
   }
+  // What Plaid last said about a replacement's history pull, and when, so
+  // Connections can say how far along it is rather than "never synced".
+  if (!hasColumn('plaid_items', 'history_status')) {
+    db.exec('ALTER TABLE plaid_items ADD COLUMN history_status TEXT');
+    db.exec('ALTER TABLE plaid_items ADD COLUMN history_checked_at TEXT');
+  }
 
   // settings predates profiles and was keyed on `key` alone. SQLite cannot
   // change a primary key in place, so rebuild the table and copy every row

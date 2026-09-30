@@ -21,7 +21,7 @@ const { addTag } = await import('../src/tags.ts');
 const { setTransactionOverride } = await import('../src/overrides.ts');
 const { getCashflow, getTransactions } = await import('../src/queries.ts');
 const { createProfile } = await import('../src/profiles.ts');
-const { connectionsPage } = await import('../src/web/pages.ts');
+const { connectionsPage, handoverProgress } = await import('../src/web/pages.ts');
 
 let db: DB;
 
@@ -237,6 +237,7 @@ describe('the sync', () => {
     expect(unsyncedItems(db).map((i) => i.item_id)).not.toContain('new');
     const status = plaidStatus(db);
     expect(status.find((s) => s['item_id'] === 'old')?.['replaced_by']).toBe('new');
+    expect(status.find((s) => s['item_id'] === 'new')?.['history_status']).toBe('INITIAL_UPDATE_COMPLETE');
   });
 
   it('takes over once it is: old link removed at Plaid, history in, tag kept, nothing twice', async () => {
@@ -345,5 +346,13 @@ describe('the Connections page', () => {
     expect(render([item({ replaces_item_id: 'i0' })])).toContain('>taking over</span>');
     expect(render([item({ history_days: 730 })])).toContain('History: 2 years');
     expect(render([item({ history_days: 730 })])).not.toContain('data-history=');
+  });
+});
+
+describe('handover progress', () => {
+  it('says where Plaid is, in words', () => {
+    expect(handoverProgress('INITIAL_UPDATE_COMPLETE', '2026-09-30T12:00:00Z')).toMatch(/recent months and is gathering the rest/);
+    expect(handoverProgress('HISTORICAL_UPDATE_COMPLETE', '2026-09-30T12:00:00Z')).toMatch(/next refresh/);
+    expect(handoverProgress(null, null)).toMatch(/Press Refresh now/);
   });
 });

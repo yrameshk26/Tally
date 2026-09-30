@@ -207,7 +207,9 @@ src/
   web/            routes, pages, layout (app shell + the one stylesheet, as
                   tokens; the theme choice is per browser, in localStorage,
                   applied from <head>), icons (hand-drawn), charts, markdown,
-                  OAuth pages, logo
+                  OAuth pages, logo. Confirmation is the shell's themed
+                  tallyConfirm() / form[data-confirm], never the browser's
+                  confirm/alert/prompt (test/brand.test.ts checks the source)
   auth/           password, TOTP, sessions
   lib/            logger, money, registered-type classifier, token crypto, html,
                   category (Plaid's RENT_AND_UTILITIES split into RENT and

@@ -469,6 +469,19 @@ button.secondary,.btn.secondary{background:var(--panel);color:var(--fg);border-c
 button.secondary:hover,.btn.secondary:hover{background:var(--panel-2);border-color:color-mix(in oklch,var(--accent) 55%,var(--line-strong));filter:none}
 button.danger{background:transparent;color:var(--neg);border-color:color-mix(in oklch,var(--neg) 40%,transparent);box-shadow:none}
 button.danger:hover{background:color-mix(in oklch,var(--neg) 9%,transparent);filter:none;box-shadow:none}
+button.danger-solid{background:var(--neg);border-color:var(--neg);color:#fff;box-shadow:none}
+button.danger-solid:hover{filter:brightness(1.08);box-shadow:0 4px 12px -4px color-mix(in oklch,var(--neg) 60%,transparent)}
+.modal{border:1px solid var(--line);border-radius:var(--radius);background:var(--panel);color:var(--fg);
+  padding:1.4rem 1.5rem 1.2rem;width:min(28rem,calc(100vw - 2rem));box-shadow:var(--shadow-lift)}
+.modal::backdrop{background:color-mix(in oklch,var(--fg) 28%,transparent);backdrop-filter:blur(3px)}
+.modal[open]{animation:modal-in .16s ease-out}
+@keyframes modal-in{from{opacity:0;transform:translateY(6px) scale(.98)}to{opacity:1;transform:none}}
+@media (prefers-reduced-motion:reduce){.modal[open]{animation:none}}
+.modal-title{margin:0 0 .5rem;font-size:1.08rem;line-height:1.35}
+.modal-body{margin:0 0 1.25rem;color:var(--fg-muted);line-height:1.55}
+.modal-actions{display:flex;justify-content:flex-end;gap:.6rem;flex-wrap:wrap}
+.handover-note{display:block;max-width:15rem;font-size:var(--step--1);line-height:1.4;white-space:normal}
+@media print{.modal{display:none}}
 button:disabled{opacity:.5;cursor:not-allowed;transform:none;filter:none}
 button[aria-disabled=true]{opacity:.65;cursor:progress}
 .row{display:flex;gap:.6rem;align-items:center;flex-wrap:wrap}
@@ -859,12 +872,36 @@ export function page(opts: {
       `show()});show()})();</scr` + `ipt>`
     : '';
 
-  // Destructive forms confirm first. One handler in the shell rather than one
-  // per page, and nonced — a nonce CSP blocks inline on*= handlers outright.
+  // Confirmation in the app's own dialog, never the browser's: window.confirm
+  // cannot be themed and reads as a different site. One dialog for the shell,
+  // exposed as tallyConfirm() for page scripts, and wired to every
+  // form[data-confirm]. Built with textContent, so a bank or merchant name in
+  // the message is text, never markup. The title is the message's opening
+  // question ("Disconnect TD?") and the confirm button takes the submit
+  // button's own label. Esc and a click outside cancel. A form asks only
+  // before something destructive (disconnect, revoke, delete), so its dialog
+  // is always the red kind, with Cancel focused.
   const confirmScript = chrome
-    ? `<script nonce="${nonce}">for(const f of document.querySelectorAll('form[data-confirm]'))` +
-      `f.addEventListener('submit',e=>{if(!window.confirm(f.dataset.confirm))e.preventDefault()});` +
-      `</scr` + `ipt>`
+    ? `<script nonce="${nonce}">(()=>{` +
+      `const el=(t,c)=>{const n=document.createElement(t);if(c)n.className=c;return n};` +
+      `const d=el('dialog','modal'),h=el('h2','modal-title'),p=el('p','modal-body'),row=el('div','modal-actions'),` +
+      `no=el('button','secondary'),yes=el('button');` +
+      `h.id='modal-title';d.setAttribute('aria-labelledby','modal-title');no.type=yes.type='button';no.textContent='Cancel';` +
+      `row.append(no,yes);d.append(h,p,row);document.body.append(d);` +
+      `let done=null;const finish=v=>{if(!done)return;const f=done;done=null;d.close();f(v)};` +
+      `no.addEventListener('click',()=>finish(false));yes.addEventListener('click',()=>finish(true));` +
+      `d.addEventListener('cancel',e=>{e.preventDefault();finish(false)});` +
+      `d.addEventListener('click',e=>{if(e.target===d)finish(false)});` +
+      `window.tallyConfirm=o=>new Promise(r=>{const m=String(o.message||''),i=m.indexOf('? ');` +
+      `h.textContent=o.title||(i>0?m.slice(0,i+1):'Are you sure?');` +
+      `p.textContent=o.title?m:(i>0?m.slice(i+2):m);p.hidden=!p.textContent;` +
+      `yes.textContent=o.ok||'Continue';yes.className=o.danger?'danger-solid':'';` +
+      `done=r;d.showModal();(o.danger?no:yes).focus()});` +
+      `for(const f of document.querySelectorAll('form[data-confirm]'))f.addEventListener('submit',e=>{` +
+      `if(f.dataset.confirmed){delete f.dataset.confirmed;return}e.preventDefault();const s=e.submitter;` +
+      `tallyConfirm({message:f.dataset.confirm,ok:(s&&s.textContent.trim())||'Continue',danger:true})` +
+      `.then(ok=>{if(!ok)return;f.dataset.confirmed='1';s?f.requestSubmit(s):f.requestSubmit()})})` +
+      `})();</scr` + `ipt>`
     : '';
 
   // Idle sign-out. The server decides — getSession refuses a session that has
