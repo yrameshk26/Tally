@@ -109,9 +109,13 @@ history is public too.
    (`src/sources/plaid-history.ts`) must never count both connections: the new
    Item stays unread (no balances, no transactions, not in the catch-up sync)
    until Plaid reports `HISTORICAL_UPDATE_COMPLETE`, and the old one is removed
-   at Plaid before anything of the new one is stored. A plain disconnect
-   deactivates accounts but keeps their transactions, so re-adding a bank by
-   hand does count its overlap twice; point people at the handover instead.
+   at Plaid before anything of the new one is stored. Accounts pair by last
+   four and type, then by name when two cards share a last four (American
+   Express does), and only when unambiguous. Whatever a handover could not
+   pair, and a bank disconnected and re-added by hand, is finished by
+   `finishHandovers` at the end of every Plaid sync when exactly one live
+   connection of that bank exists on the profile; a disconnect alone keeps
+   its accounts' transactions, so without that the overlap counts twice.
    A rollup reads its whole window (`ROLLUP_ROW_LIMIT`), never a page
    of rows: a total over the newest thousand transactions is wrong, not partial.
    The report's PDF is the browser's print dialog, not a PDF library; keep it

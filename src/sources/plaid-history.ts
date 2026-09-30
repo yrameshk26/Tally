@@ -69,23 +69,64 @@ export type HandoverResult = {
 
 /**
  * Pair old accounts with new ones. Last four digits and type when the bank
- * sends a mask; the account name otherwise. Only a single, unclaimed candidate
- * counts: a guess would put one card's history on another.
+ * sends a mask, then the account name when two cards share those (American
+ * Express reuses the last four across a business card's family); the name
+ * alone when there is no mask. Only a single, unclaimed candidate counts: a
+ * guess would put one card's history on another.
  */
 export function pairAccounts(oldAccts: Acct[], newAccts: Acct[]): Map<string, string> {
   const pairs = new Map<string, string>();
   const taken = new Set<string>();
-  const key = (a: Acct): string | null =>
-    a.mask ? `mask:${a.mask}|${(a.account_subtype ?? '').toLowerCase()}` : a.name ? `name:${a.name.toLowerCase()}` : null;
+  const name = (a: Acct): string => (a.name ?? '').trim().toLowerCase();
+  const byMask = (a: Acct): string | null =>
+    a.mask ? `${a.mask}|${(a.account_subtype ?? '').toLowerCase()}` : null;
   for (const o of oldAccts) {
-    const k = key(o);
-    if (!k) continue;
-    const candidates = newAccts.filter((n) => key(n) === k && !taken.has(n.id));
+    const open = newAccts.filter((n) => !taken.has(n.id));
+    let candidates = byMask(o)
+      ? open.filter((n) => byMask(n) === byMask(o))
+      : name(o)
+        ? open.filter((n) => !n.mask && name(n) === name(o))
+        : [];
+    if (candidates.length > 1 && name(o)) candidates = candidates.filter((n) => name(n) === name(o));
     if (candidates.length !== 1) continue;
     pairs.set(o.id, candidates[0]!.id);
     taken.add(candidates[0]!.id);
   }
   return pairs;
+}
+
+/**
+ * Old accounts a handover could not pair at the time, finished later: the old
+ * Item is gone from plaid_items but its accounts, and their transactions, are
+ * still stored next to the new connection's copies. For each such Item, when
+ * exactly one live connection of the same bank exists on the same profile,
+ * the handover runs again for what is left. It moves nothing it cannot pair,
+ * so running it on every sync is safe, and it also mends a bank that was
+ * disconnected and added again by hand.
+ */
+export function finishHandovers(db: DB, profileId: string): Array<{ from: string; to: string; result: HandoverResult }> {
+  const leftovers = db
+    .prepare(
+      `SELECT DISTINCT a.item_id, a.institution FROM accounts a
+       WHERE a.source = 'plaid' AND a.source_profile_id = ? AND a.item_id IS NOT NULL
+         AND a.item_id NOT IN (SELECT item_id FROM plaid_items)
+         AND EXISTS (SELECT 1 FROM transactions t WHERE t.account_id = a.id)`,
+    )
+    .all(profileId) as Array<{ item_id: string; institution: string | null }>;
+  const done: Array<{ from: string; to: string; result: HandoverResult }> = [];
+  for (const left of leftovers) {
+    if (!left.institution) continue;
+    const live = db
+      .prepare(
+        `SELECT item_id FROM plaid_items
+         WHERE profile_id = ? AND institution_name = ? AND replaces_item_id IS NULL`,
+      )
+      .all(profileId, left.institution) as Array<{ item_id: string }>;
+    if (live.length !== 1) continue;
+    const result = handOver(db, left.item_id, live[0]!.item_id);
+    if (Object.keys(result.accounts).length) done.push({ from: left.item_id, to: live[0]!.item_id, result });
+  }
+  return done;
 }
 
 /**

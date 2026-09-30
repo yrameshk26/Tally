@@ -15,7 +15,7 @@ const { initDb, openDb } = await import('../src/db.ts');
 const { PlaidApi } = await import('plaid');
 const { exchangePublicToken, saveItem, syncPlaid, plaidStatus, unsyncedItems } = await import('../src/sources/plaid.ts');
 const { plaidHistoryDays, setSetting } = await import('../src/settings.ts');
-const { handOver, historyReady, pairAccounts } = await import('../src/sources/plaid-history.ts');
+const { finishHandovers, handOver, historyReady, pairAccounts } = await import('../src/sources/plaid-history.ts');
 const { upsertAccount, upsertTransactions } = await import('../src/store.ts');
 const { addTag } = await import('../src/tags.ts');
 const { setTransactionOverride } = await import('../src/overrides.ts');
@@ -354,5 +354,56 @@ describe('handover progress', () => {
     expect(handoverProgress('INITIAL_UPDATE_COMPLETE', '2026-09-30T12:00:00Z')).toMatch(/recent months and is gathering the rest/);
     expect(handoverProgress('HISTORICAL_UPDATE_COMPLETE', '2026-09-30T12:00:00Z')).toMatch(/next refresh/);
     expect(handoverProgress(null, null)).toMatch(/Press Refresh now/);
+  });
+});
+
+describe('two cards with the same last four digits', () => {
+  // American Express reuses the last four across a business card family.
+  const oldCards = [
+    account('old:blue', 'old', '2002', { name: 'Blue Business Plus Card' }),
+    account('old:bonvoy', 'old', '2002', { name: 'Bonvoy Business Amex Card' }),
+  ];
+  const newCards = [
+    account('new:bonvoy', 'new', '2002', { name: 'Bonvoy Business Amex Card' }),
+    account('new:blue', 'new', '2002', { name: 'Blue Business Plus Card' }),
+  ];
+
+  it('are told apart by name', () => {
+    const asAcct = (a: ReturnType<typeof account>) => ({ ...a, profile_id: 'me', currency_override: null });
+    expect(Object.fromEntries(pairAccounts(oldCards.map(asAcct), newCards.map(asAcct)))).toEqual({
+      'old:blue': 'new:blue',
+      'old:bonvoy': 'new:bonvoy',
+    });
+  });
+
+  it('are finished on a later sync when an earlier handover left them, without counting twice', () => {
+    // The state an earlier handover left: old Item gone, its two cards and their
+    // rows still stored next to the new connection's copies.
+    saveItem(db, { item_id: 'new', access_token: 'tok', institution_id: 'ins_1', institution_name: 'Test Bank', history_days: 730 });
+    for (const a of [...oldCards, ...newCards]) upsertAccount(db, a);
+    db.prepare("UPDATE accounts SET active = 0, status = 'removed' WHERE item_id = 'old'").run();
+    upsertTransactions(db, [
+      tx('o1', 'old:bonvoy', '2026-08-10', 300, 'HOTEL'),
+      tx('n1', 'new:bonvoy', '2026-08-10', 300, 'HOTEL'),
+      tx('n0', 'new:bonvoy', '2025-02-01', 80, 'OLDER HOTEL'),
+    ]);
+    addTag(db, ['o1'], 'Business');
+    expect(getCashflow(db, { start: '2025-01-01', end: '2026-12-31' }).spend_cad).toBe(680);
+
+    const done = finishHandovers(db, 'me');
+    expect(done).toHaveLength(1);
+    expect(getCashflow(db, { start: '2025-01-01', end: '2026-12-31' }).spend_cad).toBe(380);
+    expect(getTransactions(db, { tag: 'Business', start: '2025-01-01' }).map((t) => t.id)).toEqual(['n1']);
+    // Nothing left to do the second time.
+    expect(finishHandovers(db, 'me')).toEqual([]);
+  });
+
+  it('leaves them alone when it cannot tell which connection took over', () => {
+    saveItem(db, { item_id: 'a', access_token: 'tok', institution_id: 'ins_1', institution_name: 'Test Bank' });
+    saveItem(db, { item_id: 'b', access_token: 'tok', institution_id: 'ins_1', institution_name: 'Test Bank' });
+    upsertAccount(db, oldCards[0]!);
+    upsertTransactions(db, [tx('o1', 'old:blue', '2026-08-10', 300, 'HOTEL')]);
+    expect(finishHandovers(db, 'me')).toEqual([]);
+    expect(getTransactions(db).map((t) => t.id)).toEqual(['o1']);
   });
 });

@@ -34,7 +34,7 @@ import {
   type TransactionRow,
 } from '../store.ts';
 import { makeConverter, type RateMap } from '../fx.ts';
-import { DEFAULT_HISTORY_DAYS, handOver, historyReady, type HandoverResult } from './plaid-history.ts';
+import { DEFAULT_HISTORY_DAYS, finishHandovers, handOver, historyReady, type HandoverResult } from './plaid-history.ts';
 
 export type PlaidItemRow = {
   item_id: string;
@@ -409,6 +409,9 @@ export async function syncPlaid(
     .filter((r) => r.item_id !== null && failedItems.has(r.item_id))
     .map((r) => r.id);
   const deactivated = deactivateMissing(db, 'plaid', [...seen, ...keep], profileId);
+  // Anything an earlier handover could not pair, now that it can.
+  const finished = finishHandovers(db, profileId);
+  if (finished.length) log.info('plaid: finished earlier handovers', { count: finished.length });
 
   const misses = fx.misses();
   return {
@@ -416,6 +419,7 @@ export async function syncPlaid(
     accounts: accountCount,
     transactions: txCount,
     deactivated,
+    ...(finished.length ? { finished_handovers: finished } : {}),
     ...(misses.length ? { fx_misses: misses } : {}),
     detail: perItem,
   };

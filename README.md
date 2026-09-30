@@ -503,7 +503,7 @@ Read [SECURITY.md](SECURITY.md) before deploying. The short version:
 |---|---|
 | `npm run demo` | Seed a fictional database to try it without credentials |
 | `npm run dev` | Run the server from TypeScript |
-| `npm run check` | Typecheck + 461 tests |
+| `npm run check` | Typecheck + 464 tests |
 | `npm run sync` | One-shot sync; exits non-zero if a source errored |
 | `npm run db:init` | Create the database, seeding `room.json` if present |
 | `npm run hash-password` | Print an `ADMIN_PASSWORD_HASH` |

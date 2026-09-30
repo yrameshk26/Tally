@@ -3,6 +3,18 @@
 Dated, append-only. Each entry says what was chosen, what it was chosen over,
 and why.
 
+## 2026-09-30 — Handover pairing: same last four, told apart by name
+
+The first live handovers left two American Express business cards unpaired:
+both end in the same four digits, so pairing by last four and type found two
+candidates and, rightly, would not guess. Their old rows stayed next to the new
+copies and counted twice. The name now breaks that tie, and `finishHandovers`
+runs at the end of every Plaid sync for any removed connection whose accounts
+still hold transactions, when exactly one live connection of the same bank is
+on the profile. It pairs only what it can, so it is safe to run every time,
+and it also mends the long-standing double count from disconnecting a bank and
+adding it again by hand.
+
 ## 2026-09-30 — The app's own dialogs, never the browser's
 
 `window.confirm` looked like another site had interrupted ("tally.talnt.fit
