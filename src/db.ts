@@ -447,6 +447,17 @@ export function migrateProfiles(db: DB): void {
     db.exec("ALTER TABLE plaid_items ADD COLUMN profile_id TEXT NOT NULL DEFAULT 'me'");
   }
 
+  // How much transaction history the Item was linked with (NULL: Plaid's
+  // default of 90 days, which is all an Item linked before this could have).
+  // Plaid fixes it at link time, so getting more means linking again, and the
+  // new Item names the one it takes over from until the handover is done.
+  if (!hasColumn('plaid_items', 'history_days')) {
+    db.exec('ALTER TABLE plaid_items ADD COLUMN history_days INTEGER');
+  }
+  if (!hasColumn('plaid_items', 'replaces_item_id')) {
+    db.exec('ALTER TABLE plaid_items ADD COLUMN replaces_item_id TEXT');
+  }
+
   // settings predates profiles and was keyed on `key` alone. SQLite cannot
   // change a primary key in place, so rebuild the table and copy every row
   // onto the default profile.

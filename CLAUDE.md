@@ -35,7 +35,10 @@ history is public too.
    `optional_products` only, and an existing Item that needs a newly enabled
    product is disconnected and added again. `test/statements.test.ts` pins the
    shape of both link paths — a change here cannot be verified by tests alone,
-   so make it behind a setting that is off by default.
+   so make it behind a setting that is off by default. `days_requested`
+   (`transactions`) goes on a new link only, from `PLAID_TRANSACTION_DAYS` or
+   the Connections "Get 2 years of history" action; Plaid never changes it for
+   an existing Item, so update mode must not carry it.
 4. **Assistant output is rendered by `src/web/markdown.ts`, never a library.**
    It renders text from a third-party model built on institution-supplied data.
    Input is escaped *first* and tags are only ever emitted by that file, so
@@ -102,7 +105,14 @@ history is public too.
    range skips transfers and card payments. A tag or override on a pending
    charge moves to the posted one through `replaces` (Plaid's
    `pending_transaction_id`) in `upsertTransactions`; a new source adapter that
-   has pending rows sets it too. A rollup reads its whole window (`ROLLUP_ROW_LIMIT`), never a page
+   has pending rows sets it too. Relinking a bank for more history
+   (`src/sources/plaid-history.ts`) must never count both connections: the new
+   Item stays unread (no balances, no transactions, not in the catch-up sync)
+   until Plaid reports `HISTORICAL_UPDATE_COMPLETE`, and the old one is removed
+   at Plaid before anything of the new one is stored. A plain disconnect
+   deactivates accounts but keeps their transactions, so re-adding a bank by
+   hand does count its overlap twice; point people at the handover instead.
+   A rollup reads its whole window (`ROLLUP_ROW_LIMIT`), never a page
    of rows: a total over the newest thousand transactions is wrong, not partial.
    The report's PDF is the browser's print dialog, not a PDF library; keep it
    that way (see DECISIONS.md).
@@ -191,7 +201,9 @@ src/
                   is install-wide and display-only (the MCP server, cookies and
                   code stay "tally")
   link-server.ts  LOCAL ONLY Plaid Link helper
-  sources/        snaptrade.ts, plaid.ts, wise.ts, statements.ts (never persisted)
+  sources/        snaptrade.ts, plaid.ts, wise.ts, statements.ts (never persisted),
+                  plaid-history.ts (relink a bank for two years and hand over
+                  tags, corrections and account settings)
   web/            routes, pages, layout (app shell + the one stylesheet, as
                   tokens; the theme choice is per browser, in localStorage,
                   applied from <head>), icons (hand-drawn), charts, markdown,

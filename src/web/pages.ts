@@ -468,6 +468,10 @@ const LABELS: Record<string, { label: string; hint: string }> = {
     label: 'App name',
     hint: 'What the sign-in screen, the navigation and the browser tab call this, up to 40 characters. Clear it to go back to “tally”.',
   },
+  PLAID_TRANSACTION_DAYS: {
+    label: 'History for new banks (days)',
+    hint: 'How far back a newly linked bank’s transactions go, 30 to 730. Blank uses Plaid’s default of 90. Plaid fixes this when a bank is linked; for one already linked, use “Get 2 years of history” on Connections.',
+  },
   CATEGORY_DETAIL: {
     label: 'Categories',
     hint: 'Grouped files spending the way a budgeting app does: Food, Bills & utilities, Family care, Home, Pets and so on, each with its own subcategories, including ones to choose by hand. Plaid detailed uses Plaid’s finer categories as they come; Plaid broad keeps its sixteen top-level ones. Read on the fly, so switching changes nothing stored, your own corrections win in every mode, and the totals are the same in all three.',
@@ -549,7 +553,13 @@ export function settingsPage(opts: {
     <form method="post" action="/settings">
       ${csrfField(opts.csrf)}
       ${group('SnapTrade — brokerages', ['SNAPTRADE_CLIENT_ID', 'SNAPTRADE_CONSUMER_KEY', 'SNAPTRADE_TRANSPORT'])}
-      ${group('Plaid — banks and cards', ['PLAID_CLIENT_ID', 'PLAID_SECRET', 'PLAID_ENV'])}
+      ${group('Plaid — banks and cards', [
+        'PLAID_CLIENT_ID',
+        'PLAID_SECRET',
+        'PLAID_ENV',
+        // Install-wide, so only where the route will store it.
+        ...(opts.isDefaultProfile ? ['PLAID_TRANSACTION_DAYS'] : []),
+      ])}
       ${group('Wise — multi-currency', ['WISE_API_TOKEN'])}
       ${
         // Install-level, not per profile: llmConfig always reads the default
@@ -859,8 +869,20 @@ export function connectionsPage(opts: {
               <tbody>${join(
                 opts.items.map((i) => {
                   const ok = i['status'] === 'ok';
+                  const days = Number(i['history_days'] ?? 90);
+                  const replacing = Boolean(i['replaces_item_id']);
+                  const replaced = Boolean(i['replaced_by']);
+                  const history = days >= 730 ? '2 years' : `${String(days)} days`;
                   return html`<tr>
-                    <td>${String(i['institution'] ?? 'unknown')}</td>
+                    <td>${String(i['institution'] ?? 'unknown')}
+                      <div class="sub-line">History: ${history}${
+                        replacing
+                          ? html` <span class="pill warn" title="Waiting for Plaid’s full history. The connection it replaces keeps working until then; the next refresh after that hands over.">taking over</span>`
+                          : replaced
+                            ? html` <span class="pill" title="A two-year link of this bank takes over once Plaid has its full history.">being replaced</span>`
+                            : raw('')
+                      }</div>
+                    </td>
                     <td>${ok ? html`<span class="pill ok">ok</span>` : html`<span class="pill bad">${String(i['status'])}${i['error_code'] ? html` ${String(i['error_code'])}` : raw('')}</span>`}</td>
                     <td class="num">${String(i['accounts'] ?? 0)}</td>
                     <td class="num">${money(Number(i['balance_cad'] ?? 0))}</td>
@@ -873,6 +895,14 @@ export function connectionsPage(opts: {
                       <button class="secondary" type="button"
                         title="Re-authenticate this bank's login"
                         data-relink="${String(i['item_id'])}">Repair</button>
+                      ${
+                        days < 730 && !replacing && !replaced && ok
+                          ? html`<button class="secondary" type="button"
+                              title="Link this bank again with two years of transactions; your tags and corrections move across"
+                              data-history="${String(i['item_id'])}"
+                              data-institution="${String(i['institution'] ?? 'this bank')}">Get 2 years of history</button>`
+                          : raw('')
+                      }
 
                       <form method="post" action="/connections/remove" class="inline-form"
                             data-confirm="Disconnect ${String(i['institution'] ?? 'this bank')}? Its access token is revoked at Plaid and its accounts leave your net worth. Transaction history is kept.">
@@ -935,14 +965,19 @@ export function connectionsPage(opts: {
           token,
           receivedRedirectUri: location.pathname === '/connections/oauth' ? location.href : undefined,
           onSuccess: async (publicToken) => {
-            try { const r = await api('/api/plaid/exchange', { public_token: publicToken });
+            try { const replaces = sessionStorage.getItem('tally_replaces') || '';
+                  const r = await api('/api/plaid/exchange', { public_token: publicToken, replaces });
                   say('Linked ' + (r.institution_name || r.item_id) + ' — reloading…');
                   sessionStorage.removeItem('tally_lt');
                   sessionStorage.removeItem('tally_profile');
-                  location.href = '/connections?profile=' + encodeURIComponent(resumeProfile()); }
+                  sessionStorage.removeItem('tally_replaces');
+                  const msg = r.replacing
+                    ? 'Linked. Plaid is gathering two years of history; the old connection keeps working until it is all here, then your tags and corrections move across on the next refresh.'
+                    : (r.note || '');
+                  location.href = '/connections?profile=' + encodeURIComponent(resumeProfile()) + (msg ? '&ok=' + encodeURIComponent(msg) : ''); }
             catch (e) { say('Could not save the connection: ' + e.message); }
           },
-          onExit: (err) => { if (err) say('Exited: ' + (err.error_code || '') + ' ' + (err.error_message || '')); },
+          onExit: (err) => { sessionStorage.removeItem('tally_replaces'); if (err) say('Exited: ' + (err.error_code || '') + ' ' + (err.error_message || '')); },
         }).open();
       }
       document.getElementById('connect')?.addEventListener('click', async (ev) => {
@@ -950,10 +985,26 @@ export function connectionsPage(opts: {
         try { const r = await api('/api/plaid/link-token');
               sessionStorage.setItem('tally_lt', r.link_token);
               sessionStorage.setItem('tally_profile', PROFILE);
+              sessionStorage.removeItem('tally_replaces');
               say(''); open(r.link_token); }
         catch (e) { say('Could not start Plaid Link: ' + e.message); }
         ev.target.disabled = false;
       });
+      for (const btn of document.querySelectorAll('[data-history]')) {
+        btn.addEventListener('click', async () => {
+          const bank = btn.dataset.institution;
+          if (!confirm('Link ' + bank + ' again with two years of transactions? Choose ' + bank +
+            ' in the next window and sign in. Your current connection keeps working until Plaid has the full ' +
+            'history (usually within a few hours), then it is removed and your tags and corrections move across.')) return;
+          say('Preparing…');
+          try { const r = await api('/api/plaid/history-token', { item_id: btn.dataset.history });
+                sessionStorage.setItem('tally_lt', r.link_token);
+                sessionStorage.setItem('tally_profile', PROFILE);
+                sessionStorage.setItem('tally_replaces', btn.dataset.history);
+                say(''); open(r.link_token); }
+          catch (e) { say('Could not start: ' + e.message); }
+        });
+      }
       for (const btn of document.querySelectorAll('[data-relink]')) {
         btn.addEventListener('click', async () => {
           say('Preparing repair…');

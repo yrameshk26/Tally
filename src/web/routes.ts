@@ -84,6 +84,7 @@ import {
   INSTALL_KEYS,
   MANAGED_KEYS,
   SECRET_KEYS,
+  plaidHistoryDays,
 } from '../settings.ts';
 import { plaidCreds, plaidReady, snaptradeReady, testCredentials, wiseReady } from '../credentials.ts';
 import {
@@ -145,6 +146,7 @@ import {
 import { failedSources, lastSyncReport, runSync, syncProgress } from '../sync.ts';
 import { MAX_LOGO_BYTES, deleteLogo, getLogo, logoUrl, setLogo } from '../brand.ts';
 import { loadRates } from '../fx.ts';
+import { DEFAULT_HISTORY_DAYS, MAX_HISTORY_DAYS } from '../sources/plaid-history.ts';
 import { addTag, cleanTag, listTags, parseTags, removeTag, setTags } from '../tags.ts';
 import { createFailureLimiter } from '../ratelimit.ts';
 import { originOf, plaidRedirectFor, safeNext } from './oauth.ts';
@@ -676,7 +678,7 @@ export function createWebRouter(db: DB): express.Router {
         const value = String(body[key] ?? '').trim();
         // Clearing the name is how you go back to "tally"; everywhere else a
         // blank field means "leave it".
-        if (key === 'APP_NAME' && key in body && !value) {
+        if ((key === 'APP_NAME' || key === 'PLAID_TRANSACTION_DAYS') && key in body && !value) {
           if (deleteSetting(db, key, profileId)) saved.push(key);
           continue;
         }
@@ -747,9 +749,39 @@ export function createWebRouter(db: DB): express.Router {
             'Each profile has its own allowance — add another profile, or remove a connection here.',
         );
       }
-      res.json({ link_token: await createLinkToken(db, redirectUriFor(req), profile.id) });
+      res.json({ link_token: await createLinkToken(db, redirectUriFor(req), profile.id, plaidHistoryDays(db)) });
     } catch (e) {
       log.warn('plaid link-token failed', { error: plaidErrorDetail(e) });
+      res.status(400).json({ error: plaidErrorDetail(e) });
+    }
+  });
+
+  // "Get 2 years of history" for a bank already linked. Plaid fixes the
+  // history when an Item is linked, so this links the same bank again with
+  // the maximum, and the sync hands over once Plaid has all of it
+  // (sources/plaid-history.ts).
+  router.post('/api/plaid/history-token', requireAuth, requireCsrf, async (req: Ctx, res: Response) => {
+    try {
+      const profile = requiredProfile(req);
+      const itemId = String((req.body as { item_id?: string })?.item_id ?? '');
+      const item = listItems(db, profile.id).find((i) => i.item_id === itemId);
+      if (!item) throw new Error('No such connection on this profile.');
+      if ((item.history_days ?? DEFAULT_HISTORY_DAYS) >= MAX_HISTORY_DAYS) {
+        throw new Error('This connection already has two years of history.');
+      }
+      if (item.replaces_item_id || listItems(db).some((i) => i.replaces_item_id === itemId)) {
+        throw new Error('A handover for this connection is already under way.');
+      }
+      // The old Item stays until the new one is ready, so both count briefly.
+      if (listItems(db, profile.id).length >= PLAID_ITEM_CAP) {
+        throw new Error(
+          `All ${PLAID_ITEM_CAP} Plaid Items are in use for this profile, and this needs one free for a while. ` +
+            'Remove a connection you no longer use first.',
+        );
+      }
+      res.json({ link_token: await createLinkToken(db, redirectUriFor(req), profile.id, MAX_HISTORY_DAYS) });
+    } catch (e) {
+      log.warn('plaid history-token failed', { error: plaidErrorDetail(e) });
       res.status(400).json({ error: plaidErrorDetail(e) });
     }
   });
@@ -770,15 +802,25 @@ export function createWebRouter(db: DB): express.Router {
       const publicToken = String((req.body as { public_token?: string })?.public_token ?? '');
       if (!publicToken) throw new Error('public_token is required');
       const profile = requiredProfile(req);
-      const saved = await exchangePublicToken(db, publicToken, profile.id);
-      log.info(`linked ${saved.institution_name ?? saved.item_id} to profile ${profile.id}`);
+      const replaces = String((req.body as { replaces?: string })?.replaces ?? '') || null;
+      const saved = await exchangePublicToken(db, publicToken, profile.id, {
+        replaces,
+        historyDays: replaces ? MAX_HISTORY_DAYS : plaidHistoryDays(db),
+      });
+      log.info(`linked ${saved.institution_name ?? saved.item_id} to profile ${profile.id}`, {
+        ...(saved.replacing ? { replacing: saved.replacing } : {}),
+      });
       // Pull balances straight away so the new row is not sitting at zero
       // accounts until the nightly sync. Failure here is not a failed link.
+      // Not for a replacement: its accounts would count next to the old ones
+      // until the handover, which waits for Plaid's full history.
       let accounts = 0;
-      try {
-        accounts = await syncNewItem(db, saved.item_id, loadRates(db), profile.id);
-      } catch (e) {
-        log.warn(`initial sync for ${saved.item_id} failed (${errMessage(e)})`);
+      if (!saved.replacing) {
+        try {
+          accounts = await syncNewItem(db, saved.item_id, loadRates(db), profile.id);
+        } catch (e) {
+          log.warn(`initial sync for ${saved.item_id} failed (${errMessage(e)})`);
+        }
       }
       res.json({ ok: true, profile: profile.id, accounts, ...saved });
     } catch (e) {

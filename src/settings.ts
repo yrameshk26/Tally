@@ -48,6 +48,7 @@ export const MANAGED_KEYS = [
   'LLM_BASE_URL',
   'APP_NAME',
   'CATEGORY_DETAIL',
+  'PLAID_TRANSACTION_DAYS',
 ] as const;
 
 export type ManagedKey = (typeof MANAGED_KEYS)[number];
@@ -71,7 +72,7 @@ export const DEFAULTS: Partial<Record<ManagedKey, string>> = {
  * the default profile only, so storing one anywhere else would write a row
  * nothing ever reads.
  */
-export const INSTALL_KEYS = new Set<string>(['APP_NAME', 'CATEGORY_DETAIL']);
+export const INSTALL_KEYS = new Set<string>(['APP_NAME', 'CATEGORY_DETAIL', 'PLAID_TRANSACTION_DAYS']);
 
 export const DEFAULT_APP_NAME = 'tally';
 
@@ -110,6 +111,21 @@ export function categoryDetail(db: DB): CategoryDetail {
     return (CATEGORY_DETAILS as readonly string[]).includes(v) ? (v as CategoryDetail) : DEFAULT_CATEGORY_DETAIL;
   } catch {
     return DEFAULT_CATEGORY_DETAIL;
+  }
+}
+
+/**
+ * Days of transaction history a newly linked bank asks Plaid for, or null for
+ * Plaid's default (90). Off unless set: a link-token change cannot be verified
+ * by tests alone (CLAUDE.md rule 3). "Get 2 years of history" on Connections
+ * asks for the maximum whatever this says.
+ */
+export function plaidHistoryDays(db: DB): number | null {
+  try {
+    const v = Number(getSetting(db, 'PLAID_TRANSACTION_DAYS').trim());
+    return Number.isInteger(v) && v >= 30 && v <= 730 ? v : null;
+  } catch {
+    return null;
   }
 }
 
@@ -158,6 +174,13 @@ export function setSetting(
   if (key === 'APP_NAME') {
     value = cleanAppName(value);
     if (!value) throw new Error('The app name cannot be blank. Clear the field to go back to "tally".');
+  }
+  if (key === 'PLAID_TRANSACTION_DAYS') {
+    value = value.trim();
+    const n = Number(value);
+    if (!Number.isInteger(n) || n < 30 || n > 730) {
+      throw new Error('Plaid history is a number of days from 30 to 730 (two years). Clear it for Plaid’s default of 90.');
+    }
   }
   if (key === 'CATEGORY_DETAIL') {
     value = value.trim().toLowerCase();

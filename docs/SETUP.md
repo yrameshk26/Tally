@@ -241,7 +241,7 @@ PLAID_ENV=production
 PLAID_PRODUCTS=transactions
 PLAID_OPTIONAL_PRODUCTS=liabilities,statements
 PLAID_COUNTRY_CODES=US,CA
-PLAID_TRANSACTION_DAYS=730
+PLAID_TRANSACTION_DAYS=730   # new links ask for two years; unset is Plaid's 90
 PLAID_STATEMENT_MONTHS=24
 PLAID_REDIRECT_URI=http://localhost:8788/oauth-return
 ```

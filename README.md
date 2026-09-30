@@ -65,7 +65,7 @@ place a trade or move money, and that is enforced as a project rule rather than
 an intention.
 
 It is also a genuinely small program: no ORM, no charting library, no auth
-framework, ~440 tests, and a dependency list you can read in one screen.
+framework, ~460 tests, and a dependency list you can read in one screen.
 
 **If this is useful to you, a ⭐ on the repo helps more people find it** — that is
 the only distribution this project has.
@@ -272,7 +272,7 @@ Plaid behaviour is set by these variables:
 | `PLAID_PRODUCTS` | `transactions` | Required products. Every one listed narrows which institutions Link will offer, so keep it minimal. |
 | `PLAID_OPTIONAL_PRODUCTS` | `liabilities` | Fetched best-effort; never blocks Item creation. Add `statements` here to enable statement downloads. |
 | `PLAID_COUNTRY_CODES` | `US,CA` | |
-| `PLAID_TRANSACTION_DAYS` | `730` | |
+| `PLAID_TRANSACTION_DAYS` | unset (Plaid's 90) | Days of transaction history a **newly linked** bank asks for, 30 to 730. Also under Settings → Plaid. Plaid fixes it at link time; for a bank already linked, use **Get 2 years of history** on Connections. Before 2026-09-30 this variable was documented but never sent to Plaid, so every Item got 90 days. |
 | `PLAID_STATEMENT_MONTHS` | `24` | Statement window requested at link time. Plaid's own cap is 24. |
 
 **Wise.** Settings → API tokens → create a **read-only** token → `WISE_API_TOKEN`.
@@ -416,7 +416,16 @@ Server-rendered, no framework, no webfonts, no inline styles under a strict CSP.
   render as Markdown with tables and charts, every answer shows which tools it
   called and what they returned, and ⌘P prints a clean transcript.
 - **Connections** — Plaid Link to add banks and cards, Item health, one-click
-  repair, disconnect.
+  repair, disconnect. Each bank shows how much history it was linked with.
+  **Get 2 years of history** links that bank again asking Plaid for the
+  maximum (Plaid fixes history when a bank is linked, so there is no other
+  way). The current connection keeps working until Plaid has the full history,
+  usually within a few hours; the next refresh after that removes the old
+  connection at Plaid and hands over. Accounts are paired by last four digits
+  and type; tags, hand corrections and each account's profile and currency
+  move across; anything older than the new history reaches is kept. Choosing a
+  different bank in Link adds it as a new connection instead. It needs one free
+  Item slot while both exist.
 - **Profiles** — up to 5, each with its own provider credentials; move an
   account between them.
 - **Settings** — provider credentials, stored encrypted in the database and
@@ -493,7 +502,7 @@ Read [SECURITY.md](SECURITY.md) before deploying. The short version:
 |---|---|
 | `npm run demo` | Seed a fictional database to try it without credentials |
 | `npm run dev` | Run the server from TypeScript |
-| `npm run check` | Typecheck + 441 tests |
+| `npm run check` | Typecheck + 458 tests |
 | `npm run sync` | One-shot sync; exits non-zero if a source errored |
 | `npm run db:init` | Create the database, seeding `room.json` if present |
 | `npm run hash-password` | Print an `ADMIN_PASSWORD_HASH` |

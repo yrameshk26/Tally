@@ -78,7 +78,6 @@ export const config = {
     countryCodes: list('PLAID_COUNTRY_CODES', ['US', 'CA']),
     linkPort: int('PLAID_LINK_PORT', 8788),
     redirectUri: str('PLAID_REDIRECT_URI'),
-    transactionDays: int('PLAID_TRANSACTION_DAYS', 730),
     /** How far back Link asks for statements. Plaid's own cap is 24 months. */
     statementMonths: int('PLAID_STATEMENT_MONTHS', 24),
   },

@@ -34,6 +34,7 @@ import {
   type TransactionRow,
 } from '../store.ts';
 import { makeConverter, type RateMap } from '../fx.ts';
+import { DEFAULT_HISTORY_DAYS, handOver, historyReady, type HandoverResult } from './plaid-history.ts';
 
 export type PlaidItemRow = {
   item_id: string;
@@ -49,6 +50,11 @@ export type PlaidItemRow = {
   institution_products: string | null;
   last_synced_at: string | null;
   profile_id: string;
+  /** Days of history requested at link time; null means Plaid's default (90). */
+  history_days: number | null;
+  /** The Item this one is taking over from, until the handover is done. */
+  replaces_item_id: string | null;
+  created_at: string;
 };
 
 // One client per profile: two profiles are two different Plaid teams, and
@@ -131,13 +137,17 @@ export function saveItem(
     access_token: string;
     institution_id?: string | null;
     institution_name?: string | null;
+    history_days?: number | null;
+    replaces_item_id?: string | null;
   },
   profileId = DEFAULT_PROFILE_ID,
 ): void {
   const ts = nowISO();
   db.prepare(
-    `INSERT INTO plaid_items (item_id, institution_id, institution_name, access_token, status, profile_id, created_at, updated_at)
-     VALUES (@item_id, @institution_id, @institution_name, @access_token, 'ok', @profile_id, @ts, @ts)
+    `INSERT INTO plaid_items (item_id, institution_id, institution_name, access_token, status, profile_id,
+                              history_days, replaces_item_id, created_at, updated_at)
+     VALUES (@item_id, @institution_id, @institution_name, @access_token, 'ok', @profile_id,
+             @history_days, @replaces_item_id, @ts, @ts)
      ON CONFLICT(item_id) DO UPDATE SET
        institution_id   = COALESCE(excluded.institution_id, plaid_items.institution_id),
        institution_name = COALESCE(excluded.institution_name, plaid_items.institution_name),
@@ -152,6 +162,8 @@ export function saveItem(
     institution_name: item.institution_name ?? null,
     access_token: encryptToken(item.access_token, config.tokenEncKey),
     profile_id: profileId,
+    history_days: item.history_days ?? null,
+    replaces_item_id: item.replaces_item_id ?? null,
     ts,
   });
 }
@@ -277,9 +289,28 @@ export async function syncPlaid(
     // not of this connection's health, and it needs no access token. Leaving it
     // inside meant a broken Item never learned whether it could do statements —
     // so the one bank we knew could not stayed marked "unknown".
+    // Taken over earlier in this run by its replacement: already removed.
+    if (!db.prepare('SELECT 1 FROM plaid_items WHERE item_id = ?').get(item.item_id)) continue;
     await refreshInstitutionProducts(db, item);
     try {
       const token = accessTokenFor(item);
+      if (item.replaces_item_id) {
+        // Nothing of a replacement is read until its whole history is there,
+        // or its accounts would count next to the ones they replace.
+        const probe = await api.transactionsSync({ access_token: token, count: 1 });
+        const status = String(probe.data.transactions_update_status ?? '');
+        if (!historyReady(status, item.created_at)) {
+          setItemStatus(db, item.item_id, 'ok');
+          perItem[label] = { waiting_for_history: true, update_status: status || 'unknown' };
+          continue;
+        }
+        // Ready. Remove the old Item at Plaid before storing anything of the
+        // new one: if Plaid refuses, nothing here changes and the next run
+        // tries again, rather than both being counted in the meantime.
+        if (db.prepare('SELECT 1 FROM plaid_items WHERE item_id = ?').get(item.replaces_item_id)) {
+          await removeItem(db, item.replaces_item_id);
+        }
+      }
       const balances = await api.accountsBalanceGet({ access_token: token });
 
       for (const acct of balances.data.accounts) {
@@ -319,6 +350,18 @@ export async function syncPlaid(
       const tx = await syncItemTransactions(db, item, token, fx, profileId);
       txCount += tx.added + tx.modified;
 
+      let handover: HandoverResult | undefined;
+      if (item.replaces_item_id) {
+        // The old Item is gone at Plaid (above); move what the household added.
+        const oldId = item.replaces_item_id;
+        handover = handOver(db, oldId, item.item_id);
+        log.info(`plaid: ${label} took over from its earlier connection`, {
+          accounts: Object.keys(handover.accounts).length,
+          carried: handover.carried,
+          kept_older: handover.kept_older,
+        });
+      }
+
       let liabilities: number | undefined;
       if (config.plaid.products.includes('liabilities')) {
         liabilities = await syncLiabilities(db, token, label, profileId);
@@ -333,6 +376,7 @@ export async function syncPlaid(
       perItem[label] = {
         accounts: balances.data.accounts.length,
         ...tx,
+        ...(handover ? { handover } : {}),
         ...(liabilities === undefined ? {} : { liability_accounts: liabilities }),
       };
     } catch (e) {
@@ -522,12 +566,19 @@ export async function createLinkToken(
   db: DB,
   redirectUri?: string,
   profileId = DEFAULT_PROFILE_ID,
+  /**
+   * Days of transaction history to ask for (30 to 730). Omitted, Plaid's
+   * default of 90 applies. Fixed for the life of the Item once linked.
+   */
+  historyDays?: number | null,
 ): Promise<string> {
   const redirect = redirectUri ?? config.plaid.redirectUri;
   const res = await plaidClient(db, profileId).linkTokenCreate({
     user: { client_user_id: `household-${profileId}` },
     client_name: 'tally',
     products: plaidProducts(),
+    // A new Item only, never update mode: Plaid will not change it afterwards.
+    ...(historyDays ? { transactions: { days_requested: historyDays } } : {}),
     ...(plaidOptionalProducts().length ? { optional_products: plaidOptionalProducts() } : {}),
     // Statements rides in optional_products, which is best-effort and never
     // blocks a link. It cannot go in additional_consented_products — Plaid
@@ -576,7 +627,8 @@ export async function exchangePublicToken(
   db: DB,
   publicToken: string,
   profileId = DEFAULT_PROFILE_ID,
-): Promise<{ item_id: string; institution_name: string | null }> {
+  opts: { historyDays?: number | null; replaces?: string | null } = {},
+): Promise<{ item_id: string; institution_name: string | null; replacing: string | null; note?: string }> {
   const api = plaidClient(db, profileId);
   const ex = await api.itemPublicTokenExchange({ public_token: publicToken });
   const accessToken = ex.data.access_token;
@@ -598,6 +650,23 @@ export async function exchangePublicToken(
     log.warn(`plaid: could not resolve institution (${errMessage(e)})`);
   }
 
+  // Taking over from an existing connection only when it is plainly the same
+  // bank on the same profile. Anything else is saved as an ordinary new
+  // connection: handing a bank's history to a different bank would be worse
+  // than a second row to tidy up.
+  let replacing: string | null = null;
+  let note: string | undefined;
+  if (opts.replaces) {
+    const old = db.prepare('SELECT * FROM plaid_items WHERE item_id = ?').get(opts.replaces) as
+      | PlaidItemRow
+      | undefined;
+    if (!old) note = 'The connection it was meant to replace is gone, so it was added as a new one.';
+    else if (old.profile_id !== profileId) note = 'That connection belongs to another profile, so this was added as a new one.';
+    else if (!institutionId || old.institution_id !== institutionId) {
+      note = `This is not the same bank as ${old.institution_name ?? 'the one being replaced'}, so it was added as a new connection.`;
+    } else replacing = old.item_id;
+  }
+
   saveItem(
     db,
     {
@@ -605,10 +674,12 @@ export async function exchangePublicToken(
       access_token: accessToken,
       institution_id: institutionId,
       institution_name: institutionName,
+      history_days: opts.historyDays ?? null,
+      replaces_item_id: replacing,
     },
     profileId,
   );
-  return { item_id: itemId, institution_name: institutionName };
+  return { item_id: itemId, institution_name: institutionName, replacing, ...(note ? { note } : {}) };
 }
 
 /**
@@ -679,7 +750,8 @@ export async function syncNewItem(
  */
 export function unsyncedItems(db: DB): PlaidItemRow[] {
   return db
-    .prepare("SELECT * FROM plaid_items WHERE last_synced_at IS NULL AND status = 'ok'")
+    // A replacement waits for its full history before anything of it is read.
+    .prepare("SELECT * FROM plaid_items WHERE last_synced_at IS NULL AND status = 'ok' AND replaces_item_id IS NULL")
     .all() as PlaidItemRow[];
 }
 
@@ -738,6 +810,12 @@ export function plaidStatus(db: DB, profileId?: string): Array<Record<string, un
     status: i.status,
     error_code: i.error_code,
     last_synced_at: i.last_synced_at,
+    history_days: i.history_days ?? DEFAULT_HISTORY_DAYS,
+    replaces_item_id: i.replaces_item_id,
+    replaced_by:
+      (db.prepare('SELECT item_id FROM plaid_items WHERE replaces_item_id = ?').get(i.item_id) as
+        | { item_id: string }
+        | undefined)?.item_id ?? null,
     supports_statements: supportsStatements(i),
     accounts: (
       db.prepare('SELECT COUNT(*) AS n FROM accounts WHERE item_id = ?').get(i.item_id) as {

@@ -3,6 +3,36 @@
 Dated, append-only. Each entry says what was chosen, what it was chosen over,
 and why.
 
+## 2026-09-30 — Two years of history, on demand
+
+A user wanted transactions back to January; every bank had 90 days. Plaid's
+`days_requested` goes up to 730, but it is set when a bank is linked and
+"cannot be updated" afterwards. `PLAID_TRANSACTION_DAYS=730` had been in the
+README and `.env.example` all along and was never sent to Plaid, which is why.
+
+- **New links:** `PLAID_TRANSACTION_DAYS` is now sent, but unset means Plaid's
+  90 rather than the documented 730. Rule 3 asks for link-token changes to be
+  off by default; an install that had already set it (the example file does)
+  now gets what it asked for.
+- **Existing banks: "Get 2 years of history"** links the same bank again with
+  730 days and hands over, rather than asking the user to disconnect and
+  re-add. That manual route loses every tag and hand correction (new Item, new
+  transaction ids) and double counts the overlap, since a disconnect keeps the
+  old account's transactions.
+- **The new Item is not read at all until Plaid reports the history complete**
+  (`HISTORICAL_UPDATE_COMPLETE`, or three days of an unknown status). Reading
+  it earlier would show both connections' balances and transactions. The old
+  Item is removed at Plaid first, so a refusal changes nothing locally.
+- **Pairing by last four digits and type, or name when there is no mask, only
+  when unambiguous.** A wrong pair would move one card's history onto another;
+  an old account without a partner is left as a disconnect leaves it.
+- **Transactions are matched on date, amount and bank text**, then amount
+  within three days, each new row claimed once. Old rows the new history
+  covers are removed; rows older than it are moved to the new account as they
+  are, so no history is lost when a bank returns less than it did before.
+- **Guarded:** a different bank chosen in Link, another profile's connection,
+  or one already mid-handover is never treated as a replacement.
+
 ## 2026-09-29 — Tags, on top of categories
 
 Asked for by the same user: a vacation looks like ordinary spending (fuel,

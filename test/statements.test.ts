@@ -132,6 +132,13 @@ describe('link tokens stay in a shape Plaid accepts', () => {
     expect(fn).toContain('plaidOptionalProducts()');
   });
 
+  it('asks for more history only on a new link, and only when told to', () => {
+    // Plaid fixes the history when an Item is linked and will not change it
+    // afterwards, so update mode must never carry it.
+    expect(body('createUpdateLinkToken')).not.toContain('days_requested');
+    expect(body('createLinkToken')).toContain('...(historyDays ? { transactions: { days_requested: historyDays } } : {})');
+  });
+
   it('no link path mentions additional_consented_products at all', () => {
     expect(source).not.toContain('additional_consented_products:');
   });
