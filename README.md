@@ -385,9 +385,10 @@ Server-rendered, no framework, no webfonts, no inline styles under a strict CSP.
   same spending by parent, for questions about a whole area.
 - **Tags** — a label on top of a transaction's category, for a trip ("Italy
   2026") or business spending on a personal card. Untagged is the ordinary
-  case. On Transactions, set the dates and the card, then **Tag the
-  transactions shown** in one go (transfers and card payments are skipped while
-  they are hidden), or type tags on a single row. The **Tag** filter shows one
+  case. On Transactions, set the dates and the card: every row starts ticked,
+  so untick the ones the tag does not apply to (a header box clears or selects
+  them all, and the count says how many) and press **Tag selected**, or **Untag
+  selected** to take it off. Or type tags on a single row. The **Tag** filter shows one
   tag, or **Untagged only** for the ordinary month with trips and business set
   aside. Each tag links to its own report under **Reports → Tag**: spending by
   category, merchant and month, over the tag's own dates however many months it
@@ -504,7 +505,7 @@ Read [SECURITY.md](SECURITY.md) before deploying. The short version:
 |---|---|
 | `npm run demo` | Seed a fictional database to try it without credentials |
 | `npm run dev` | Run the server from TypeScript |
-| `npm run check` | Typecheck + 467 tests |
+| `npm run check` | Typecheck + 468 tests |
 | `npm run sync` | One-shot sync; exits non-zero if a source errored |
 | `npm run db:init` | Create the database, seeding `room.json` if present |
 | `npm run hash-password` | Print an `ADMIN_PASSWORD_HASH` |

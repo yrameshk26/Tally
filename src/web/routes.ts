@@ -163,7 +163,10 @@ function redirectUriFor(req: Request): string {
 
 export function createWebRouter(db: DB): express.Router {
   const router = express.Router();
-  router.use(express.urlencoded({ extended: false, limit: '64kb' }));
+  // A page of 1,000 ticked transactions is 1,000 form fields. The defaults (1,000
+  // fields, 64 KB) would drop the last ones without a word, tagging part of a
+  // selection and saying nothing, so they are raised to fit a full page.
+  router.use(express.urlencoded({ extended: false, limit: '256kb', parameterLimit: 3000 }));
   router.use(express.json({ limit: '64kb' }));
 
   // Failed sign-ins per 15 minutes, per address. Successes do not count, so a
@@ -1047,17 +1050,16 @@ export function createWebRouter(db: DB): express.Router {
     }
   });
 
-  // Tag (or untag) every transaction the posted view shows: set the dates and
-  // the card, then tag the trip in one go. The view is re-read from `back`,
-  // the same query string the page was drawn from.
+  // Tag (or untag) the ticked transactions: set the dates and the card, leave
+  // every row ticked, untick the ones that do not belong, and tag the rest.
   router.post('/transactions/tags', requireAuth, requireCsrf, (req: Ctx, res: Response) => {
     const body = (req.body ?? {}) as Record<string, unknown>;
     try {
-      const back = String(body['back'] ?? '/transactions');
-      const query = back.startsWith('/transactions?') ? Object.fromEntries(new URLSearchParams(back.slice(14))) : {};
       const tag = cleanTag(String(body['tag'] ?? ''));
       if (!tag) throw new Error('Type a tag first.');
-      const ids = matchTransactions(filtersFrom(query)).rows.map((t) => t.id);
+      const posted = body['transaction_id'];
+      const ids = (Array.isArray(posted) ? posted : posted ? [posted] : []).map(String);
+      if (ids.length === 0) throw new Error('Tick at least one transaction first.');
       if (body['action'] === 'remove') {
         const n = removeTag(db, ids, tag);
         res.redirect(303, backTo(body, `Removed “${tag}” from ${String(n)} transaction(s).`));

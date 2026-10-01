@@ -1479,14 +1479,14 @@ export function transactionsPage(opts: {
 
     ${
       opts.rows.length > 0
-        ? html`<form method="post" action="/transactions/tags" class="bulk-bar">
+        ? html`<form method="post" action="/transactions/tags" id="bulk-tags" class="bulk-bar">
             ${csrfField(opts.csrf)}
             <input type="hidden" name="back" value="${currentQuery(f)}">
-            <span class="muted">Tag the ${String(opts.rows.length)} transaction${opts.rows.length === 1 ? '' : 's'} shown</span>
+            <span class="muted" id="tag-count">${String(opts.rows.length)} selected</span>
             <input type="text" name="tag" list="tag-list" required maxlength="40" autocomplete="off"
               aria-label="Tag" placeholder="e.g. Italy 2026 or Business">
-            <button type="submit" name="action" value="add" class="secondary">Add tag</button>
-            <button type="submit" name="action" value="remove" class="secondary">Remove tag</button>
+            <button type="submit" name="action" value="add" class="secondary" data-needs-selection>Tag selected</button>
+            <button type="submit" name="action" value="remove" class="secondary" data-needs-selection>Untag selected</button>
           </form>`
         : raw('')
     }
@@ -1554,10 +1554,12 @@ export function transactionsPage(opts: {
         opts.rows.length === 0
           ? html`<p class="muted">Nothing matches these filters.</p>`
           : html`<div class="table-wrap"><table>
-              <thead><tr><th>Date</th><th>Merchant</th><th>Account</th><th class="num">Amount</th><th>Category and merchant</th></tr></thead>
+              <thead><tr><th class="check"><input type="checkbox" id="tag-all" checked aria-label="Select or clear every transaction shown"></th><th>Date</th><th>Merchant</th><th>Account</th><th class="num">Amount</th><th>Category and merchant</th></tr></thead>
               <tbody>${join(
                 opts.rows.map(
                   (t) => html`<tr>
+                    <td class="check"><input type="checkbox" name="transaction_id" value="${t.id}" form="bulk-tags" checked
+                      aria-label="Select ${t.merchant ?? t.name ?? t.id} on ${t.date}"></td>
                     <td class="muted nowrap">${t.date}${t.pending ? html`<div><span class="pill">pending</span></div>` : raw('')}</td>
                     <td class="cell-merchant">
                       <span class="clip" title="${t.merchant ?? t.name ?? ''}">${t.merchant ?? t.name ?? '—'}</span>
@@ -1578,7 +1580,22 @@ export function transactionsPage(opts: {
                   </tr>`,
                 ),
               )}</tbody>
-            </table></div>`
+            </table></div>
+            ${raw(
+              `<script nonce="${opts.nonce}">(()=>{` +
+                `const all=document.getElementById('tag-all'),c=document.getElementById('tag-count'),` +
+                `f=document.getElementById('bulk-tags');if(!all||!c||!f)return;` +
+                `const boxes=()=>[...document.querySelectorAll('input[name=transaction_id][form=bulk-tags]')];` +
+                `const sync=()=>{const b=boxes(),n=b.filter(x=>x.checked).length;` +
+                `c.textContent=n===b.length?'All '+n+' selected':n+' of '+b.length+' selected';` +
+                `for(const x of f.querySelectorAll('[data-needs-selection]'))x.toggleAttribute('disabled',n===0);` +
+                `all.checked=n>0&&n===b.length;all.indeterminate=n>0&&n<b.length};` +
+                `all.addEventListener('change',()=>{for(const x of boxes())x.checked=all.checked;sync()});` +
+                `for(const x of boxes())x.addEventListener('change',sync);` +
+                `sync()})();` +
+                `</scr` +
+                `ipt>`,
+            )}`
       }
     </section>
 

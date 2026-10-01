@@ -371,41 +371,83 @@ describe('transfers on the Transactions tab', () => {
     expect(inlineHandlers(page)).toEqual([]);
   });
 
-  it('tags exactly the transactions a filtered view shows, and untags them', async () => {
+  it('tags the ticked transactions only, so one can be left out, and untags them', async () => {
     seed();
     const { cookie, csrf } = await login();
-    const post = (path: string, fields: Record<string, string>): Promise<Response> =>
+    const post = (path: string, fields: Array<[string, string]>): Promise<Response> =>
       fetch(`${base}${path}`, {
         method: 'POST',
         headers: { cookie, 'content-type': 'application/x-www-form-urlencoded' },
-        body: new URLSearchParams({ _csrf: csrf, ...fields }),
+        body: new URLSearchParams([['_csrf', csrf], ...fields]),
         redirect: 'manual',
       });
-    // One card, one week: the purchase is shown, the card payment is hidden.
-    const back = '/transactions?start=2031-04-08&end=2031-04-14&account_id=plaid%3Atx-card';
-    const res = await post('/transactions/tags', { back, tag: ' Lisbon  2031 ', action: 'add' });
-    const tagged = getTransactions(getDb(), { tag: 'Lisbon 2031' }).map((t) => t.id);
-    expect(tagged).toContain('web-buy');
-    expect(tagged).not.toContain('web-pay-card');
-    expect(tagged).not.toContain('web-pay-chq');
-    expect(decodeURIComponent(res.headers.get('location') ?? '')).toContain(
-      `Tagged ${String(tagged.length)} transaction(s) “Lisbon 2031”`,
-    );
+    const where = (r: Response): string => decodeURIComponent(r.headers.get('location') ?? '');
+    const back = '/transactions?start=2031-04-08&end=2031-04-14';
 
-    const view = await (await fetch(`${base}/transactions?start=2031-04-01&end=2031-04-30&tag=Lisbon%202031`, { headers: { cookie } })).text();
-    expect(view).toContain('Showing only what is tagged');
+    // Every row arrives ticked, each with a label a screen reader can use.
+    const view = await (await fetch(`${base}${back}`, { headers: { cookie } })).text();
+    expect(view).toMatch(/name="transaction_id" value="web-buy" form="bulk-tags" checked/);
+    expect(view).toContain('id="tag-all"');
     expect(inlineHandlers(view)).toEqual([]);
+
+    // Tick two of three: the one left out is not tagged.
+    const res = await post('/transactions/tags', [
+      ['back', back],
+      ['tag', ' Lisbon  2031 '],
+      ['action', 'add'],
+      ['transaction_id', 'web-buy'],
+      ['transaction_id', 'web-pay-chq'],
+    ]);
+    expect(where(res)).toContain('Tagged 2 transaction(s) “Lisbon 2031”');
+    expect(getTransactions(getDb(), { tag: 'Lisbon 2031' }).map((t) => t.id).sort()).toEqual(['web-buy', 'web-pay-chq']);
+    expect(getTransactions(getDb(), { tag: 'Lisbon 2031' }).map((t) => t.id)).not.toContain('web-pay-card');
+
+    const filtered = await (await fetch(`${base}/transactions?start=2031-04-01&end=2031-04-30&tag=Lisbon%202031`, { headers: { cookie } })).text();
+    expect(filtered).toContain('Showing only what is tagged');
     const report = await (await fetch(`${base}/report?period=tag&tag=Lisbon%202031`, { headers: { cookie } })).text();
     expect(report).toContain('Tag summary: Lisbon 2031');
 
-    // One row's field replaces its tags; the form carries merchant and category too.
-    await post('/transactions/override', { transaction_id: 'web-buy', merchant: '', category: '', tags: 'Lisbon 2031, Business', back });
+    // One row's own field replaces its tags; the form carries merchant and category too.
+    await post('/transactions/override', [['transaction_id', 'web-buy'], ['merchant', ''], ['category', ''], ['tags', 'Lisbon 2031, Business'], ['back', back]]);
     expect(getTransactions(getDb(), { tag: 'business' }).map((t) => t.id)).toEqual(['web-buy']);
 
-    const off = await post('/transactions/tags', { back, tag: 'lisbon 2031', action: 'remove' });
-    expect(decodeURIComponent(off.headers.get('location') ?? '')).toContain(`Removed “lisbon 2031” from ${String(tagged.length)}`);
-    expect(getTransactions(getDb(), { tag: 'Lisbon 2031' })).toEqual([]);
-    expect(await post('/transactions/tags', { back, tag: '  ' }).then((r) => r.headers.get('location'))).toMatch(/err=/);
+    const off = await post('/transactions/tags', [['back', back], ['tag', 'lisbon 2031'], ['action', 'remove'], ['transaction_id', 'web-buy']]);
+    expect(where(off)).toContain('Removed “lisbon 2031” from 1');
+    expect(getTransactions(getDb(), { tag: 'Lisbon 2031' }).map((t) => t.id)).toEqual(['web-pay-chq']);
+
+    // Nothing ticked, or no tag, is an error rather than a silent no-op or "everything".
+    expect(where(await post('/transactions/tags', [['back', back], ['tag', 'Italy']]))).toMatch(/err=Tick at least one/);
+    expect(where(await post('/transactions/tags', [['back', back], ['tag', '  '], ['transaction_id', 'web-buy']]))).toMatch(/err=Type a tag/);
+  });
+
+  it('does not drop ticked rows from a full page of a thousand', async () => {
+    seed();
+    const db = getDb();
+    const rows = Array.from({ length: 1_000 }, (_, i) => ({
+      id: `plaid:bulk-${String(i).padStart(4, '0')}-${'x'.repeat(30)}`,
+      account_id: 'plaid:tx-card',
+      date: '2031-05-01',
+      name: `BULK ${String(i)}`,
+      merchant: `Bulk ${String(i)}`,
+      amount: 1,
+      currency: 'CAD',
+      amount_cad: 1,
+      category: 'FOOD_AND_DRINK',
+      category_detailed: null,
+      pending: false,
+    }));
+    upsertTransactions(db, rows);
+    const { cookie, csrf } = await login();
+    const form = new URLSearchParams([['_csrf', csrf], ['back', '/transactions'], ['tag', 'Everything'], ['action', 'add']]);
+    for (const r of rows) form.append('transaction_id', r.id);
+    const res = await fetch(`${base}/transactions/tags`, {
+      method: 'POST',
+      headers: { cookie, 'content-type': 'application/x-www-form-urlencoded' },
+      body: form,
+      redirect: 'manual',
+    });
+    expect(decodeURIComponent(res.headers.get('location') ?? '')).toContain('Tagged 1000 transaction(s)');
+    expect(getTransactions(db, { tag: 'Everything', start: '2031-05-01', limit: 2_000 })).toHaveLength(1_000);
   });
 
   it('refuses a bulk change with nothing selected', async () => {

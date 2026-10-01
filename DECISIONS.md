@@ -77,11 +77,14 @@ category cannot say which is which. A tag can, without disturbing the category.
   a fixed "vacation / business / personal" field: one tag per trip ("Italy
   2026") keeps trips apart, and untagged already means personal, so nothing
   has to be tagged to be counted.
-- **Tag what a filter shows**, rather than row by row: dates plus a card is how
-  a trip is found. The bulk POST re-reads the view from the same query string
-  the page was drawn from, so it lands on exactly what the person saw,
-  including the hidden-transfers rule. MCP's `tag_transactions` requires dates
-  for the same reason and skips transfers.
+- **Tag what a filter shows, minus what is unticked**, rather than row by row:
+  dates plus a card is how a trip is found, and a trip nearly always has one or
+  two charges that are not part of it. Every row starts ticked, so the common
+  case is one click to untick the exception, and the POST carries the ticked
+  ids themselves (first built as "re-read the view", which could not leave one
+  out). The form parser's field and size limits were raised to fit a full page
+  of 1,000, which it would otherwise truncate without saying. MCP's
+  `tag_transactions` requires dates for the same reason and skips transfers.
 - **A tag report is a report period**, not a new page: the same by-category,
   by-merchant and largest-expense sections, over the tag's first to last date,
   with the months shown when it crosses one. Net worth is left out; a tag is a
