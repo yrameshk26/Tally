@@ -480,6 +480,9 @@ button.danger-solid:hover{filter:brightness(1.08);box-shadow:0 4px 12px -4px col
 .modal-title{margin:0 0 .5rem;font-size:1.08rem;line-height:1.35}
 .modal-body{margin:0 0 1.25rem;color:var(--fg-muted);line-height:1.55}
 .modal-actions{display:flex;justify-content:flex-end;gap:.6rem;flex-wrap:wrap}
+.inline-label{display:inline-flex;align-items:center;gap:.45rem;margin:0;font-size:var(--step--1);color:var(--fg-muted)}
+.inline-label select{width:auto;min-width:11rem}
+form[action="/categories"] input[name=name]{width:auto;flex:1 1 12rem}
 .handover-note{display:block;max-width:15rem;font-size:var(--step--1);line-height:1.4;white-space:normal}
 @media print{.modal{display:none}}
 button:disabled{opacity:.5;cursor:not-allowed;transform:none;filter:none}

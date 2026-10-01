@@ -3,6 +3,18 @@
 Dated, append-only. Each entry says what was chosen, what it was chosen over,
 and why.
 
+## 2026-10-01 — Subcategories of your own
+
+A user wanted "Rent" under Income for rent received. A subcategory is stored as
+its parent's code with the name on the end (`INCOME_RENT`), the same shape as
+Plaid's detailed codes, so family matching already files it under Income in
+pickers, filters and group totals; the form gained an "Under" picker rather
+than a new table. A name that would spell another family (Home + "Improvement
+shed" is Plaid's HOME_IMPROVEMENT) is refused instead of filed somewhere
+unexpected. Income or spending is still decided by the amount's direction, so
+a deposit filed as Income › Rent counts as income even if the bank called it a
+transfer.
+
 ## 2026-09-30 — Handover pairing: same last four, told apart by name
 
 The first live handovers left two American Express business cards unpaired:

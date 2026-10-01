@@ -12,7 +12,7 @@ import { round2, todayISO } from './lib/money.ts';
 import { computeTotals, type NetWorthTotals } from './snapshots.ts';
 import { moveAccount } from './profiles.ts';
 import { corrector, effectiveCurrency } from './overrides.ts';
-import { categoryGroup, effectiveCategory, familyOf } from './lib/category.ts';
+import { categoryGroup, effectiveCategory, familyLabel, familyOf } from './lib/category.ts';
 import { categoryDetail } from './settings.ts';
 import { GROUPED_CATEGORIES, toGrouped } from './lib/taxonomy.ts';
 import { cleanTag, tagsByTransaction } from './tags.ts';
@@ -1040,6 +1040,20 @@ export function knownCategories(db: DB): string[] {
   return [
     ...new Set([...bank, ...rows.map((r) => read(r.c)), ...offered, ...NOT_SPENDING_CATEGORIES]),
   ].sort();
+}
+
+/**
+ * Categories a subcategory can be added under: every family already in a
+ * picker, plus Income, which banks rarely split but households do (rent
+ * received, a side business).
+ */
+export function categoryParents(db: DB): string[] {
+  const families = new Set<string>(['INCOME']);
+  for (const c of knownCategories(db)) {
+    const f = familyOf(c);
+    if (f) families.add(f);
+  }
+  return [...families].sort((a, b) => familyLabel(a).localeCompare(familyLabel(b)));
 }
 
 export function setAccountProfile(db: DB, accountId: string, profileId: string): boolean {

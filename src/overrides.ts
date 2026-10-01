@@ -17,7 +17,7 @@ import type { DB } from './db.ts';
 import { config } from './config.ts';
 import { loadRates, tryConvert } from './fx.ts';
 import { nowISO, round2 } from './lib/money.ts';
-import { effectiveCategory, type CategoryDetail } from './lib/category.ts';
+import { categoryLabel, effectiveCategory, familyLabel, familyOf, type CategoryDetail } from './lib/category.ts';
 import { toGrouped } from './lib/taxonomy.ts';
 import { categoryDetail } from './settings.ts';
 
@@ -147,9 +147,24 @@ export function normalizeCategory(name: string): string {
     .slice(0, 60);
 }
 
-export function addCategory(db: DB, name: string): string {
-  const key = normalizeCategory(name);
+/**
+ * Add a category of your own, optionally under a parent ("Rent" under Income
+ * is INCOME_RENT). A subcategory is just its parent's code with more words on
+ * the end, the same shape as Plaid's, so filters, group totals and pickers
+ * treat it like any other member of that family.
+ */
+export function addCategory(db: DB, name: string, parent?: string | null): string {
+  let key = normalizeCategory(name);
   if (!key) throw new Error('a category needs a name');
+  const under = parent ? normalizeCategory(parent) : '';
+  if (under) {
+    if (familyOf(under) !== under) throw new Error(`${categoryLabel(under)} is not a category that can hold subcategories`);
+    if (key !== under && !key.startsWith(`${under}_`)) key = `${under}_${key}`.slice(0, 60);
+    // HOME + IMPROVEMENT_X spells Plaid's HOME_IMPROVEMENT family, not Home.
+    if (key === under || familyOf(key) !== under) {
+      throw new Error(`That name would file under ${familyLabel(familyOf(key) ?? key)}, not ${familyLabel(under)}. Try another name.`);
+    }
+  }
   db.prepare('INSERT INTO categories (name, created_at) VALUES (?, ?) ON CONFLICT(name) DO NOTHING').run(
     key,
     nowISO(),

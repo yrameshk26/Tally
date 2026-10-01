@@ -1282,6 +1282,12 @@ export function handoverProgress(status: unknown, checkedAt: unknown): string {
   }
 }
 
+/** "Income › Rent" for a subcategory, "Household" for a category of its own. */
+export function categoryPath(code: string): string {
+  const family = familyOf(code);
+  return family && family !== code ? `${familyLabel(family)} › ${categoryLabel(code)}` : categoryLabel(code);
+}
+
 /** Days from start to end, both counted. */
 function daysBetween(start: string, end: string): number {
   return Math.round((Date.parse(end) - Date.parse(start)) / 86_400_000) + 1;
@@ -1660,6 +1666,8 @@ export function merchantsPage(opts: {
   cards: AccountView[];
   categories: string[];
   customCategories: string[];
+  /** What a new category can be added under. */
+  categoryParents?: string[];
   profiles: Profile[];
   /** Transfers and card payments left out of the directory and the totals. */
   hiddenTransfers?: number;
@@ -1857,7 +1865,13 @@ export function merchantsPage(opts: {
       <form method="post" action="/categories" class="row mb">
         ${csrfField(opts.csrf)}
         <input type="hidden" name="back" value="${back}">
-        <input type="text" name="name" placeholder="e.g. Childcare" aria-label="New category" required>
+        <input type="text" name="name" placeholder="e.g. Rent" aria-label="New category" required>
+        <label class="inline-label">Under
+          <select name="parent" aria-label="Parent category">
+            <option value="">Nothing: a category of its own</option>
+            ${join((opts.categoryParents ?? []).map((p) => html`<option value="${p}">${familyLabel(p)}</option>`))}
+          </select>
+        </label>
         <button type="submit">Add category</button>
       </form>
       ${
@@ -1869,7 +1883,7 @@ export function merchantsPage(opts: {
                 opts.customCategories.map((name) => {
                   const used = opts.categoryGroups.find((c) => c.category === name);
                   return html`<tr>
-                    <td>${name}</td>
+                    <td>${categoryPath(name)}</td>
                     <td class="num">${used ? String(used.count) : html`<span class="muted">0</span>`}</td>
                     <td class="num">
                       <form method="post" action="/categories/delete" class="inline-form"

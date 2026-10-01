@@ -822,12 +822,17 @@ export function toolDefs(db: DB): ToolDef[] {
     title: 'Add a category',
     description:
       'Create a category of your own, on top of whatever taxonomy the institution sends. ' +
-      'Normalised to UPPER_SNAKE_CASE to match the built-in ones.',
-    inputSchema: { name: z.string().min(1).max(60) },
+      'Normalised to UPPER_SNAKE_CASE to match the built-in ones. Pass `parent` to make it a ' +
+      'subcategory: name "Rent" with parent INCOME is INCOME_RENT, which files, filters and ' +
+      'totals under Income.',
+    inputSchema: {
+      name: z.string().min(1).max(60),
+      parent: z.string().max(60).optional().describe('a parent category code, e.g. INCOME, FOOD, HOME'),
+    },
     annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
-    handler: ({ name }) => {
+    handler: ({ name, parent }) => {
       try {
-        return ok({ created: true, category: addCategory(db, name) });
+        return ok({ created: true, category: addCategory(db, name, parent ?? null) });
       } catch (e) {
         return fail(e);
       }

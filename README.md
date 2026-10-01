@@ -128,7 +128,7 @@ question:
 | `set_transaction_category` | Correct one transaction's merchant or category |
 | `set_merchant_rule`, `list_merchant_rules`, `delete_merchant_rule` | Rewrite every match, past and future |
 | `set_merchant_category` | File one merchant under a category, creating it if needed |
-| `list_categories`, `add_category`, `delete_category` | Categories beyond the bank's taxonomy |
+| `list_categories`, `add_category`, `delete_category` | Categories beyond the bank's taxonomy; `add_category` takes a `parent` for a subcategory (Rent under Income) |
 | `list_tags` | Tags in use, with count, first and last date, and spending |
 | `tag_transactions` | Add or remove a tag by transaction id, or over a date range narrowed to an account, profile or search (a trip on the travel card) |
 | `rename_tag`, `delete_tag` | Rename (or merge) a tag, or take it off everything |
@@ -397,7 +397,8 @@ Server-rendered, no framework, no webfonts, no inline styles under a strict CSP.
   filed under, which cards paid it, and when; opens on this month to date. Set a
   category per merchant from a picker, or tick several and set it for all of
   them at once; filter by category or to uncategorised only; add categories of
-  your own. Plaid's combined "Rent and utilities" is split into **Rent** and
+  your own, on their own or under a parent ("Rent" under Income, shown as
+  Income › Rent), which then files, filters and totals with that parent. Plaid's combined "Rent and utilities" is split into **Rent** and
   **Utilities** using the detailed category it sends, when it sends one. Above it,
   expenses by category as a ranked bar chart plus a totals table with each
   category's share. Transfers and card payments are left out of the directory
@@ -503,7 +504,7 @@ Read [SECURITY.md](SECURITY.md) before deploying. The short version:
 |---|---|
 | `npm run demo` | Seed a fictional database to try it without credentials |
 | `npm run dev` | Run the server from TypeScript |
-| `npm run check` | Typecheck + 464 tests |
+| `npm run check` | Typecheck + 467 tests |
 | `npm run sync` | One-shot sync; exits non-zero if a source errored |
 | `npm run db:init` | Create the database, seeding `room.json` if present |
 | `npm run hash-password` | Print an `ADMIN_PASSWORD_HASH` |

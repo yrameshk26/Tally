@@ -7,10 +7,17 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import { initDb, openDb, type DB } from '../src/db.ts';
 import { categoryLabel, effectiveCategory, familyLabel, familyOf, refineCategory } from '../src/lib/category.ts';
 import { FROM_PLAID, GROUPED_CATEGORIES, GROUPED_PARENT_OF, toGrouped } from '../src/lib/taxonomy.ts';
-import { getCashflow, getTransactions, isTransferLike, knownCategories, matchesCategory } from '../src/queries.ts';
-import { categoryOptions } from '../src/web/pages.ts';
+import {
+  categoryParents,
+  getCashflow,
+  getTransactions,
+  isTransferLike,
+  knownCategories,
+  matchesCategory,
+} from '../src/queries.ts';
+import { categoryOptions, categoryPath } from '../src/web/pages.ts';
 import { createProfile } from '../src/profiles.ts';
-import { addMerchantRule } from '../src/overrides.ts';
+import { addCategory, addMerchantRule, setTransactionOverride } from '../src/overrides.ts';
 import { upsertAccount, upsertTransactions } from '../src/store.ts';
 import { categoryDetail, setSetting } from '../src/settings.ts';
 import type { RegisteredType } from '../src/lib/registered.ts';
@@ -365,5 +372,36 @@ describe('the grouped list itself', () => {
       'TRAVEL_RENTAL_CARS',
     ];
     for (const code of seen) expect(GROUPED_CATEGORIES, code).toContain(toGrouped(code));
+  });
+});
+
+describe('a category of your own, under a parent', () => {
+  it('is the parent code with the name on the end, filed under that parent', () => {
+    expect(addCategory(db, 'Rent', 'INCOME')).toBe('INCOME_RENT');
+    expect(familyOf('INCOME_RENT')).toBe('INCOME');
+    expect(categoryPath('INCOME_RENT')).toBe('Income › Rent');
+    // Under a grouped parent too, and without doubling a prefix already typed.
+    expect(addCategory(db, 'Food tips', 'FOOD')).toBe('FOOD_TIPS');
+    expect(addCategory(db, 'Household')).toBe('HOUSEHOLD');
+    expect(categoryPath('HOUSEHOLD')).toBe('Household');
+  });
+
+  it('refuses a name that would land in another family, or a parent that cannot hold one', () => {
+    // HOME + IMPROVEMENT spells Plaid's HOME_IMPROVEMENT, not Home.
+    expect(() => addCategory(db, 'Improvement shed', 'HOME')).toThrow(/would file under Home improvement, not Home/);
+    expect(() => addCategory(db, 'Rent', 'HOUSEHOLD')).toThrow(/is not a category that can hold subcategories/);
+  });
+
+  it('is offered under its parent in every picker, and counted as income when money comes in', () => {
+    addCategory(db, 'Rent', 'INCOME');
+    expect(categoryParents(db)).toContain('INCOME');
+    const picker = categoryOptions(knownCategories(db), null).value;
+    expect(picker).toMatch(/<optgroup label="Income">.*<option value="INCOME_RENT">Rent<\/option>/s);
+    upsertTransactions(db, [row('t', 'Tenant', 'TRANSFER_IN', 'TRANSFER_IN_DEPOSIT', -1_500)]);
+    setTransactionOverride(db, 't', { category: 'INCOME_RENT' });
+    const c = getCashflow(db, { start: '2026-08-01', end: '2026-08-31' });
+    // A deposit the bank called a transfer, filed as rent received, is income now.
+    expect(c.income_cad).toBe(1_500);
+    expect(getTransactions(db, { category: 'INCOME' }).map((t) => t.id)).toEqual(['t']);
   });
 });

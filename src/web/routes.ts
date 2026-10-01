@@ -32,6 +32,7 @@ import {
   prettyCategory,
   UNCATEGORISE,
   UNTAGGED,
+  categoryPath,
   reportPage,
   chatPage,
   type MerchantFilters,
@@ -97,6 +98,7 @@ import {
   groupByMerchant,
   isTransferLike,
   knownCategories,
+  categoryParents,
   matchesCategory,
   ROLLUP_ROW_LIMIT,
   splitTransfers,
@@ -1180,6 +1182,7 @@ export function createWebRouter(db: DB): express.Router {
         cards: listAccounts(db, {}),
         categories: knownCategories(db),
         customCategories: customCategories(db),
+        categoryParents: categoryParents(db),
         profiles: listProfiles(db),
         flash: raw(flash(req, 'ok').value + flash(req, 'err').value),
       }),
@@ -1236,8 +1239,8 @@ export function createWebRouter(db: DB): express.Router {
   router.post('/categories', requireAuth, requireCsrf, (req: Ctx, res: Response) => {
     const body = (req.body ?? {}) as Record<string, unknown>;
     try {
-      const name = addCategory(db, String(body['name'] ?? ''));
-      res.redirect(303, backToMerchants(body, `Category ${name} added.`));
+      const name = addCategory(db, String(body['name'] ?? ''), String(body['parent'] ?? '') || null);
+      res.redirect(303, backToMerchants(body, `Category ${categoryPath(name)} added.`));
     } catch (e) {
       res.redirect(303, backToMerchants(body, errMessage(e), 'err'));
     }
