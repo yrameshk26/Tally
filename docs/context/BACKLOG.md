@@ -16,6 +16,18 @@ credential-dependent items there).
 
 ## 2. Open work and ideas (none promised)
 
+- **Linked mortgage: count the payment, or treat it as debt paydown?** A user
+  (2026-10-03) suggested two setups: connect the mortgage account, where the
+  paying account's transaction stays hidden (a transfer to a liability the
+  household owns, so net worth already moves), or, if not connecting it, count the
+  payment as an expense. Today the payment is counted once as Home › Mortgage in
+  both cases (the loan account's own side is excluded). The user's version is
+  defensible: when the loan is linked, principal is a liability paydown and only
+  interest is a true expense. Options: (a) leave as is; (b) when a loan account is
+  linked on the same profile, hide the payment instead (a setting or automatic);
+  (c) split interest and principal when the loan account reports them. Today a
+  rule or override filing the lender as a transfer gives the user's version. Not
+  decided; the owner said they are thinking about it.
 - **Interest versus principal on a mortgage.** A mortgage payment counts in full
   as spending (Home › Mortgage); Plaid does not split it. If a linked loan account
   reports interest, a future split could count only interest (and escrow) as an
