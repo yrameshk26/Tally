@@ -161,11 +161,24 @@ history is public too.
      hard rule here
    - a new `src/` module → the Layout tree here
    - a changed test count → the Development section
+   - any change at all → rule 20 (the agent context)
    The test is whether someone reading only these two files would be surprised
    by the code. If yes, the docs are not done.
 19. **The Link helper never deploys.** `src/link-server.ts` runs on the
    developer's machine only. Port 8788 must not be exposed and the file is
    deleted from the Docker image.
+20. **The agent context in `docs/context/` is kept current, in the same commit.**
+   It is the project's memory: another agent must be able to pick the work up
+   from it alone. Every commit that changes behaviour, structure, configuration,
+   a decision, or what is open updates the matching file (the table in
+   `docs/context/README.md` says which) and appends a dated entry to
+   `docs/context/HISTORY.md` saying what was done, why, and how it was
+   verified. `test/context-docs.test.ts` fails when a source file, table, MCP
+   tool, environment variable or setting is missing from `PROJECT.md`; it cannot
+   judge prose, so the rest is on you. Those files are in a **public**
+   repository: never write a real balance, account number, token, session link,
+   merchant or institution from the owner's accounts, or the owner's live domain
+   or any personal domain into them (the same test scans every Markdown file).
 
 ## Layout
 
@@ -223,6 +236,9 @@ src/
                   into it)
 scripts/          db-init, sync, backup, demo (fictional data, no network)
 test/             vitest — pure logic, fixtures, and the HTTP endpoint
+docs/context/     the agent context: PROJECT (architecture, data model, tools,
+                  routes, config), FEATURES, HISTORY (append-only), OPERATIONS,
+                  OWNER-AND-COMMUNITY, BACKLOG. Rule 20. AGENTS.md points here
 .github/          CI, dependabot, issue templates, FUNDING.yml
 ```
 

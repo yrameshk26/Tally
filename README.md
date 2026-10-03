@@ -505,7 +505,7 @@ Read [SECURITY.md](SECURITY.md) before deploying. The short version:
 |---|---|
 | `npm run demo` | Seed a fictional database to try it without credentials |
 | `npm run dev` | Run the server from TypeScript |
-| `npm run check` | Typecheck + 468 tests |
+| `npm run check` | Typecheck + 477 tests |
 | `npm run sync` | One-shot sync; exits non-zero if a source errored |
 | `npm run db:init` | Create the database, seeding `room.json` if present |
 | `npm run hash-password` | Print an `ADMIN_PASSWORD_HASH` |
@@ -536,6 +536,16 @@ joins the first) and naming which profile's source failed, both session clocks (
 extends the other), the guarantee that statement
 PDFs are never persisted (asserted against the source), and the HTTP endpoint
 end to end (auth, 405 on GET, rate limiting, `tools/list`, a tool call).
+The agent context in `docs/context/` is tested too: a new source file, table,
+MCP tool, environment variable or setting that is not documented fails the suite,
+as does a personal identifier in any Markdown file.
+
+## Working on it with an AI agent
+
+[`AGENTS.md`](AGENTS.md) and [`docs/context/`](docs/context/README.md) hold the
+whole project context (architecture, data model, every feature, the history, how
+to run and verify it, and what is still open) so a new agent or contributor can
+pick the work up cold. They are kept current with every change.
 
 ## Contributing
 

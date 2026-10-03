@@ -29,7 +29,7 @@ adding it again by hand.
 
 ## 2026-09-30 — The app's own dialogs, never the browser's
 
-`window.confirm` looked like another site had interrupted ("tally.talnt.fit
+`window.confirm` looked like another site had interrupted ("<your host>
 says"), ignored the theme, and could not show a title or a red button. One
 `<dialog>` lives in the page shell as `tallyConfirm()`, and every
 `form[data-confirm]` goes through it. Its text is set with textContent (a bank
