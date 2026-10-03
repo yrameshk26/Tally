@@ -254,7 +254,8 @@ export function toolDefs(db: DB): ToolDef[] {
     description:
       'Income vs spend for a period, by month, category, merchant and owner. Transfers between ' +
       'the household’s own accounts and card/loan payments are excluded by default so ' +
-      'spending is not double counted. by_category is the finest level the install uses ' +
+      'spending is not double counted. A mortgage payment is the exception: it counts as ' +
+      'spending (HOME_MORTGAGE) when it leaves a bank account. by_category is the finest level the install uses ' +
       '(by default grouped: FOOD_GROCERIES, FAMILY_CARE_CHILDCARE, BILLS_AND_UTILITIES_' +
       'PHONE_INTERNET); by_category_group totals the same spending by parent (FOOD, ' +
       'FAMILY_CARE), for questions about a whole area. Income, transfers and payments keep ' +
@@ -538,7 +539,8 @@ export function toolDefs(db: DB): ToolDef[] {
       'goes, and to spot one merchant recorded under two spellings — those show up as two ' +
       'groups with similar names, and set_merchant_rule merges them. Transfers between the ' +
       'household’s own accounts and card/loan payments are left out by default, so paying a ' +
-      'card is not counted on top of its purchases; the response says how many were left out.',
+      'card is not counted on top of its purchases (a mortgage payment is counted, as ' +
+      'HOME_MORTGAGE); the response says how many were left out.',
     inputSchema: {
       start: DATE.optional(),
       end: DATE.optional(),

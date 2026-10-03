@@ -7,29 +7,19 @@ credential-dependent items there).
 
 ## 1. Decisions waiting for the owner
 
-1. **Should a mortgage payment count as spending by default?** Today it does not:
-   Plaid files it as `LOAN_PAYMENTS_MORTGAGE_PAYMENT`, which is in the excluded set
-   in every category mode, so it is hidden from spending and income (it shows on the
-   Transactions tab when transfers are shown). A user asked whether it counts as an
-   expense or is hidden because both sides cancel. Honest answer: it is hidden by
-   design for card payments (the purchases are counted one by one) but a mortgage
-   has no purchases to count, so excluding it **understates** spending; both sides
-   do not cancel unless the mortgage account is also linked. Workaround that works
-   today and is verified: `add_category` "Mortgage" under Home gives `HOME_MORTGAGE`;
-   file the lender under it and it counts everywhere at once.
-   Options: (a) leave as is and document; (b) add "Home › Mortgage" to the grouped
-   list as a hand-pick entry; (c) a setting to count mortgage payments as spending,
-   which needs thought about a linked mortgage account (its credit side must stay
-   excluded) and about interest versus principal. Recommendation: (b) now, (c) if
-   more people ask.
-2. **Reports screen.** The owner said the Reports screen will be revisited after
+1. **Reports screen.** The owner said the Reports screen will be revisited after
    more use. Wait for their notes before changing it.
-3. **The leaked domain in git history.** Commit `7c35752` added the live domain to
+2. **The leaked domain in git history.** Commit `7c35752` added the live domain to
    `DECISIONS.md` (removed from the current tree on 2026-10-02). Removing it from
    history needs a force-push of a public repository, which the agent will not do
    without the owner's explicit say. Low impact if the domain is already public.
 
 ## 2. Open work and ideas (none promised)
+
+- **Interest versus principal on a mortgage.** A mortgage payment counts in full
+  as spending (Home › Mortgage); Plaid does not split it. If a linked loan account
+  reports interest, a future split could count only interest (and escrow) as an
+  expense, which some users prefer. Not requested.
 
 - **Costco gas versus the warehouse.** Suggested to a user: a `contains` rule on
   the gas station's bank text set to Fuel. Unverified in practice: rules apply in

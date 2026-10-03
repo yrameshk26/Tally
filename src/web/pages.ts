@@ -2375,7 +2375,7 @@ export function reportPage(opts: {
       ${
         tagged && r.excluded.count === 0
           ? raw('')
-          : html`Transfers between your own accounts and card or loan payments are not income or spending, so
+          : html`Transfers between your own accounts and card or loan payments are not income or spending (except a mortgage payment, which is counted), so
       ${String(r.excluded.count)} of them are left out (${money(r.excluded.out_cad)} out,
       ${money(r.excluded.in_cad)} in)${
         r.excluded.pending ? `, as are ${String(r.excluded.pending)} still pending` : ''

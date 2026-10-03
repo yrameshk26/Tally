@@ -99,7 +99,14 @@ history is public too.
    `corrector` and never written back: Plaid's detailed or broad code before
    rules and overrides, then, in grouped mode, `toGrouped` after them. The
    grouped list (`src/lib/taxonomy.ts`) never maps an income, transfer or
-   payment code: a mortgage payment filed under Home would become spending.
+   payment code. The one deliberate exception is a mortgage payment:
+   `countsAsMortgageSpend` (`src/lib/category.ts`) reads Plaid's
+   `LOAN_PAYMENTS_MORTGAGE_PAYMENT` as `HOME_MORTGAGE`, which is spending, in
+   every mode and before rules and overrides, when money leaves an account that
+   is not the mortgage account itself (that account's own side of the payment,
+   and any charge on it, stays excluded, so it is counted once). A card has
+   purchases to count; a mortgage has nothing else, so excluding it understated
+   spending. A rule or override can still file it as a transfer.
    Tags (`src/tags.ts`) narrow a view and never decide what is spending: a
    tagged or untagged cashflow runs the same exclusion, and bulk tagging a
    range skips transfers and card payments. A tag or override on a pending

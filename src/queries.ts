@@ -12,7 +12,7 @@ import { round2, todayISO } from './lib/money.ts';
 import { computeTotals, type NetWorthTotals } from './snapshots.ts';
 import { moveAccount } from './profiles.ts';
 import { corrector, effectiveCurrency } from './overrides.ts';
-import { categoryGroup, effectiveCategory, familyLabel, familyOf } from './lib/category.ts';
+import { categoryGroup, countsAsMortgageSpend, effectiveCategory, familyLabel, familyOf } from './lib/category.ts';
 import { categoryDetail } from './settings.ts';
 import { GROUPED_CATEGORIES, toGrouped } from './lib/taxonomy.ts';
 import { cleanTag, tagsByTransaction } from './tags.ts';
@@ -346,7 +346,7 @@ export function getTransactions(
 
   const rows = db
     .prepare(
-      `SELECT t.*, a.name AS account_name, a.profile_id AS profile
+      `SELECT t.*, a.name AS account_name, a.profile_id AS profile, a.account_category AS acct_category
        FROM transactions t
        LEFT JOIN accounts a ON a.id = t.account_id
        ${where.length ? `WHERE ${where.join(' AND ')}` : ''}
@@ -371,6 +371,11 @@ export function getTransactions(
       currency: String(r['currency']),
       category: (r['category'] as string) ?? null,
       category_detailed: (r['category_detailed'] as string) ?? null,
+      mortgage_spend: countsAsMortgageSpend(
+        r['category_detailed'] as string | null,
+        Number(r['amount_cad']) > 0,
+        r['acct_category'] as string | null,
+      ),
       pending: Boolean(r['pending']),
       tags: tags.get(String(r['id'])) ?? [],
     }),
@@ -613,7 +618,11 @@ export function getHoldingsByAccount(
 
 /** Categories that move money between the household's own accounts. */
 export const TRANSFER_CATEGORIES = ['TRANSFER_IN', 'TRANSFER_OUT'];
-/** Card and loan payments — excluded by default so card spend is not double counted. */
+/**
+ * Card and loan payments: excluded by default so card spend is not double
+ * counted. A mortgage payment leaving a bank account is read as HOME_MORTGAGE
+ * before this is applied (lib/category.ts, countsAsMortgageSpend).
+ */
 export const PAYMENT_CATEGORIES = ['LOAN_PAYMENTS'];
 /**
  * Everything that is neither income nor spending: money moving between the
@@ -701,7 +710,7 @@ export function getCashflow(
   const raw = db
     .prepare(
       `SELECT t.id, t.date, t.amount_cad, t.category, t.category_detailed, t.merchant, t.name,
-              a.profile_id AS profile
+              a.profile_id AS profile, a.account_category AS acct_category
        FROM transactions t
        LEFT JOIN accounts a ON a.id = t.account_id
        WHERE ${where.join(' AND ')}`,
@@ -715,12 +724,17 @@ export function getCashflow(
     merchant: string | null;
     name: string | null;
     profile: string | null;
+    acct_category: string | null;
   }>;
 
   // Corrections apply here too: a merchant rule that only fixed the transaction
   // list while cashflow kept the bank's spelling would be worse than no rule.
   const correct = corrector(db);
-  const rows = raw.map((r) => correct(r)).filter((r) => !inCategories(r.category, excluded));
+  const rows = raw
+    .map((r) =>
+      correct({ ...r, mortgage_spend: countsAsMortgageSpend(r.category_detailed, r.amount_cad > 0, r.acct_category) }),
+    )
+    .filter((r) => !inCategories(r.category, excluded));
 
   const months = new Map<string, { income: number; spend: number }>();
   const categories = new Map<string, number>();

@@ -377,7 +377,8 @@ Server-rendered, no framework, no webfonts, no inline styles under a strict CSP.
   detailed category decides where a row lands; subcategories Plaid cannot tell
   apart (which kind of insurance, pet grooming, condo fees) are in the picker to
   choose by hand. Income, transfers and loan or card payments keep Plaid's
-  names and stay out of spending. Settings → Appearance → Categories switches to
+  names and stay out of spending; the one exception is a **mortgage payment**,
+  which counts as spending (Home › Mortgage) when it leaves a bank account. Settings → Appearance → Categories switches to
   Plaid detailed (Groceries, Coffee, Fuel) or Plaid broad (Food and drink), or
   set `CATEGORY_DETAIL=detailed|broad`. It is chosen on read, so switching
   rewrites nothing, your own corrections win in every mode, and the totals are
@@ -505,7 +506,7 @@ Read [SECURITY.md](SECURITY.md) before deploying. The short version:
 |---|---|
 | `npm run demo` | Seed a fictional database to try it without credentials |
 | `npm run dev` | Run the server from TypeScript |
-| `npm run check` | Typecheck + 477 tests |
+| `npm run check` | Typecheck + 482 tests |
 | `npm run sync` | One-shot sync; exits non-zero if a source errored |
 | `npm run db:init` | Create the database, seeding `room.json` if present |
 | `npm run hash-password` | Print an `ADMIN_PASSWORD_HASH` |

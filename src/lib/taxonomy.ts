@@ -184,6 +184,9 @@ const TAXONOMY: Parent[] = [
       ['HOME_APPLIANCES', 'Appliances', []],
       ['HOME_CONDO_FEES', 'Condo fees', []],
       ['HOME_FURNISHINGS', 'Furniture, decor & supplies', ['HOME_IMPROVEMENT_FURNITURE']],
+      // Produced by the corrector from Plaid's mortgage payment (lib/category.ts),
+      // not mapped from a code here: see countsAsMortgageSpend.
+      ['HOME_MORTGAGE', 'Mortgage', []],
       [
         'HOME_MAINTENANCE',
         'Home improvement & maintenance',

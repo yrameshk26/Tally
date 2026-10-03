@@ -167,9 +167,16 @@ category is in a transfer or loan-payment family (`TRANSFER_IN`, `TRANSFER_OUT`,
 `LOAN_PAYMENTS`, including detailed codes under them) is neither income nor
 spending. Everything else is income if money came in and spending if it went out.
 Totals, the report, Merchants, `get_spend_by_merchant` and tags all share this.
-So a **mortgage payment is hidden by default** (Plaid files it as
-`LOAN_PAYMENTS_MORTGAGE_PAYMENT`); filing it under a category of your own
-(`HOME_MORTGAGE`, made with `add_category`, parent `HOME`) counts it as spending.
+**The one exception is a mortgage payment.** Plaid files it as
+`LOAN_PAYMENTS_MORTGAGE_PAYMENT`, but a mortgage has no purchases to count
+instead, so leaving it out understated spending. `countsAsMortgageSpend`
+(`src/lib/category.ts`) reads it as `HOME_MORTGAGE` (Home › Mortgage), which is
+spending, in every mode, when money leaves an account that is not the mortgage
+account itself; the callers (`getTransactions`, `getCashflow`) set a
+`mortgage_spend` input on the `corrector`, which applies it before rules and
+overrides. The mortgage account's own side of the payment (a credit) and charges
+on it stay excluded, so the payment is counted once from the account it left.
+A rule or override can still file it as a transfer.
 
 **Signs and money.** Stored positive = out; read negative = out. Liabilities are
 stored negative in `accounts.balance`. Every conversion goes through `src/fx.ts`;

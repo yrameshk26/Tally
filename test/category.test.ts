@@ -270,13 +270,14 @@ describe('grouped categories', () => {
     expect(familyLabel('BILLS_AND_UTILITIES')).toBe('Bills & utilities');
   });
 
-  it('leaves income, transfers and payments in Plaid’s terms', () => {
+  it('leaves income, transfers and card payments in Plaid’s terms, and reads a mortgage as Home', () => {
     seed();
     expect(cat('w')).toBe('INCOME_SALARY');
     expect(cat('p')).toBe('LOAN_PAYMENTS_CREDIT_CARD_PAYMENT');
-    // A mortgage payment stays out of spending, as it is in the other modes.
-    expect(cat('m')).toBe('LOAN_PAYMENTS_MORTGAGE_PAYMENT');
     expect(cat('s')).toBe('TRANSFER_OUT_ACCOUNT_TRANSFER');
+    // The one loan payment that is an expense: nothing else counts what it bought.
+    expect(cat('m')).toBe('HOME_MORTGAGE');
+    expect(categoryPath('HOME_MORTGAGE')).toBe('Home › Mortgage');
   });
 
   it('gives the same totals as Plaid’s categories, in every mode', () => {
@@ -286,7 +287,8 @@ describe('grouped categories', () => {
       return [c.spend_cad, c.income_cad, c.net_cad];
     };
     const grouped = totals();
-    expect(grouped).toEqual([2_500, 4_000, 1_500]);
+    // 2,500 of everyday spending plus the 2,100 mortgage payment.
+    expect(grouped).toEqual([4_600, 4_000, -600]);
     setSetting(db, 'CATEGORY_DETAIL', 'detailed');
     expect(totals()).toEqual(grouped);
     setSetting(db, 'CATEGORY_DETAIL', 'broad');
@@ -296,7 +298,7 @@ describe('grouped categories', () => {
   it('totals by group and filters by group', () => {
     seed();
     expect(getCashflow(db, month).by_category_group).toEqual([
-      { category: 'HOME', spend_cad: 1_500 },
+      { category: 'HOME', spend_cad: 3_600 },
       { category: 'FAMILY_CARE', spend_cad: 800 },
       { category: 'FOOD', spend_cad: 126 },
       { category: 'BILLS_AND_UTILITIES', spend_cad: 74 },
@@ -403,5 +405,61 @@ describe('a category of your own, under a parent', () => {
     // A deposit the bank called a transfer, filed as rent received, is income now.
     expect(c.income_cad).toBe(1_500);
     expect(getTransactions(db, { category: 'INCOME' }).map((t) => t.id)).toEqual(['t']);
+  });
+});
+
+describe('a mortgage payment', () => {
+  const month = { start: '2026-08-01', end: '2026-08-31' };
+  const mortgage = (id: string, account: string, amount: number) => ({
+    ...row(id, 'Lender', 'LOAN_PAYMENTS', 'LOAN_PAYMENTS_MORTGAGE_PAYMENT', amount),
+    account_id: account,
+  });
+
+  it('counts as spending when it leaves a bank account, in every mode', () => {
+    upsertTransactions(db, [mortgage('m', 'chq', 2_100)]);
+    for (const mode of ['grouped', 'detailed', 'broad']) {
+      setSetting(db, 'CATEGORY_DETAIL', mode);
+      const c = getCashflow(db, month);
+      expect([mode, c.spend_cad], mode).toEqual([mode, 2_100]);
+      expect(getTransactions(db)[0]?.category, mode).toBe('HOME_MORTGAGE');
+    }
+    // Its parent is Home, so a Home filter finds it.
+    expect(getTransactions(db, { category: 'HOME' }).map((t) => t.id)).toEqual(['m']);
+  });
+
+  it('is counted once when the mortgage account is linked too', () => {
+    upsertAccount(db, {
+      id: 'loan', source: 'plaid', institution: 'Test Bank', name: 'Mortgage', mask: '9',
+      account_category: 'LOAN', account_subtype: 'mortgage', registered_type: 'NA' as RegisteredType,
+      currency: 'CAD', balance: -300_000, balance_cad: -300_000, available: null, active: true, status: 'ok', item_id: null,
+    });
+    upsertTransactions(db, [
+      mortgage('out', 'chq', 2_100), // the payment leaving chequing
+      mortgage('credit', 'loan', -2_100), // the same payment arriving on the loan
+      mortgage('interest', 'loan', 900), // a charge on the loan is not a second payment
+    ]);
+    expect(getCashflow(db, month).spend_cad).toBe(2_100);
+    expect(getCashflow(db, month).income_cad).toBe(0);
+  });
+
+  it('can still be filed as a transfer, and your correction wins', () => {
+    upsertTransactions(db, [mortgage('m', 'chq', 2_100)]);
+    setTransactionOverride(db, 'm', { category: 'TRANSFER_OUT' });
+    expect(getCashflow(db, month).spend_cad).toBe(0);
+    addMerchantRule(db, { pattern: 'Lender', match_type: 'merchant', category: 'TRANSFER_OUT' });
+    expect(getCashflow(db, month).spend_cad).toBe(0);
+  });
+
+  it('is not what a card payment is: those stay out', () => {
+    upsertTransactions(db, [
+      row('card', 'Card payment', 'LOAN_PAYMENTS', 'LOAN_PAYMENTS_CREDIT_CARD_PAYMENT', 500),
+      row('other', 'Loan', 'LOAN_PAYMENTS', 'LOAN_PAYMENTS_OTHER_PAYMENT', 300),
+    ]);
+    expect(getCashflow(db, month).spend_cad).toBe(0);
+  });
+
+  it('does not leak its working flag into the rows', () => {
+    upsertTransactions(db, [mortgage('m', 'chq', 2_100)]);
+    expect(Object.keys(getTransactions(db)[0] ?? {})).not.toContain('mortgage_spend');
   });
 });

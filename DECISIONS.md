@@ -3,6 +3,28 @@
 Dated, append-only. Each entry says what was chosen, what it was chosen over,
 and why.
 
+## 2026-10-03 — A mortgage payment is spending
+
+Plaid files a mortgage payment under loan payments, which are excluded from
+spending so that paying a card is not counted on top of its purchases. A
+mortgage has no purchases standing behind it, so excluding it understated what
+a household spends (and it was only hidden, never offset: the lender is not an
+account the household owns). Earlier (2026-09-28) this was left as a separate
+decision; a user asked and it was settled.
+
+- **Counted as `HOME_MORTGAGE` (Home › Mortgage), in every mode**, decided by
+  `countsAsMortgageSpend` before rules and overrides, so all three category modes
+  keep giving identical totals (rule 12) and a hand correction still wins.
+- **Only money leaving an account other than the mortgage account itself.** When
+  the loan is linked too, the same payment also arrives there as a credit, and it
+  can carry charges; those stay excluded so the payment is counted once, from the
+  account it left.
+- **Not split into interest and principal**: Plaid does not say, and some people
+  would count only interest. Left open rather than guessed.
+- Chosen over a setting: the default that understates spending was the bug, and a
+  rule filing the lender as a transfer restores the old behaviour for anyone who
+  wants it.
+
 ## 2026-10-01 — Subcategories of your own
 
 A user wanted "Rent" under Income for rent received. A subcategory is stored as

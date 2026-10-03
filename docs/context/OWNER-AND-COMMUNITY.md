@@ -106,7 +106,7 @@ All of the below shipped unless marked. Requests came through Reddit comments
 | "Rent" under Income | Subcategories of your own (`469b9bb`) |
 | Tally should not need a Claude subscription to be useful | Principle: the UI keeps getting the basics; see section 1 |
 | Costco gas versus the warehouse club | Advised: a `contains` rule on the gas station's bank text; not yet confirmed by the user (`BACKLOG.md`) |
-| Is a mortgage payment an expense or hidden? | Answered: hidden by default as a loan payment; count it by filing under a category of your own. Default behaviour is an open decision (`BACKLOG.md`) |
+| Is a mortgage payment an expense or hidden? | It was hidden as a loan payment, which understated spending; now counted as Home › Mortgage by default (2026-10-03) |
 
 ## 6. Things only the owner can do
 

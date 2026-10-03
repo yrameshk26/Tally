@@ -166,8 +166,26 @@ Entry template:
 - Answered for the owner, a Reddit question: a mortgage payment is hidden from
   spending by default (Plaid files it under loan payments); it can be counted by
   filing it under a category of your own (`HOME_MORTGAGE`). Verified with a
-  scratch script against the real code before answering. Whether it should count by
-  default is an open decision (`BACKLOG.md`).
+  scratch script against the real code before answering. The owner then asked for
+  it to be fixed (next entry).
+
+## 2026-10-03: a mortgage payment counts as spending
+
+- Asked (Reddit, via the owner): is a mortgage payment an expense, or hidden because
+  both sides cancel? It was hidden (a loan payment), which understated spending.
+  The owner said "make mortgage fix".
+- Done: `countsAsMortgageSpend` reads Plaid's mortgage payment as `HOME_MORTGAGE`
+  (Home › Mortgage) when money leaves an account other than the mortgage account
+  itself, in every category mode, before rules and overrides; `HOME_MORTGAGE` added
+  to the grouped list; wording in the MCP descriptions, report footnote and README
+  updated. Card payments and other loan payments are unchanged. See DECISIONS
+  2026-10-03.
+- Verified: new tests (counts in all three modes with identical totals; counted
+  once when the loan account is linked, its credit side and a charge on it excluded;
+  an override or rule to a transfer still excludes it; card and other loan payments
+  still excluded; the flag does not leak into rows), and three older assertions that
+  encoded the old rule were updated. 482 tests.
+- Left open: interest versus principal (`BACKLOG.md`).
 
 ## Lessons that apply to future work
 

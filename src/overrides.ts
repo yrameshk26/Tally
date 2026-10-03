@@ -17,7 +17,7 @@ import type { DB } from './db.ts';
 import { config } from './config.ts';
 import { loadRates, tryConvert } from './fx.ts';
 import { nowISO, round2 } from './lib/money.ts';
-import { categoryLabel, effectiveCategory, familyLabel, familyOf, type CategoryDetail } from './lib/category.ts';
+import { MORTGAGE, categoryLabel, effectiveCategory, familyLabel, familyOf, type CategoryDetail } from './lib/category.ts';
 import { toGrouped } from './lib/taxonomy.ts';
 import { categoryDetail } from './settings.ts';
 
@@ -289,6 +289,8 @@ export type Correctable = {
   category: string | null;
   /** Plaid's detailed category, read instead of `category` in detailed mode. */
   category_detailed?: string | null;
+  /** Set by the caller when this row is a mortgage payment that counts as spending. */
+  mortgage_spend?: boolean;
 };
 
 export type Corrected<T> = T & {
@@ -314,10 +316,13 @@ export function corrector(
   const rules = listMerchantRules(db);
 
   const correct = <T extends Correctable>(input: T): Corrected<T> => {
+    // The flag is an input, not part of the result: it must not leak into the
+    // rows MCP and the pages hand out.
+    const { mortgage_spend, ...rest } = input;
     const row = {
-      ...input,
-      category: effectiveCategory(input.category, input.category_detailed, detail),
-    } as T;
+      ...rest,
+      category: mortgage_spend ? MORTGAGE : effectiveCategory(input.category, input.category_detailed, detail),
+    } as unknown as T;
     const over = overrides.get(row.id);
     if (over && (over.merchant !== null || over.category !== null)) {
       return {

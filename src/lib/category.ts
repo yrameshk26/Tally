@@ -102,6 +102,31 @@ export function effectiveCategory(
   return family && detailed !== family ? detailed : category;
 }
 
+/** Plaid's detailed code for a mortgage payment. */
+export const MORTGAGE_PAYMENT = 'LOAN_PAYMENTS_MORTGAGE_PAYMENT';
+/** What a mortgage payment is read as: Home › Mortgage, which is spending. */
+export const MORTGAGE = 'HOME_MORTGAGE';
+
+/**
+ * Whether a row is a mortgage payment that counts as spending. Plaid files it
+ * under loan payments, which are left out of spending because paying a card
+ * would otherwise count on top of its purchases. A mortgage has no purchases
+ * to count, so leaving it out understates what the household spends; the money
+ * leaving a bank account for the lender is the expense.
+ *
+ * Only the outflow counts, and not on the mortgage account itself: when the
+ * loan is linked too, its side of the same payment arrives as a credit, and
+ * charges on it are not a second payment. Both stay excluded, so the payment is
+ * counted once, from the account it left.
+ */
+export function countsAsMortgageSpend(
+  detailed: string | null | undefined,
+  outflow: boolean,
+  accountCategory: string | null | undefined,
+): boolean {
+  return detailed === MORTGAGE_PAYMENT && outflow && (accountCategory ?? '').toUpperCase() !== 'LOAN';
+}
+
 /** The family a category is totalled under, for "how much on food". */
 export function categoryGroup(category: string | null | undefined): string {
   return familyOf(category) ?? category ?? 'UNCATEGORIZED';

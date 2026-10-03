@@ -172,11 +172,16 @@ One definition (hard rule 12): after corrections, a row in a transfer or loan
 payment family is neither income nor spending, in cashflow, the Transactions
 totals, the report, Merchants, `get_spend_by_merchant` and tags alike. Rollups
 read their whole window (`ROLLUP_ROW_LIMIT`, 50,000), never a page.
-**Consequence worth knowing:** a mortgage payment is hidden by default, because
-Plaid files it as `LOAN_PAYMENTS_MORTGAGE_PAYMENT`. To count it, file it under a
-category of your own such as `HOME_MORTGAGE` (parent Home); exclusion is decided
-after corrections, so the rule takes effect everywhere at once. Whether it should
-count by default is an open decision (see `BACKLOG.md`).
+**Mortgage payments count as spending (2026-10-03).** Plaid files one under loan
+payments, which are left out so that paying a card is not counted on top of its
+purchases; a mortgage has no purchases to count, so excluding it understated
+spending. It is now read as `HOME_MORTGAGE` (Home › Mortgage, a hand-pickable entry
+in the grouped list too) when money leaves any account except the mortgage account
+itself, in all three category modes, before rules and overrides. When the mortgage
+is also linked, its credit side and any charge on it stay excluded so the payment
+is counted once. Filing it as a transfer by rule or override still excludes it.
+Interest versus principal is not split (Plaid does not say). Pinned by
+`test/category.test.ts` (`describe('a mortgage payment')`).
 
 ## 11. Tags (2026-09-29, checkboxes 2026-10-01)
 
