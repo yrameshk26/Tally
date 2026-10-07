@@ -166,6 +166,15 @@ after reseeding a clean demo database.
   already logged in on that browser, so repair from a private window with the
   login that owns that connection, or disconnect if its cards are supplementary
   cards already visible through another connection.
+- **Reading Plaid's own log.** The dashboard's Activity log shows each call Tally
+  made, with a request id, the item id and Plaid's response. Use it to tell Plaid's
+  error from Tally's: a `400 ITEM_LOGIN_REQUIRED` there is Plaid's answer. Its
+  integration type matters: **Classic** institutions are signed in to with stored
+  credentials and break when the bank challenges or refuses that sign-in; OAuth
+  institutions do not. Tally's balance read (`/accounts/balance/get`) is a live
+  bank check, so a bank that refuses live sign-ins fails there first. A fresh
+  link that goes `ITEM_LOGIN_REQUIRED` on its first read is the bank refusing, not
+  stale credentials; quote the request id and item id to Plaid support.
 - OAuth banks need `https://<host>/connections/oauth` registered in the Plaid
   dashboard, and `PLAID_REDIRECT_URI` set to it when behind a proxy that rewrites
   the host. `TRUST_PROXY` must equal the number of proxy hops.

@@ -210,6 +210,20 @@ Entry template:
 - Verified: `test/cash.test.ts` (21), HTTP tests in `test/web.test.ts`, the wording
   test in `test/plaid-history.test.ts`.
 
+## 2026-10-07 (later): the Amex Canada relink still fails
+
+- Asked: the owner relinked the spouse's Amex Canada card after the disconnect
+  advice, then reported the new row "never syncing", and pasted Plaid's dashboard
+  log for the failing call.
+- Found (live, read-only, plus one `sync_now`): the new link had no sync yet
+  ("never synced"); the first sync it got failed with `ITEM_LOGIN_REQUIRED` and 0
+  accounts. Plaid's log shows its own 400 on `/accounts/balance/get` with the
+  generic message, integration type Classic. Same failure as the replacement link
+  before it. No code changed; nothing was lost.
+- Recorded: BACKLOG 3b (status, owner-side steps, an unbuilt cached-balance
+  experiment), OPERATIONS section 7 (how to read Plaid's log).
+- Left open: waiting on the owner's Plaid support ticket and a manual Amex login.
+
 ## Lessons that apply to future work
 
 - A change to link tokens cannot be proved by tests; keep it behind a setting that

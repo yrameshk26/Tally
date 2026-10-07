@@ -87,14 +87,33 @@ credential-dependent items there).
 
 ## 3b. The spouse's Amex Canada link (open, owner side)
 
-Both the old 90 day connection and the new two-year replacement report
-`login_required`; the replacement broke right after linking, so the handover never
-ran. Repair has also failed for this bank. Suggested path: disconnect the broken
-replacement and the old connection, then link American Express (Canada) once from
-the spouse profile with that cardholder's own login in a private window. History is
-kept on disconnect, and `finishHandovers` pairs the old rows with the new link when
-exactly one live connection of that bank exists, so nothing counts twice. If Plaid
-refuses the login again, it is the bank's session rules, not Tally.
+Status on 2026-10-07: the old 90 day connection and the two-year replacement were
+both `login_required`, so the owner disconnected both and linked the card fresh.
+The fresh link showed `ok`, zero accounts, never synced (no sync had run yet);
+the first sync then got `ITEM_LOGIN_REQUIRED` from Plaid, on the first read, with
+nothing fetched. Plaid's own dashboard log for that call says the same, with only
+the generic message ("login details have changed ... use update mode") and the
+integration type **Classic** (Plaid signs in with stored credentials, so the bank
+can refuse or challenge it). It happened to the replacement link too, so a login
+that Link accepts is being rejected when Plaid reads it. Not a Tally defect; the
+reason is Amex's and is not visible from Tally.
+
+Owner-side next steps, in order: (1) open a Plaid support ticket with the request
+id and item id from the dashboard log (Plaid can see the bank's real response);
+(2) look at the item's earlier log entries (`PRODUCT_NOT_READY` means it was only
+not ready, `ITEM_LOGIN_REQUIRED` from the start means the bank refused it);
+(3) sign in to Amex Canada by hand as that cardholder and clear any security
+prompt, then Repair from a private window. `finishHandovers` pairs old rows with a
+new link once exactly one live connection of the bank exists, so a working relink
+does not count anything twice.
+
+Possible experiment, **not built and unproven**: Tally reads balances with
+`/accounts/balance/get` (`src/sources/plaid.ts`, in the sync and in `syncNewItem`),
+which makes Plaid sign in to the bank live. Plaid's cached `/accounts/get` does
+not. If a bank refuses live sign-ins but serves cached data, a setting (off by
+default, hard rule 3) that reads cached balances would keep it syncing, at the
+cost of slightly stale balances; a connection the bank truly rejects would still
+fail on the transaction read. Only worth building if Plaid support points at it.
 
 ## 4. Owner-side items still open
 
