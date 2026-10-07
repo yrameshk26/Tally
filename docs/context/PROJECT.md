@@ -52,6 +52,7 @@ Every file, one line. `src/` is the server; `scripts/` are command-line tools.
 | `src/queries.ts` | Read models: net worth, accounts, holdings, transactions, cashflow, merchant and category rollups, contribution room, `knownCategories`, spending definition (`isTransferLike`, `NOT_SPENDING_CATEGORIES`, `splitTransfers`, `ROLLUP_ROW_LIMIT`) |
 | `src/overrides.ts` | Hand corrections applied on read: merchant rules, per-transaction overrides, currency override, user categories (`addCategory` with optional parent), the `corrector` |
 | `src/tags.ts` | Tags on transactions: add, remove, set, rename, delete, list |
+| `src/cash.ts` | Cash spending entered by hand: one `Cash` account per profile (`manual:cash:<profile>`, source `manual`, zero balance), `addCashExpense`, `updateCashExpense`, `deleteCashExpense` (only `manual:` rows), `cashReconciliation` (withdrawn vs recorded) |
 | `src/report.ts` | `buildPeriodReport` for a month, a year or a tag; `parsePeriod`, `periodBounds` |
 | `src/summary.ts` | `get_financial_summary`: composes read models into sections |
 | `src/sync.ts` | Orchestrator: FX, then each source per profile; single-flight `runSync`, progress, `failedSources` |
@@ -244,6 +245,10 @@ the registry; the user-facing table is in `README.md`.
 | `tag_transactions` | W | Add or remove a tag by ids or a date range (skips transfers) |
 | `rename_tag` | W | Rename or merge |
 | `delete_tag` | W | Remove from everything |
+| `add_cash_expense` | W | Record a cash expense (amount, description, date, category, tags, currency, profile); expenses only |
+| `update_cash_expense` | W | Change a cash entry made here; a bank's transaction is refused |
+| `delete_cash_expense` | W | Delete a cash entry made here; a bank's transaction is refused |
+| `cash_reconciliation` | | Cash withdrawn (ATM) vs cash spending recorded, and what is unaccounted for |
 | `set_merchant_rule` | W | Rewrite merchant and category for a pattern, past and future |
 | `list_merchant_rules` | | Rules with how many rows each touches |
 | `delete_merchant_rule` | W | |
@@ -270,7 +275,7 @@ Everything below needs a session except the sign-in pages, `GET /brand/logo`,
 |---|---|
 | Sign in | `GET /login`, `POST /login`, `GET/POST /login/verify`, `GET /login/cancel`, `POST /logout`, `POST /session/ping` |
 | Overview | `GET /`, `POST /sync`, `GET /sync/status`, `POST /accounts/currency`, `POST /accounts/move` |
-| Transactions | `GET /transactions`, `POST /transactions/override`, `POST /transactions/tags`, `POST /transactions/rule`, `POST /transactions/rule/delete` |
+| Transactions | `GET /transactions`, `POST /transactions/override`, `POST /transactions/tags`, `POST /transactions/rule`, `POST /transactions/rule/delete`, `POST /transactions/cash`, `POST /transactions/cash/update`, `POST /transactions/cash/delete` |
 | Merchants | `GET /merchants`, `POST /merchants/category`, `POST /merchants/category/bulk`, `POST /categories`, `POST /categories/delete` |
 | Reports | `GET /report` (`period` month, year or tag) |
 | Assistant | `GET /chat`, `GET /chat/:id`, `POST /chat`, `POST /chat/delete` |

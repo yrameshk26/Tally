@@ -107,6 +107,7 @@ All of the below shipped unless marked. Requests came through Reddit comments
 | Tally should not need a Claude subscription to be useful | Principle: the UI keeps getting the basics; see section 1 |
 | Costco gas versus the warehouse club | Advised: a `contains` rule on the gas station's bank text; not yet confirmed by the user (`BACKLOG.md`) |
 | Is a mortgage payment an expense or hidden? | It was hidden as a loan payment, which understated spending; now counted as Home › Mortgage by default (2026-10-03) |
+| Cash transactions missing from totals; add them by hand with category and tags | Cash spending, expenses only, one Cash account per profile; an ATM withdrawal stays a hidden transfer and a tile shows withdrawn vs recorded (2026-10-07) |
 | Follow-up on mortgages: with the mortgage account linked, hide the payment; unlinked, count it | Acknowledged; today it counts once either way; a transfer rule gives the hide behaviour; automatic handling is an open question (`BACKLOG.md`) |
 
 ## 6. Things only the owner can do

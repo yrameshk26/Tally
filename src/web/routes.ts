@@ -150,6 +150,7 @@ import { MAX_LOGO_BYTES, deleteLogo, getLogo, logoUrl, setLogo } from '../brand.
 import { loadRates } from '../fx.ts';
 import { DEFAULT_HISTORY_DAYS, MAX_HISTORY_DAYS } from '../sources/plaid-history.ts';
 import { addTag, cleanTag, listTags, parseTags, removeTag, setTags } from '../tags.ts';
+import { addCashExpense, cashReconciliation, deleteCashExpense, tagsFromField, updateCashExpense } from '../cash.ts';
 import { createFailureLimiter } from '../ratelimit.ts';
 import { originOf, plaidRedirectFor, safeNext } from './oauth.ts';
 import { listClients, revokeClient } from '../oauth.ts';
@@ -1010,6 +1011,20 @@ export function createWebRouter(db: DB): express.Router {
         })),
         hiddenTransfers: hidden,
         truncated: matched.length >= TX_PAGE_LIMIT,
+        cash: {
+          reconciliation: cashReconciliation(db, {
+            start: f.start,
+            end: f.end,
+            ...(f.profile ? { profile: f.profile } : {}),
+          }),
+          // The "Record cash spending" shortcut on a withdrawal opens the form filled in.
+          ...(/^\d{4}-\d{2}-\d{2}$/.test(String(req.query['cash_date'] ?? ''))
+            ? { prefillDate: String(req.query['cash_date']) }
+            : {}),
+          ...(/^\d+(\.\d{1,2})?$/.test(String(req.query['cash_amount'] ?? ''))
+            ? { prefillAmount: String(req.query['cash_amount']) }
+            : {}),
+        },
         flash: raw(flash(req, 'ok').value + flash(req, 'err').value),
       }),
       '/transactions',
@@ -1045,6 +1060,50 @@ export function createWebRouter(db: DB): express.Router {
       });
       if ('tags' in body) setTags(db, id, parseTags(String(body['tags'] ?? '')));
       res.redirect(303, backTo(body, 'Transaction updated.'));
+    } catch (e) {
+      res.redirect(303, backTo(body, errMessage(e), 'err'));
+    }
+  });
+
+  // Cash spending entered by hand. Only these rows can be edited or deleted
+  // here; a bank's rows would come back on the next sync.
+  router.post('/transactions/cash', requireAuth, requireCsrf, (req: Ctx, res: Response) => {
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    try {
+      const profile = String(body['profile'] ?? '').trim();
+      addCashExpense(db, {
+        amount: Number(body['amount']),
+        description: String(body['description'] ?? ''),
+        date: String(body['date'] ?? '') || todayISO(),
+        category: String(body['category'] ?? '').trim() || null,
+        tags: tagsFromField(body['tags']),
+        ...(profile ? { profile } : {}),
+      });
+      res.redirect(303, backTo(body, 'Cash spending added.'));
+    } catch (e) {
+      res.redirect(303, backTo(body, errMessage(e), 'err'));
+    }
+  });
+
+  router.post('/transactions/cash/update', requireAuth, requireCsrf, (req: Ctx, res: Response) => {
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    try {
+      updateCashExpense(db, String(body['transaction_id'] ?? ''), {
+        amount: Number(body['amount']),
+        description: String(body['description'] ?? ''),
+        date: String(body['date'] ?? ''),
+      });
+      res.redirect(303, backTo(body, 'Cash entry updated.'));
+    } catch (e) {
+      res.redirect(303, backTo(body, errMessage(e), 'err'));
+    }
+  });
+
+  router.post('/transactions/cash/delete', requireAuth, requireCsrf, (req: Ctx, res: Response) => {
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    try {
+      deleteCashExpense(db, String(body['transaction_id'] ?? ''));
+      res.redirect(303, backTo(body, 'Cash entry deleted.'));
     } catch (e) {
       res.redirect(303, backTo(body, errMessage(e), 'err'));
     }

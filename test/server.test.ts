@@ -98,9 +98,12 @@ describe('tools', () => {
     const tools = (json['result'] as { tools: Array<{ name: string }> }).tools;
     const names = tools.map((t) => t.name).sort();
     expect(names).toEqual([
+      'add_cash_expense',
       'add_category',
       'backup_now',
+      'cash_reconciliation',
       'create_profile',
+      'delete_cash_expense',
       'delete_category',
       'delete_merchant_rule',
       'delete_profile',
@@ -137,6 +140,7 @@ describe('tools', () => {
       'sync_now',
       'sync_report',
       'tag_transactions',
+      'update_cash_expense',
     ]);
     expect(names.some((n) => /trade|order|buy|sell|transfer|withdraw|pay/.test(n))).toBe(false);
   });

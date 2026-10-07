@@ -187,6 +187,29 @@ Entry template:
   encoded the old rule were updated. 482 tests.
 - Left open: interest versus principal (`BACKLOG.md`).
 
+## 2026-10-07: cash spending, and a stuck Amex Canada relink explained
+
+- Asked (Reddit, via the owner): a user's totals differed from their bank by a small
+  amount because of cash, and asked for manual cash transactions with category and
+  tags. The owner clarified that rent arrives by Zelle or Venmo (a transfer, not cash),
+  only expenses should be recorded, and one ATM withdrawal can cover several expenses.
+  The owner said "build it".
+- Done: `src/cash.ts`, a form, tile and per-row Edit and Delete on Transactions,
+  `POST /transactions/cash*`, four MCP tools, CSS, demo data. See DECISIONS 2026-10-07
+  and FEATURES section 6.
+- Found by tests while building: an impossible date such as 2026-02-31 passed
+  validation (JavaScript rolls it into March); fixed by a round trip. Found by a test of
+  the page: the "Record cash spending" shortcut lives on withdrawal rows, which are
+  hidden by default, so the tile got a "see them" link.
+- Also: the owner reported a spouse's Amex Canada link "stuck forever". Live status
+  showed both the old 90 day connection and the new two-year replacement as
+  `login_required` (the new one broke right after linking and never reported history),
+  so the handover could never run. Nothing was lost; the old rows still count and the
+  replacement holds no data. The Connections row now says the new link needs its login
+  (`handoverProgress(..., linkOk)`). The fix itself is on the owner's side (BACKLOG).
+- Verified: `test/cash.test.ts` (21), HTTP tests in `test/web.test.ts`, the wording
+  test in `test/plaid-history.test.ts`.
+
 ## Lessons that apply to future work
 
 - A change to link tokens cannot be proved by tests; keep it behind a setting that

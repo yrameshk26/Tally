@@ -354,6 +354,8 @@ describe('handover progress', () => {
     expect(handoverProgress('INITIAL_UPDATE_COMPLETE', '2026-09-30T12:00:00Z')).toMatch(/recent months and is gathering the rest/);
     expect(handoverProgress('HISTORICAL_UPDATE_COMPLETE', '2026-09-30T12:00:00Z')).toMatch(/next refresh/);
     expect(handoverProgress(null, null)).toMatch(/Press Refresh now/);
+    expect(handoverProgress(null, null, false)).toMatch(/needs its login/);
+    expect(handoverProgress('INITIAL_UPDATE_COMPLETE', '2026-09-30T12:00:00Z', false)).toMatch(/Repair it, or disconnect it/);
   });
 });
 

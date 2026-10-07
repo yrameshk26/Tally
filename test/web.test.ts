@@ -420,6 +420,98 @@ describe('transfers on the Transactions tab', () => {
     expect(where(await post('/transactions/tags', [['back', back], ['tag', '  '], ['transaction_id', 'web-buy']]))).toMatch(/err=Type a tag/);
   });
 
+  it('adds, edits and deletes cash spending, and refuses a bank row', async () => {
+    seed();
+    const db = getDb();
+    upsertAccount(db, {
+      id: 'plaid:cash-chq', source: 'plaid', institution: 'Test Bank', name: 'Chequing', mask: null,
+      account_category: 'DEPOSITORY', account_subtype: 'checking', registered_type: 'NON_REG',
+      currency: 'CAD', balance: 100, balance_cad: 100, available: null, active: true, status: 'ok', item_id: null,
+    });
+    upsertTransactions(db, [{
+      id: 'plaid:atm-1', account_id: 'plaid:cash-chq', date: '2026-03-05', name: 'ATM WITHDRAWAL', merchant: 'ATM',
+      amount: 200, currency: 'CAD', amount_cad: 200, category: 'TRANSFER_OUT',
+      category_detailed: 'TRANSFER_OUT_WITHDRAWAL', pending: false,
+    }]);
+    const { cookie, csrf } = await login();
+    const post = (path: string, fields: Array<[string, string]>, token = csrf): Promise<Response> =>
+      fetch(`${base}${path}`, {
+        method: 'POST',
+        headers: { cookie, 'content-type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams([['_csrf', token], ...fields]),
+        redirect: 'manual',
+      });
+    const where = (r: Response): string => decodeURIComponent(r.headers.get('location') ?? '');
+    const back = '/transactions?start=2026-03-01&end=2026-03-31';
+    const view = async (): Promise<string> => (await fetch(`${base}${back}`, { headers: { cookie } })).text();
+
+    // The tile counts the withdrawal, hidden as a transfer; the form is there.
+    let page = await view();
+    expect(page).toContain('Add cash spending');
+    expect(page).toContain('Cash withdrawn');
+    expect(page).toContain('see them');
+    expect(inlineHandlers(page)).toEqual([]);
+
+    // Withdrawals are transfers and hidden by default; "see them" shows them, each with a shortcut.
+    const seen = await (await fetch(`${base}${back}&category=TRANSFER_OUT_WITHDRAWAL`, { headers: { cookie } })).text();
+    expect(seen).toContain('Record cash spending');
+    expect(seen).toContain('cash_date=2026-03-05');
+    expect(seen).toContain('cash_amount=200');
+
+    // The shortcut opens the form filled in.
+    const prefilled = await (await fetch(`${base}${back}&cash_date=2026-03-05&cash_amount=200`, { headers: { cookie } })).text();
+    expect(prefilled).toMatch(/<details class="cash-box" open>/);
+    expect(prefilled).toContain('value="200"');
+
+    // Add: it counts, wears a cash pill, and the tile moves.
+    const added = await post('/transactions/cash', [
+      ['back', back], ['date', '2026-03-06'], ['amount', '35.50'], ['description', 'Farm market'],
+      ['category', 'FOOD_AND_DRINK'], ['tags', 'Spring trip'],
+    ]);
+    expect(where(added)).toContain('Cash spending added.');
+    const [entry] = getTransactions(db, { start: '2026-03-01', end: '2026-03-31', tag: 'Spring trip' });
+    expect(entry).toMatchObject({ merchant: 'Farm market', amount_cad: -35.5 });
+    page = await view();
+    expect(page).toContain('<span class="pill">cash</span>');
+    expect(page).toContain('Edit amount or date');
+    expect(page).toContain('Delete this cash entry?');
+    expect(inlineHandlers(page)).toEqual([]);
+
+    // Edit.
+    const id = entry?.id ?? '';
+    expect(where(await post('/transactions/cash/update', [['back', back], ['transaction_id', id], ['date', '2026-03-07'], ['amount', '40'], ['description', 'Market stall']])))
+      .toContain('Cash entry updated.');
+    expect(getTransactions(db, { start: '2026-03-01', end: '2026-03-31', tag: 'Spring trip' })[0]).toMatchObject({ merchant: 'Market stall', amount_cad: -40, date: '2026-03-07' });
+
+    // Bad input is an error, not a silent change.
+    expect(where(await post('/transactions/cash', [['back', back], ['amount', '0'], ['description', 'x']]))).toMatch(/err=The amount must be more than zero/);
+    expect(where(await post('/transactions/cash', [['back', back], ['amount', '5'], ['description', 'x'], ['category', 'TRANSFER_OUT']]))).toMatch(/err=That category is not spending/);
+    expect(where(await post('/transactions/cash', [['back', back], ['amount', '5'], ['description', ' ']]))).toMatch(/err=Say what it was/);
+
+    // A bank's row can be neither edited nor deleted here.
+    expect(where(await post('/transactions/cash/delete', [['back', back], ['transaction_id', 'plaid:atm-1']]))).toMatch(/err=Only cash entries/);
+    expect(where(await post('/transactions/cash/update', [['back', back], ['transaction_id', 'plaid:atm-1'], ['date', '2026-03-05'], ['amount', '1'], ['description', 'x']]))).toMatch(/err=Only cash entries/);
+    expect(getTransactions(db, { start: '2026-03-01', end: '2026-03-31', search: 'ATM' })).toHaveLength(1);
+
+    // CSRF is required.
+    const refused = await post('/transactions/cash/delete', [['transaction_id', id]], 'wrong');
+    expect(refused.status).toBe(403);
+    expect(getTransactions(db, { start: '2026-03-01', end: '2026-03-31', tag: 'Spring trip' })).toHaveLength(1);
+
+    // Delete.
+    expect(where(await post('/transactions/cash/delete', [['back', back], ['transaction_id', id]]))).toContain('Cash entry deleted.');
+    expect(getTransactions(db, { start: '2026-03-01', end: '2026-03-31', tag: 'Spring trip' })).toHaveLength(0);
+
+    // An unauthenticated post goes nowhere.
+    const anon = await fetch(`${base}/transactions/cash`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({ amount: '5', description: 'x' }),
+      redirect: 'manual',
+    });
+    expect(anon.headers.get('location')).toBe('/login');
+  });
+
   it('does not drop ticked rows from a full page of a thousand', async () => {
     seed();
     const db = getDb();

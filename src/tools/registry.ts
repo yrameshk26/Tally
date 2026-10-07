@@ -65,6 +65,7 @@ import { buildPeriodReport, parsePeriod } from '../report.ts';
 import { pruneBackups, writeBackup } from '../backup.ts';
 import { categoryDetail } from '../settings.ts';
 import { addTag, deleteTag, listTags, removeTag, renameTag } from '../tags.ts';
+import { addCashExpense, cashReconciliation, deleteCashExpense, updateCashExpense } from '../cash.ts';
 
 /** Profiles are user-defined, so this is a free-form id rather than an enum. */
 const PROFILE = z.string().min(1).max(32);
@@ -704,6 +705,101 @@ export function toolDefs(db: DB): ToolDef[] {
     handler: ({ tag }) => {
       try {
         return ok({ tag, removed_from: deleteTag(db, tag) });
+      } catch (e) {
+        return fail(e);
+      }
+    },
+  }),
+
+  tool({
+    name: 'add_cash_expense',
+    title: 'Record cash spending',
+    description:
+      'Record something paid in cash, which no bank can see, e.g. "I spent $20 cash at the ' +
+      'market on groceries". It becomes an ordinary transaction on a "Cash" account (one per ' +
+      'profile) so categories, tags, reports and totals treat it like any other. Expenses only: ' +
+      'do not record an ATM withdrawal (it is a transfer and stays hidden) and do not record ' +
+      'money received. One withdrawal spent on several things is several entries. Amount is ' +
+      'positive; date defaults to today; category is a code from list_categories (blank is ' +
+      'uncategorised); currency defaults to CAD. Writes only to this database, never to a bank.',
+    inputSchema: {
+      amount: z.number().positive().max(1_000_000),
+      description: z.string().min(1).max(80),
+      date: DATE.optional(),
+      category: z.string().max(60).optional(),
+      tags: z.array(TAG).max(10).optional(),
+      currency: z.string().length(3).optional(),
+      profile: PROFILE.optional(),
+    },
+    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
+    handler: (args) => {
+      try {
+        const id = addCashExpense(db, args);
+        return ok({ created: true, transaction_id: id });
+      } catch (e) {
+        return fail(e);
+      }
+    },
+  }),
+
+  tool({
+    name: 'update_cash_expense',
+    title: 'Change a cash entry',
+    description:
+      'Change a cash entry made with add_cash_expense: amount, description, date, category or ' +
+      'tags (tags replaces the entry\'s tags). Only the fields given change. Refuses any bank ' +
+      'transaction, which would only come back on the next sync.',
+    inputSchema: {
+      transaction_id: z.string(),
+      amount: z.number().positive().max(1_000_000).optional(),
+      description: z.string().min(1).max(80).optional(),
+      date: DATE.optional(),
+      category: z.string().max(60).optional(),
+      tags: z.array(TAG).max(10).optional(),
+      currency: z.string().length(3).optional(),
+    },
+    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
+    handler: ({ transaction_id, ...patch }) => {
+      try {
+        updateCashExpense(db, transaction_id, patch);
+        return ok({ updated: true, transaction_id });
+      } catch (e) {
+        return fail(e);
+      }
+    },
+  }),
+
+  tool({
+    name: 'delete_cash_expense',
+    title: 'Delete a cash entry',
+    description:
+      'Delete a cash entry made with add_cash_expense, with its tags. Refuses any bank ' +
+      'transaction.',
+    inputSchema: { transaction_id: z.string() },
+    annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: false },
+    handler: ({ transaction_id }) => {
+      try {
+        deleteCashExpense(db, transaction_id);
+        return ok({ deleted: true, transaction_id });
+      } catch (e) {
+        return fail(e);
+      }
+    },
+  }),
+
+  tool({
+    name: 'cash_reconciliation',
+    title: 'Cash taken out versus cash spending recorded',
+    description:
+      'For a date range: cash withdrawn from bank accounts (Plaid’s withdrawal code), cash ' +
+      'spending recorded by hand, and the difference, which is cash spending not yet entered ' +
+      '(or cash still in a wallet). Use it to find forgotten cash expenses. A bank that does ' +
+      'not label withdrawals shows none.',
+    inputSchema: { start: DATE, end: DATE, profile: PROFILE.optional() },
+    annotations: READ_ONLY,
+    handler: ({ start, end, profile }) => {
+      try {
+        return ok(cashReconciliation(db, { start, end, ...(profile ? { profile } : {}) }));
       } catch (e) {
         return fail(e);
       }

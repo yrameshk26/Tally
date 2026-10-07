@@ -106,6 +106,25 @@ what the balance is in.
   "Apply to all" turns a merchant rename and category into a rule.
 - **Tag selected / Untag selected** with a checkbox per row (see section 11).
 - Merchant rules table with how many rows each touches and a delete button.
+- **Cash spending** (2026-10-07, `src/cash.ts`; a user's request): an "Add cash
+  spending" form (date, amount, what it was, category, tags, profile) records an
+  expense on one `Cash` account per profile. It is an ordinary transaction, so
+  categories, tags, rules, reports and every total treat it like any other row, in
+  all three category modes. Rules: expenses only (a transfer category is refused,
+  since the entry would vanish from spending); no income (rent paid by Zelle or
+  Venmo arrives through a bank as a transfer and is filed under Income › Rent);
+  zero balance, so net worth is untouched; a sync never touches source `manual`.
+  Only entries made here can be edited or deleted (cash pill, Edit and Delete with
+  the themed confirm); a bank's rows cannot, as the next sync would restore them.
+  An ATM withdrawal is **not** categorised: it stays a hidden transfer, and one
+  withdrawal that paid for several things needs no splitting, because each thing
+  is recorded. A tile shows cash withdrawn (Plaid's `TRANSFER_OUT_WITHDRAWAL`, so
+  only banks that label it), cash recorded, and the difference ("not yet accounted
+  for"); "see them" lists the withdrawals, each with "Record cash spending" that
+  opens the form filled in. Over MCP: `add_cash_expense`, `update_cash_expense`,
+  `delete_cash_expense`, `cash_reconciliation`. A date is validated by round trip
+  (`2026-02-31` is refused; `Date.parse` alone would roll it into March).
+  Tests: `test/cash.test.ts`, `test/web.test.ts`.
 - Tests: `test/overrides.test.ts`, `test/web.test.ts`.
 
 ## 7. Merchants

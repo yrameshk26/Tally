@@ -18,6 +18,7 @@ import { replaceHoldings, upsertAccount, upsertActivities, upsertTransactions } 
 import { setAccountProfile, setRoomLimit } from '../src/queries.ts';
 import { addMerchantRule } from '../src/overrides.ts';
 import { addTag } from '../src/tags.ts';
+import { addCashExpense } from '../src/cash.ts';
 import { writeSnapshot } from '../src/snapshots.ts';
 import { nowISO } from '../src/lib/money.ts';
 import type { RegisteredType } from '../src/lib/registered.ts';
@@ -339,6 +340,31 @@ function main(): void {
   }));
   upsertTransactions(db, tripRows);
   addTag(db, tripRows.map((t) => t.id), 'Lisbon trip');
+
+  // Cash: two ATM withdrawals (transfers, hidden) and the things the cash paid
+  // for, so the Transactions tile shows withdrawn, recorded and the gap.
+  upsertTransactions(
+    db,
+    [
+      [12, 120],
+      [5, 80],
+    ].map(([daysAgo, amount], i) => ({
+      id: `demo:atm:${String(i)}`,
+      account_id: 'demo:chq',
+      date: dayISO(daysAgo ?? 0),
+      name: 'ATM WITHDRAWAL',
+      merchant: null,
+      amount: amount ?? 0,
+      currency: 'CAD',
+      amount_cad: amount ?? 0,
+      category: 'TRANSFER_OUT',
+      category_detailed: 'TRANSFER_OUT_WITHDRAWAL',
+      pending: false,
+    })),
+  );
+  addCashExpense(db, { amount: 24.5, description: 'Farmers market', date: dayISO(11), category: 'FOOD_AND_DRINK' });
+  addCashExpense(db, { amount: 35, description: 'Haircut', date: dayISO(9), category: 'PERSONAL_CARE' });
+  addCashExpense(db, { amount: 18.75, description: 'Bake sale', date: dayISO(6), category: 'FOOD_AND_DRINK' });
 
   // One rule already in place, so the Merchants tab shows what a rule does
   // rather than only describing it.

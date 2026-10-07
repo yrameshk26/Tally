@@ -15,7 +15,8 @@ import {
   type TransactionView,
 } from '../queries.ts';
 import type { MerchantRule } from '../overrides.ts';
-import { round2 } from '../lib/money.ts';
+import { round2, todayISO } from '../lib/money.ts';
+import { WITHDRAWAL_CODE, isCashTransactionId, type CashReconciliation } from '../cash.ts';
 import { categoryLabel, familyLabel, familyOf } from '../lib/category.ts';
 import { PLAID_ITEM_CAP } from '../sources/plaid.ts';
 import type { NetWorthTotals } from '../snapshots.ts';
@@ -873,12 +874,12 @@ export function connectionsPage(opts: {
                   const replacing = Boolean(i['replaces_item_id']);
                   const replaced = Boolean(i['replaced_by']);
                   const history = days >= 730 ? '2 years' : `${String(days)} days`;
-                  const progress = replacing ? handoverProgress(i['history_status'], i['history_checked_at']) : null;
+                  const progress = replacing ? handoverProgress(i['history_status'], i['history_checked_at'], ok) : null;
                   return html`<tr>
                     <td>${String(i['institution'] ?? 'unknown')}
                       <div class="sub-line">History: ${history}${
                         replacing
-                          ? html` <span class="pill warn" title="Waiting for Plaid’s full history. The connection it replaces keeps working until then; the next refresh after that hands over.">taking over</span>`
+                          ? html` <span class="pill warn" title="${ok ? 'Waiting for Plaid’s full history. The connection it replaces keeps working until then; the next refresh after that hands over.' : 'This new link needs its login, so it cannot take over yet.'}">taking over</span>`
                           : replaced
                             ? html` <span class="pill" title="A two-year link of this bank takes over once Plaid has its full history.">being replaced</span>`
                             : raw('')
@@ -1268,7 +1269,10 @@ export const UNTAGGED = '__untagged__';
  * Where a replacement's history pull is, in words. Plaid reports it on each
  * sync; the handover runs on the first sync after it is complete.
  */
-export function handoverProgress(status: unknown, checkedAt: unknown): string {
+export function handoverProgress(status: unknown, checkedAt: unknown, linkOk = true): string {
+  // A replacement whose own login broke never reports history, so "waiting on
+  // Plaid" would be a promise nothing keeps.
+  if (!linkOk) return 'This new link needs its login before it can take over. Repair it, or disconnect it.';
   const when = typeof checkedAt === 'string' && checkedAt ? ` (checked ${checkedAt.slice(0, 16).replace('T', ' ')})` : '';
   switch (status) {
     case 'HISTORICAL_UPDATE_COMPLETE':
@@ -1286,6 +1290,103 @@ export function handoverProgress(status: unknown, checkedAt: unknown): string {
 export function categoryPath(code: string): string {
   const family = familyOf(code);
   return family && family !== code ? `${familyLabel(family)} › ${categoryLabel(code)}` : categoryLabel(code);
+}
+
+/**
+ * Cash spending: the add form, and what was taken out against what was
+ * recorded. A withdrawal is a transfer and stays hidden; the expenses it paid
+ * for are entered one by one, however many there were.
+ */
+function cashSection(
+  cash: NonNullable<Parameters<typeof transactionsPage>[0]['cash']>,
+  opts: { csrf: string; categories: string[]; profiles: Profile[] },
+  f: TxFilters,
+): SafeHtml {
+  const r = cash.reconciliation;
+  const show = r.withdrawals > 0 || r.entries > 0;
+  const open = cash.prefillDate || cash.prefillAmount ? raw(' open') : raw('');
+  const profile = f.profile || opts.profiles[0]?.id || '';
+  return html`<div id="cash-form">
+    ${
+      show
+        ? html`<div class="kpis">
+              <div class="kpi"><div class="label">Cash withdrawn</div>
+                <div class="value">${money(r.withdrawn_cad)}</div>
+                <div class="sub-line">${String(r.withdrawals)} withdrawal${r.withdrawals === 1 ? '' : 's'}, hidden as transfers
+                  ${r.withdrawals > 0 ? html`· <a href="${currentQuery({ ...f, category: WITHDRAWAL_CODE })}">see them</a>` : raw('')}</div></div>
+              <div class="kpi"><div class="label">Cash spending recorded</div>
+                <div class="value">${money(r.recorded_cad)}</div>
+                <div class="sub-line">${String(r.entries)} entr${r.entries === 1 ? 'y' : 'ies'}, counted as spending</div></div>
+              <div class="kpi"><div class="label">${r.unaccounted_cad < 0 ? 'Recorded beyond withdrawals' : 'Not yet accounted for'}</div>
+                <div class="value ${r.unaccounted_cad > 0 ? 'neg' : ''}">${money(Math.abs(r.unaccounted_cad))}</div>
+                <div class="sub-line">${
+                  r.unaccounted_cad > 0
+                    ? 'cash spending not entered yet, or still in a wallet'
+                    : r.unaccounted_cad < 0
+                      ? 'paid from cash taken out earlier'
+                      : 'every withdrawal is accounted for'
+                }</div></div>
+            </div>`
+        : raw('')
+    }
+    <details class="cash-box"${open}>
+      <summary>Add cash spending</summary>
+      <form method="post" action="/transactions/cash" class="filters cash-form">
+        ${csrfField(opts.csrf)}
+        <input type="hidden" name="back" value="${currentQuery(f)}">
+        <label>Date <input type="date" name="date" value="${cash.prefillDate ?? todayISO()}" required></label>
+        <label>Amount <input type="number" name="amount" min="0.01" step="0.01" inputmode="decimal"
+          value="${cash.prefillAmount ?? ''}" required class="w-sm"></label>
+        <label>What was it <input type="text" name="description" maxlength="80" required placeholder="e.g. market, haircut"></label>
+        <label>Category
+          <select name="category"><option value="">Uncategorised</option>${categoryOptions(opts.categories, null)}</select>
+        </label>
+        <label>Tags <input type="text" name="tags" list="tag-list" autocomplete="off" placeholder="optional, e.g. Italy 2026"></label>
+        ${
+          opts.profiles.length > 1
+            ? html`<label>Profile
+                <select name="profile">${join(opts.profiles.map((p) => html`<option value="${p.id}"${p.id === profile ? raw(' selected') : raw('')}>${p.name}</option>`))}</select>
+              </label>`
+            : raw('')
+        }
+        <button type="submit">Add</button>
+      </form>
+      <p class="hint">Record what you paid for, one entry per thing, even when one ATM withdrawal covered
+        several. The withdrawal itself stays a transfer, so nothing is counted twice. Cash taken out
+        shows only for banks that label withdrawals.</p>
+    </details>
+  </div>`;
+}
+
+/** On a cash entry: edit or delete it. On a withdrawal: a shortcut to record what it paid for. */
+function cashControls(t: TransactionView, csrf: string, f: TxFilters): SafeHtml {
+  if (isCashTransactionId(t.id)) {
+    return html`<details class="cash-edit">
+      <summary>Edit amount or date</summary>
+      <form method="post" action="/transactions/cash/update" class="cell-edit">
+        ${csrfField(csrf)}
+        <input type="hidden" name="transaction_id" value="${t.id}">
+        <input type="hidden" name="back" value="${currentQuery(f)}">
+        <input type="date" name="date" value="${t.date}" required aria-label="Date">
+        <input type="number" name="amount" min="0.01" step="0.01" value="${String(Math.abs(t.amount))}" required aria-label="Amount">
+        <input type="text" name="description" maxlength="80" value="${t.merchant ?? t.name ?? ''}" required aria-label="What was it">
+        <div class="cell-edit-row"><button class="secondary" type="submit">Save</button></div>
+      </form>
+      <form method="post" action="/transactions/cash/delete" class="inline-form mt-sm"
+        data-confirm="Delete this cash entry? It is removed from your spending and cannot be brought back.">
+        ${csrfField(csrf)}
+        <input type="hidden" name="transaction_id" value="${t.id}">
+        <input type="hidden" name="back" value="${currentQuery(f)}">
+        <button class="secondary" type="submit">Delete</button>
+      </form>
+    </details>`;
+  }
+  if (t.category_detailed === WITHDRAWAL_CODE && t.amount_cad < 0) {
+    const q = new URLSearchParams({ cash_date: t.date, cash_amount: String(Math.abs(t.amount_cad)) });
+    const base = currentQuery(f);
+    return html`<a class="btn-link" href="${base}${base.includes('?') ? '&' : '?'}${q.toString()}#cash-form">Record cash spending</a>`;
+  }
+  return raw('');
 }
 
 /** Days from start to end, both counted. */
@@ -1388,6 +1489,8 @@ export function transactionsPage(opts: {
   /** Rows the transfers filter took out, so the page can say so. */
   hiddenTransfers: number;
   truncated: boolean;
+  /** Cash spending entered by hand, and cash taken out to compare it with. */
+  cash?: { reconciliation: CashReconciliation; prefillDate?: string; prefillAmount?: string };
   flash?: SafeHtml;
 }): SafeHtml {
   const f = opts.filters;
@@ -1465,6 +1568,8 @@ export function transactionsPage(opts: {
             <a href="${currentQuery({ ...f, transfers: 'hide' })}">Hide them</a>
           </p>`
     }
+
+    ${opts.cash ? cashSection(opts.cash, opts, f) : raw('')}
 
     ${
       f.tag && f.tag !== UNTAGGED
@@ -1564,6 +1669,7 @@ export function transactionsPage(opts: {
                     <td class="cell-merchant">
                       <span class="clip" title="${t.merchant ?? t.name ?? ''}">${t.merchant ?? t.name ?? '—'}</span>
                       ${t.corrected_by ? html`<span class="pill">${t.corrected_by === 'rule' ? 'rule' : 'edited'}</span>` : raw('')}
+                      ${isCashTransactionId(t.id) ? html`<span class="pill">cash</span>` : raw('')}
                       ${t.tags.length ? html`<div class="tags">${join(t.tags.map(tagChip))}</div>` : raw('')}
                       ${
                         t.merchant && t.name && t.merchant !== t.name
@@ -1576,7 +1682,7 @@ export function transactionsPage(opts: {
                       ${t.currency !== 'CAD' ? html`<div><span class="pill">${t.currency}</span></div>` : raw('')}
                     </td>
                     <td class="num nowrap ${t.amount_cad < 0 ? 'neg' : 'pos'}">${money(t.amount_cad)}</td>
-                    <td class="cell-edit-col">${editCell(t)}</td>
+                    <td class="cell-edit-col">${editCell(t)}${cashControls(t, opts.csrf, f)}</td>
                   </tr>`,
                 ),
               )}</tbody>

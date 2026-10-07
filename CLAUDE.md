@@ -107,6 +107,10 @@ history is public too.
    and any charge on it, stays excluded, so it is counted once). A card has
    purchases to count; a mortgage has nothing else, so excluding it understated
    spending. A rule or override can still file it as a transfer.
+   Cash spending (`src/cash.ts`) is expenses only, on a zero-balance `manual`
+   account: the ATM withdrawal stays a hidden transfer and each thing it paid
+   for is recorded, so nothing counts twice; a transfer category is refused for
+   an entry, and only `manual:` rows on a cash account can be changed or deleted.
    Tags (`src/tags.ts`) narrow a view and never decide what is spending: a
    tagged or untagged cashflow runs the same exclusion, and bulk tagging a
    range skips transfers and card payments. A tag or override on a pending
@@ -221,6 +225,10 @@ src/
   profiles.ts     up to 5 profiles; create/rename/delete, move an account
   tags.ts         your own labels on transactions (a trip, business); never
                   part of what counts as spending
+  cash.ts         cash spending entered by hand, on one Cash account per profile
+                  (source 'manual'; a sync never touches it, and its rows are the
+                  only transactions that can be edited or deleted); the
+                  withdrawn-versus-recorded reconciliation
   settings.ts     DB-stored settings that override the environment; APP_NAME
                   is install-wide and display-only (the MCP server, cookies and
                   code stay "tally")

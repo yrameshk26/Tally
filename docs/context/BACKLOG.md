@@ -33,6 +33,9 @@ credential-dependent items there).
   reports interest, a future split could count only interest (and escrow) as an
   expense, which some users prefer. Not requested.
 
+- **Cash follow-ups (not requested):** several named wallets, a receipt photo,
+  CSV import, and splitting one withdrawal across entries. Cash withdrawals are only
+  recognised where the bank labels them `TRANSFER_OUT_WITHDRAWAL`.
 - **Costco gas versus the warehouse.** Suggested to a user: a `contains` rule on
   the gas station's bank text set to Fuel. Unverified in practice: rules apply in
   `position` order and the first match wins, so an earlier exact-merchant rule for
@@ -81,6 +84,17 @@ credential-dependent items there).
 - The context-docs drift test (`test/context-docs.test.ts`) checks source files,
   tables, tools, environment variables and settings against `PROJECT.md`; it cannot
   judge prose, so `FEATURES.md`, `HISTORY.md` and this file rely on discipline.
+
+## 3b. The spouse's Amex Canada link (open, owner side)
+
+Both the old 90 day connection and the new two-year replacement report
+`login_required`; the replacement broke right after linking, so the handover never
+ran. Repair has also failed for this bank. Suggested path: disconnect the broken
+replacement and the old connection, then link American Express (Canada) once from
+the spouse profile with that cardholder's own login in a private window. History is
+kept on disconnect, and `finishHandovers` pairs the old rows with the new link when
+exactly one live connection of that bank exists, so nothing counts twice. If Plaid
+refuses the login again, it is the bank's session rules, not Tally.
 
 ## 4. Owner-side items still open
 

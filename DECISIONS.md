@@ -3,6 +3,41 @@
 Dated, append-only. Each entry says what was chosen, what it was chosen over,
 and why.
 
+## 2026-10-07 — Cash spending is entered by hand, as expenses only
+
+A user who tracks a rental property found their totals differed from the bank's
+by a small amount, because some spending was cash. Banks cannot see cash.
+
+- **Expenses only, on one `Cash` account per profile**, as ordinary transactions
+  (source `manual`, zero balance). Chosen over a separate cash ledger, so
+  categories, tags, rules, reports and every total work unchanged and there is no
+  second code path to keep honest. Net worth is untouched.
+- **The ATM withdrawal is not categorised.** It is money moving from the bank to a
+  pocket, so it stays a hidden transfer (hard rule 12). One withdrawal that paid for
+  several things needs no splitting: record each thing. Chosen over assigning the
+  withdrawal a category (which double counts once the real expenses are entered) and
+  over splitting it (which makes the person do arithmetic).
+- **A reconciliation shows what is not yet accounted for**: cash withdrawn
+  (`TRANSFER_OUT_WITHDRAWAL`) minus cash recorded in the window, so forgotten cash
+  spending shows as a number. A bank that does not label withdrawals shows none; the
+  tile does not guess from the description.
+- **No income.** Rent paid by Zelle or Venmo arrives through a bank as a transfer and
+  is filed under Income › Rent by a rule on the sender (income counts because the
+  exclusion is decided after corrections).
+- **A transfer category is refused for an entry**, because the entry would vanish
+  from spending and look like it was never saved.
+- **Only entries made here can be edited or deleted.** A bank's rows are refused:
+  the next sync would put them back. The check is the id prefix *and* the account.
+- **Dates are validated by round trip.** `Date.parse('2026-02-31')` is 3 March, so
+  parsing alone would store an impossible date as typed.
+- Left out for now: several named wallets, receipts, CSV import, splitting one
+  withdrawal across entries (BACKLOG).
+
+Also on this date: a replacement connection (the two-year relink) whose own login
+broke can never report history, so the handover waits forever. The Connections row
+now says so ("needs its login, repair it or disconnect it") instead of "waiting on
+Plaid".
+
 ## 2026-10-03 — A mortgage payment is spending
 
 Plaid files a mortgage payment under loan payments, which are excluded from

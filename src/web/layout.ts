@@ -643,6 +643,16 @@ ol.steps strong{color:var(--fg)}
 .filters button{align-self:flex-end}
 .btn-link{align-self:flex-end;padding:.55rem .4rem;font-size:var(--step--1);color:var(--fg-muted);text-decoration:none}
 .btn-link:hover{color:var(--accent)}
+/* Cash spending: a collapsed form under the figures, and a per-row editor. */
+.cash-box{margin:0 0 1.3rem}
+.cash-box>summary,.cash-edit>summary{cursor:pointer;font-size:var(--step--1);color:var(--fg-muted);min-height:2.75rem;
+  display:flex;align-items:center}
+.cash-box>summary:hover,.cash-edit>summary:hover{color:var(--accent)}
+.cash-box[open]>summary{margin-bottom:.5rem}
+.cash-form{margin-bottom:.6rem}
+.cash-form input[type=text]{min-width:13rem}
+.cash-edit{margin-top:.35rem}
+.cash-edit>summary{min-height:2rem}
 /* Editing inside a table row.
    The controls stack rather than sitting in a row: three of them side by side
    in a cell that is already competing with four other columns crushed the

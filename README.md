@@ -130,6 +130,8 @@ question:
 | `set_merchant_category` | File one merchant under a category, creating it if needed |
 | `list_categories`, `add_category`, `delete_category` | Categories beyond the bank's taxonomy; `add_category` takes a `parent` for a subcategory (Rent under Income) |
 | `list_tags` | Tags in use, with count, first and last date, and spending |
+| `add_cash_expense`, `update_cash_expense`, `delete_cash_expense` | Record cash spending by hand (amount, what it was, date, category, tags); change or delete only entries made this way |
+| `cash_reconciliation` | Cash withdrawn at ATMs against cash spending recorded, and the gap |
 | `tag_transactions` | Add or remove a tag by transaction id, or over a date range narrowed to an account, profile or search (a trip on the travel card) |
 | `rename_tag`, `delete_tag` | Rename (or merge) a tag, or take it off everything |
 | `set_account_currency` | Reinterpret an account a bank labelled in the wrong currency |
@@ -358,7 +360,9 @@ Server-rendered, no framework, no webfonts, no inline styles under a strict CSP.
   are hidden by default, and the page says how many, so paying a card from
   chequing is not counted as spending on top of the purchases it paid for and
   the totals match the Overview. One click shows them; asking for a transfer
-  category by name shows them too. Edit a row's merchant and category inline, or "apply to
+  category by name shows them too. **Cash spending** can be added by hand (date, amount,
+  what it was, category, tags): it counts like any purchase, an ATM withdrawal stays a
+  hidden transfer, and a tile compares cash withdrawn with cash recorded. Edit a row's merchant and category inline, or "apply to
   all" on a merchant group to write a rule. Transfer in, Transfer out and Loan
   payments are always in the category picker, so a card payment the bank filed
   as something else can be hidden by recategorising it, for one row or as a
@@ -506,7 +510,7 @@ Read [SECURITY.md](SECURITY.md) before deploying. The short version:
 |---|---|
 | `npm run demo` | Seed a fictional database to try it without credentials |
 | `npm run dev` | Run the server from TypeScript |
-| `npm run check` | Typecheck + 482 tests |
+| `npm run check` | Typecheck + 504 tests |
 | `npm run sync` | One-shot sync; exits non-zero if a source errored |
 | `npm run db:init` | Create the database, seeding `room.json` if present |
 | `npm run hash-password` | Print an `ADMIN_PASSWORD_HASH` |
