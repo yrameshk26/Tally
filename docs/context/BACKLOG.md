@@ -115,6 +115,15 @@ default, hard rule 3) that reads cached balances would keep it syncing, at the
 cost of slightly stale balances; a connection the bank truly rejects would still
 fail on the transaction read. Only worth building if Plaid support points at it.
 
+## 3c. RBC link fails at the 2-step push (open, owner side)
+
+The owner's RBC link through Plaid did not complete: RBC's 2-step push did not
+resolve. See OPERATIONS section 7 for what is and is not established. Next: read the
+Link session log in the Plaid dashboard for the failing step and code; retry from
+the phone that holds the RBC app, approving at once; ask Plaid support whether RBC
+connects by API or by credentials for this account. Nothing to change in Tally
+until that is known (hard rule 3: link behaviour cannot be proved by tests).
+
 ## 4. Owner-side items still open
 
 See `OWNER-AND-COMMUNITY.md` section 6, and in `TODO.md`: register the OAuth

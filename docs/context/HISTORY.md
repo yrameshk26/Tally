@@ -224,6 +224,16 @@ Entry template:
   experiment), OPERATIONS section 7 (how to read Plaid's log).
 - Left open: waiting on the owner's Plaid support ticket and a manual Amex login.
 
+## 2026-10-08: why RBC's 2-step push fails when Wealthsimple's RBC link works
+
+- Asked: the owner's RBC link through Plaid failed at the 2-step push, while
+  Wealthsimple (which links outside accounts through Plaid, Flinks or its own tool)
+  connected RBC.
+- Done: web research only, no code changed. Findings in OPERATIONS section 7 and
+  BACKLOG 3c: no source shows which provider Wealthsimple uses for RBC; Plaid's docs
+  say Canada has no OAuth; the cause here is not established.
+- Left open: the Link session log and a Plaid support answer (owner side).
+
 ## Lessons that apply to future work
 
 - A change to link tokens cannot be proved by tests; keep it behind a setting that

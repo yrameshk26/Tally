@@ -175,6 +175,17 @@ after reseeding a clean demo database.
   bank check, so a bank that refuses live sign-ins fails there first. A fresh
   link that goes `ITEM_LOGIN_REQUIRED` on its first read is the bank refusing, not
   stale credentials; quote the request id and item id to Plaid support.
+- **RBC (Royal Bank of Canada) and its 2-step push** (researched 2026-10-08; the
+  owner's link failed at the push). Established: RBC is Plaid's `ins_39`; Plaid's
+  OAuth guide says Canadian institutions do not use OAuth, so a Plaid link to RBC
+  signs in with the customer's credentials from Plaid's servers, which RBC treats as
+  a new device; RBC's 2-step sends one push to the single trusted device (current
+  RBC app, notifications on), and it cannot be switched off. Wealthsimple does not
+  say which provider it uses for RBC (it names Flinks, Plaid and its own tool), so
+  "it worked there" does not show the same path. Not established: why this link
+  fails; a 2022 RBC and Plaid announcement describes a direct API without
+  credential sharing, which the docs do not reconcile. The Plaid Link session log
+  (the exit or error code and the step it stopped at) is what decides it.
 - OAuth banks need `https://<host>/connections/oauth` registered in the Plaid
   dashboard, and `PLAID_REDIRECT_URI` set to it when behind a proxy that rewrites
   the host. `TRUST_PROXY` must equal the number of proxy hops.
