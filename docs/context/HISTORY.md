@@ -234,6 +234,12 @@ Entry template:
   say Canada has no OAuth; the cause here is not established.
 - Left open: the Link session log and a Plaid support answer (owner side).
 
+## 2026-10-09: could Flinks replace Plaid for RBC?
+
+- Asked: "can we use Flinks for Tally". Research only, no code changed. Flinks sells
+  production access by sales contract with a monthly minimum; no personal plan.
+  Recorded in BACKLOG 3d.
+
 ## Lessons that apply to future work
 
 - A change to link tokens cannot be proved by tests; keep it behind a setting that

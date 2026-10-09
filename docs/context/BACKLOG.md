@@ -124,6 +124,19 @@ the phone that holds the RBC app, approving at once; ask Plaid support whether R
 connects by API or by credentials for this account. Nothing to change in Tally
 until that is known (hard rule 3: link behaviour cannot be proved by tests).
 
+## 3d. Flinks as a second bank aggregator (researched 2026-10-09, not built)
+
+Asked whether Tally can use Flinks (Canadian aggregator) for banks Plaid cannot
+connect, such as RBC. Not practical for a personal install: Flinks' pricing page
+lists plans "designed for production use cases" with a monthly minimum and a one
+year term (Connect starts at 500 USD a month for 200 connections), no pay as you
+go, no self-serve production, and sandbox access only (a test institution, no live
+banks). Nothing on the page addresses individuals or personal projects; a pilot
+would need a sales conversation. An adapter would be ordinary work (a
+`src/sources/` file like the others, read-only, hard rules 1, 6, 9) if access were
+ever granted. Not checked: Wealthica's developer access, which may suit an
+individual better.
+
 ## 4. Owner-side items still open
 
 See `OWNER-AND-COMMUNITY.md` section 6, and in `TODO.md`: register the OAuth
