@@ -240,6 +240,19 @@ Entry template:
   production access by sales contract with a monthly minimum; no personal plan.
   Recorded in BACKLOG 3d.
 
+## 2026-10-09: Allow does nothing when connecting Cursor
+
+- Asked: pressing Allow on the consent page (opened on a phone) did nothing.
+- Done: reproduced the flow in headless Chromium for https, `127.0.0.1`,
+  `localhost` and custom-scheme registrations (all worked except custom-only, which
+  registration refuses). Could not see the live client's redirect URI or logs, so the
+  cause is **not confirmed**. Changed the Allow and Deny answer from a bare 303 to a
+  page that names the destination, with a Continue link, a `Refresh: 0` header and a
+  hint for loopback apps (`handBack`, DECISIONS 2026-10-09).
+- Verified: `test/oauth.test.ts` (18; updated the 303 expectation, added deny,
+  loopback and referrer tests), a browser run at phone width.
+- Left open: the owner reads the client's redirect URI on the Security page (BACKLOG).
+
 ## Lessons that apply to future work
 
 - A change to link tokens cannot be proved by tests; keep it behind a setting that

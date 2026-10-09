@@ -487,7 +487,10 @@ listed on the Security page and can be revoked there.
 
 Under the hood it is OAuth 2.1 with dynamic client registration and mandatory
 PKCE; tokens are stored only as hashes. The legacy `/mcp/<MCP_SECRET>` route
-stays on until you set `MCP_ALLOW_PATH_SECRET=false`.
+stays on until you set `MCP_ALLOW_PATH_SECRET=false`. After you press Allow, a
+page names where you are being sent back to (with a Continue link) rather than
+redirecting silently; an app that listens on `127.0.0.1` can only hear the answer
+from the device it runs on, so approve from that device, not a phone.
 
 ## Security
 
@@ -510,7 +513,7 @@ Read [SECURITY.md](SECURITY.md) before deploying. The short version:
 |---|---|
 | `npm run demo` | Seed a fictional database to try it without credentials |
 | `npm run dev` | Run the server from TypeScript |
-| `npm run check` | Typecheck + 504 tests |
+| `npm run check` | Typecheck + 507 tests |
 | `npm run sync` | One-shot sync; exits non-zero if a source errored |
 | `npm run db:init` | Create the database, seeding `room.json` if present |
 | `npm run hash-password` | Print an `ADMIN_PASSWORD_HASH` |

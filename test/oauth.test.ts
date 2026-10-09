@@ -92,8 +92,16 @@ async function authorize(clientId: string, challenge: string, cookie: string): P
     }),
     redirect: 'manual',
   });
-  expect(approve.status).toBe(303);
-  const loc = new URL(approve.headers.get('location') ?? '');
+  // Not a bare redirect: a page that names the destination, with a link to
+  // follow and a Refresh header, so a browser that declines the hop is not silent.
+  expect(approve.status).toBe(200);
+  expect(approve.headers.get('referrer-policy')).toBe('no-referrer');
+  const refresh = approve.headers.get('refresh') ?? '';
+  expect(refresh).toMatch(/^0; url=/);
+  const body = await approve.text();
+  expect(body).toContain('Continue to');
+  const loc = new URL(refresh.replace(/^0; url=/, ''));
+  expect(body).toContain(`href="${loc.toString().replaceAll('&', '&amp;')}"`);
   expect(loc.origin + loc.pathname).toBe(REDIRECT);
   expect(loc.searchParams.get('state')).toBe('xyz');
   return loc.searchParams.get('code') ?? '';
@@ -260,6 +268,57 @@ describe('the full flow', () => {
     });
     const res = await fetch(`${base}/oauth/authorize?${q}`, { headers: { cookie } });
     expect(await res.text()).toContain('S256 is required');
+  });
+});
+
+describe('the hop back to the client', () => {
+  /** Post the consent form for a client registered with `uri`, and return the response. */
+  async function decide(uri: string, decision: 'approve' | 'deny'): Promise<{ res: Response; body: string }> {
+    const reg = await fetch(`${base}/oauth/register`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ client_name: 'Cursor', redirect_uris: [uri] }),
+    });
+    const clientId = ((await reg.json()) as { client_id: string }).client_id;
+    const cookie = await login();
+    const { challenge } = pkce();
+    const fields = {
+      client_id: clientId, redirect_uri: uri, response_type: 'code', state: 's1',
+      code_challenge: challenge, code_challenge_method: 'S256',
+    };
+    const consent = await (await fetch(`${base}/oauth/authorize?${new URLSearchParams(fields)}`, { headers: { cookie } })).text();
+    const csrf = /name="_csrf" value="([^"]+)"/.exec(consent)?.[1] ?? '';
+    const res = await fetch(`${base}/oauth/authorize`, {
+      method: 'POST',
+      headers: { cookie, 'content-type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({ ...fields, _csrf: csrf, decision }),
+      redirect: 'manual',
+    });
+    return { res, body: await res.text() };
+  }
+
+  it('says where it is sending you, and gives a link, for a denial too', async () => {
+    const { res, body } = await decide(REDIRECT, 'deny');
+    expect(res.status).toBe(200);
+    expect(body).toContain('Denied');
+    expect(body).toContain('claude.ai');
+    expect(res.headers.get('refresh')).toContain('error=access_denied');
+    expect(body).toContain('access_denied');
+  });
+
+  it('warns that a loopback app only hears an answer from its own device', async () => {
+    const { res, body } = await decide('http://127.0.0.1:54321/callback', 'approve');
+    expect(res.status).toBe(200);
+    expect(body).toContain('listening on the device it runs on');
+    expect(body).toContain('127.0.0.1:54321');
+    const other = await decide(REDIRECT, 'approve');
+    expect(other.body).not.toContain('listening on the device it runs on');
+  });
+
+  it('never puts the code in a place a Referer header could carry it onward', async () => {
+    const { res } = await decide(REDIRECT, 'approve');
+    expect(res.headers.get('referrer-policy')).toBe('no-referrer');
+    expect(res.headers.get('cache-control')).toContain('no-store');
   });
 });
 

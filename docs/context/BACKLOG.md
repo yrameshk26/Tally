@@ -137,6 +137,16 @@ would need a sales conversation. An adapter would be ordinary work (a
 ever granted. Not checked: Wealthica's developer access, which may suit an
 individual better.
 
+## 3e. Cursor connector: Allow did nothing (open)
+
+See DECISIONS 2026-10-09. The cause on the owner's phone was not reproduced. If it
+recurs after the new page, the page itself says where the browser is being sent:
+a `127.0.0.1` or `localhost` destination means the app runs on another device and the
+approval must be done there; an `https` destination that fails points at the client.
+The Security page lists each client's allowed redirect URI. Open question: accept
+custom-scheme redirect URIs (RFC 8252 allows them for native apps; a hostile app
+could claim the same scheme), so far deliberately refused.
+
 ## 4. Owner-side items still open
 
 See `OWNER-AND-COMMUNITY.md` section 6, and in `TODO.md`: register the OAuth

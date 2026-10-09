@@ -202,6 +202,13 @@ the pending row's tags and, if the posted row has none, its override.
 - MCP auth is OAuth 2.1 (`/mcp`, bearer token, PKCE mandatory, dynamic client
   registration); the legacy `/mcp/<MCP_SECRET>` path stays until
   `MCP_ALLOW_PATH_SECRET=false`. A wrong secret returns 404, not 401.
+  After Allow or Deny the server does not answer with a bare 303: it returns a
+  page that names where the browser is being sent, with a Continue link, and a
+  `Refresh: 0` header (`handBack` in `src/web/oauth.ts`), so a browser that
+  declines the hop is never silent. The consent page's CSP names the registered
+  redirect origin in `form-action`. Registration accepts only `https` and
+  loopback `http` redirect URIs; a client offering only a custom scheme
+  (`cursor://...`) is refused at `/oauth/register`.
 - Uploaded logos are raster only (never SVG), served sandboxed.
 - Every absolute URL is built by `originOf(req)` (first `X-Forwarded-Proto`
   entry); behind a proxy `TRUST_PROXY` must be the number of hops.

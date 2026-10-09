@@ -302,6 +302,39 @@ export function createOAuthRouter(db: DB): express.Router {
       .send(page({ title, nonce, chrome: false, body, appName: appName(db), logoUrl: logoUrl(db) }));
   };
 
+  /**
+   * The hop back to the client after Allow or Deny. A bare 303 is invisible
+   * when the browser declines it (a phone cannot reach a loopback address that
+   * belongs to the computer running the app, and an app link can swallow the
+   * navigation), and the button then looks dead. This page names where the
+   * browser is being sent and offers a link to follow, so a refusal shows up as
+   * the browser's own error rather than as nothing; the Refresh header still
+   * sends it on at once. `back` is built from a registered redirect URI.
+   */
+  const handBack = (res: Response, back: URL, clientName: string | null, approved: boolean): void => {
+    const loopback = back.hostname === '127.0.0.1' || back.hostname === 'localhost';
+    res.setHeader('Refresh', `0; url=${back.toString()}`);
+    res.setHeader('Referrer-Policy', 'no-referrer');
+    renderPage(
+      res,
+      approved ? 'Approved' : 'Denied',
+      html`<div class="login">
+        <h1>${approved ? 'Approved' : 'Denied'}</h1>
+        <p class="sub">Sending you back to <strong>${clientName ?? back.host}</strong> (${back.host}).</p>
+        <section>
+          <p><a class="btn" href="${back.toString()}">Continue to ${clientName ?? back.host}</a></p>
+          ${
+            loopback
+              ? html`<p class="hint">This app is listening on the device it runs on. If you approved from a
+                  different device, such as a phone, the app cannot receive the answer from here:
+                  open the sign-in link on the device that runs the app instead.</p>`
+              : html`<p class="hint">If nothing happens, use the button above.</p>`
+          }
+        </section>
+      </div>`,
+    );
+  };
+
   router.get('/oauth/authorize', (req: Request, res: Response) => {
     const parsed = parseAuthz(req.query as Record<string, unknown>, req);
     if (!parsed.ok) {
@@ -376,9 +409,10 @@ export function createOAuthRouter(db: DB): express.Router {
     const back = new URL(p.redirect_uri);
     if (p.state) back.searchParams.set('state', p.state);
 
+    const clientName = getClient(db, p.client_id)?.client_name ?? null;
     if (String(body['decision']) !== 'approve') {
       back.searchParams.set('error', 'access_denied');
-      res.redirect(303, back.toString());
+      handBack(res, back, clientName, false);
       return;
     }
     const code = issueCode(db, {
@@ -392,7 +426,7 @@ export function createOAuthRouter(db: DB): express.Router {
     });
     back.searchParams.set('code', code);
     log.info('oauth consent granted', { client: p.client_id, user: session.username });
-    res.redirect(303, back.toString());
+    handBack(res, back, clientName, true);
   });
 
   // --- token ---------------------------------------------------------------

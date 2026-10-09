@@ -3,6 +3,29 @@
 Dated, append-only. Each entry says what was chosen, what it was chosen over,
 and why.
 
+## 2026-10-09 — Allow is followed by a page, not a bare redirect
+
+The owner pressed Allow when connecting Cursor and nothing happened. In a
+headless Chromium, https and loopback (`127.0.0.1`, `localhost`) redirects all
+worked, and a client offering only a custom scheme is refused at registration, so
+the cause on the owner's phone was not reproduced; the registered redirect URI of
+that client was not visible. A bare 303 is silent whenever the browser declines
+the hop (a loopback address belongs to whichever device runs the app, so a phone
+cannot deliver the answer to a computer; an app link can swallow a navigation).
+
+- **After Allow or Deny, answer 200 with a page** naming the destination, a
+  Continue link, and a `Refresh: 0` header, chosen over leaving the 303 (silent
+  failure, the one thing the owner could not diagnose) and over a meta refresh
+  (needs the head the shared layout does not expose; the header is equivalent).
+  A refusal now shows as the browser's own error after the link is followed.
+- A loopback destination gets a plain hint: the app only hears the answer on the
+  device it runs on.
+- `Referrer-Policy: no-referrer` and `no-store` on that page; the code is in the
+  link, never in the page's own URL.
+- Not changed: registration still accepts only https and loopback http, so
+  `cursor://` alone is refused (RFC 8252 permits custom schemes for native apps;
+  widening it is a security decision, left open in BACKLOG).
+
 ## 2026-10-07 — Cash spending is entered by hand, as expenses only
 
 A user who tracks a rental property found their totals differed from the bank's
