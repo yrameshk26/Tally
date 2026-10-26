@@ -2,14 +2,14 @@
 
 # better-sqlite3 is a native module, so both the dependency and build stages
 # need a toolchain. The runtime stage keeps neither.
-FROM node:22-bookworm-slim AS deps
+FROM node:25-bookworm-slim AS deps
 RUN apt-get update && apt-get install -y --no-install-recommends python3 make g++ \
     && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci --omit=dev
 
-FROM node:22-bookworm-slim AS build
+FROM node:25-bookworm-slim AS build
 RUN apt-get update && apt-get install -y --no-install-recommends python3 make g++ \
     && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
@@ -20,7 +20,7 @@ COPY src ./src
 COPY scripts ./scripts
 RUN npx tsc -p tsconfig.json
 
-FROM node:22-bookworm-slim AS runtime
+FROM node:25-bookworm-slim AS runtime
 RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates tini \
     && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
