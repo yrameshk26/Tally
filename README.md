@@ -492,6 +492,24 @@ page names where you are being sent back to (with a Continue link) rather than
 redirecting silently; an app that listens on `127.0.0.1` can only hear the answer
 from the device it runs on, so approve from that device, not a phone.
 
+**How long a connector stays signed in.** Access tokens last an hour and are
+refreshed silently. The sign-in itself lasts `MCP_SESSION_DAYS` (30 by default)
+**since the connector was last used**: every tool call and every refresh resets
+the window, so a connector you use at least once a month never asks for your
+password and authenticator again. A refresh token that has just been rotated
+keeps working for two minutes, so two requests refreshing at once, or a retry
+after a dropped response, do not sign the connector out. Tokens live in the
+database, so a restart or redeploy keeps them as long as `/data` is a volume.
+
+A session that slides never ends by itself while it is used. If you want a
+connector to sign in again every so often whatever its use, set
+`MCP_SESSION_MAX_DAYS` (off by default, whole days up to 3650): it counts from the
+day the connector was authorized and neither use nor refresh moves it. You can
+also revoke any connector at once from Security. The grace window is a deliberate
+step away from strict one-time refresh tokens (which OAuth 2.1 recommends for
+public clients): one household, hashed tokens and a two minute window made a
+client racing itself a likelier cause of sign-outs than a thief.
+
 ## Security
 
 Read [SECURITY.md](SECURITY.md) before deploying. The short version:
@@ -513,7 +531,7 @@ Read [SECURITY.md](SECURITY.md) before deploying. The short version:
 |---|---|
 | `npm run demo` | Seed a fictional database to try it without credentials |
 | `npm run dev` | Run the server from TypeScript |
-| `npm run check` | Typecheck + 507 tests |
+| `npm run check` | Typecheck + 534 tests |
 | `npm run sync` | One-shot sync; exits non-zero if a source errored |
 | `npm run db:init` | Create the database, seeding `room.json` if present |
 | `npm run hash-password` | Print an `ADMIN_PASSWORD_HASH` |

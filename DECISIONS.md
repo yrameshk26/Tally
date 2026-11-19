@@ -3,6 +3,44 @@
 Dated, append-only. Each entry says what was chosen, what it was chosen over,
 and why.
 
+## 2026-11-19 — Review follow-up on the sliding connector session
+
+Review of the sliding session found two things, both fixed on the same pull
+request.
+
+- **Purging codes weakened replay detection.** The change started calling
+  `purgeExpiredOauth` (never called before), which deleted authorization codes
+  when their 60 seconds were up. `consumeCode` recognises a replayed code by its
+  row (`used = 1`) and revokes the tokens issued from it, so a replay after a
+  minute silently stopped revoking. Codes are now kept `CODE_RETENTION_MS` (30
+  days) past expiry, chosen over keeping them forever (the table would only grow)
+  and over purging only unused ones (the used ones are the point).
+- **A sliding session had no ceiling.** Added `MCP_SESSION_MAX_DAYS`, **off by
+  default** so nothing changes unless asked, chosen over making the cap default
+  to a year (re-consent would break scheduled jobs the owner relies on). It counts
+  from authorization via `session_started_at`, copied on every rotation, and the
+  refresh expiry is `min(now + window, started + cap)`, so neither sliding nor a
+  refresh inside the grace window can reach past it. Rows from before the column
+  count from their own issue time.
+- Also: day counts are digits only (`1e2` and `0x10` are no longer days), and the
+  README says plainly that the grace window is a deliberate step away from the
+  strict one-time refresh tokens OAuth 2.1 recommends for public clients.
+
+## 2026-11-18 — MCP connector sessions slide, and rotation has a grace window
+
+Connectors were being signed out roughly weekly. The refresh token now lasts
+`MCP_SESSION_DAYS` (30) since last use, reset by every authenticated request and
+every refresh, chosen over an absolute lifetime from sign-in (what a browser
+session does, hard rule 11): a connector is a standing grant the owner already
+approved behind password and TOTP, and re-consenting every month buys little
+while breaking scheduled jobs. Revocation on the Security page still ends it at
+once. A rotated refresh token keeps working for two minutes, chosen over strict
+single use with replay detection (which revokes the family): with one household
+and hashed tokens, the realistic reuse is a client racing itself, not a thief,
+and strict reuse turned those races into sign-outs. The access token stays one
+hour. Extending the window on each request costs nothing new: the same `UPDATE`
+already wrote `last_used_at`.
+
 ## 2026-10-09 — Allow is followed by a page, not a bare redirect
 
 The owner pressed Allow when connecting Cursor and nothing happened. In a

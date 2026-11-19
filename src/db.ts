@@ -225,7 +225,9 @@ CREATE TABLE IF NOT EXISTS oauth_tokens (
   expires_at          TEXT NOT NULL,
   refresh_expires_at  TEXT,
   created_at          TEXT NOT NULL,
-  last_used_at        TEXT
+  last_used_at        TEXT,
+  rotated_at          TEXT,
+  session_started_at  TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_oauth_tokens_client ON oauth_tokens(client_id);
 
@@ -364,6 +366,13 @@ export function migrate(db: DB): void {
   addColumn('plaid_items', 'institution_products', 'TEXT');
   addColumn('room', 'note', 'TEXT');
   addColumn('sessions', 'pending', "INTEGER NOT NULL DEFAULT 0");
+  // Set when a refresh token is rotated. The old row then lives only for a
+  // short grace window so a client that refreshes twice at once (or lost the
+  // response to the first refresh) is not signed out. See src/oauth.ts.
+  addColumn('oauth_tokens', 'rotated_at', 'TEXT');
+  // When the connector was authorized, carried across every rotation, so the
+  // optional MCP_SESSION_MAX_DAYS cap cannot be reset by refreshing.
+  addColumn('oauth_tokens', 'session_started_at', 'TEXT');
 
   migrateProfiles(db);
   encryptExistingTokens(db);

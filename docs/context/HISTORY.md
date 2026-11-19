@@ -253,6 +253,47 @@ Entry template:
   loopback and referrer tests), a browser run at phone width.
 - Left open: the owner reads the client's redirect URI on the Security page (BACKLOG).
 
+## 2026-11-18: MCP connectors kept getting signed out
+
+- Asked: a connector (Grok Bot, HTTP, OAuth) hit `authentication_required`
+  about once a week and had to sign in with password and authenticator again.
+  Make the keep-alive configurable, 30 days by default, reset on every use.
+- Found: `verifyAccessToken` deleted the whole `oauth_tokens` row when the
+  access token (one hour) had expired. That row also holds the refresh token,
+  so a client that presented its stale access token before refreshing, which
+  is the normal 401-then-refresh pattern after an idle hour, lost its refresh
+  token and was signed out. Separately, rotation was strictly single use, so
+  two parallel requests refreshing with the same token, or a retry after a
+  lost response, also signed it out. Tokens are in SQLite on the `/data`
+  volume, so a restart was not the cause; nothing rotates a signing secret
+  (tokens are opaque hashes).
+- Done: an expired access token is refused without touching its refresh
+  token. The refresh window comes from `MCP_SESSION_DAYS` (30, 1 to 365) and
+  slides: every authenticated `/mcp` request and every refresh resets it to the
+  full window. Rotation retires the old pair (`rotated_at`, new column) for two
+  minutes instead of deleting it. Expired rows are purged after each refresh
+  (`purgeExpiredOauth` was never called before).
+- Verified: `test/oauth-session.test.ts` (15: default, env override, reset on
+  use, idle expiry, expired-access survival, concurrent and late reuse);
+  `test/oauth.test.ts` updated for the grace window. `npm run check` clean.
+- Deploy: optional `MCP_SESSION_DAYS` on the server; existing tokens keep
+  working, the next refresh gets the new behaviour. A connector already signed
+  out has to sign in once more.
+
+## 2026-11-19: review of the sliding connector session
+
+- Asked: review pull request 20, then "fix them on the same PR".
+- Found: (1) the new purge deleted used authorization codes after 60 seconds, so
+  a replayed code stopped revoking its tokens after a minute (it had worked
+  indefinitely because the purge was never called); (2) no ceiling on a sliding
+  session; plus test gaps and a loose day parser.
+- Done: used codes kept 30 days past expiry; optional `MCP_SESSION_MAX_DAYS` with
+  `session_started_at` (migration, carried across rotations); digits-only day
+  parsing; tests for each, a migration test from the old schema, and an HTTP test
+  that a real `/mcp` request slides the window. DECISIONS 2026-11-19.
+- Verified: the new replay tests fail with the previous purge and pass with the
+  fix (checked by putting the old line back); `npm run check` and `npm run build`.
+
 ## Lessons that apply to future work
 
 - A change to link tokens cannot be proved by tests; keep it behind a setting that

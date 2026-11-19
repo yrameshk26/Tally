@@ -62,6 +62,32 @@ function legacyDb(): DB {
   return db;
 }
 
+describe('oauth_tokens migration', () => {
+  it('adds rotated_at and session_started_at to a database from before them, keeping every token', () => {
+    const db = new Database(':memory:') as DB;
+    db.exec(`
+      CREATE TABLE oauth_tokens (
+        id INTEGER PRIMARY KEY AUTOINCREMENT, access_hash TEXT NOT NULL UNIQUE,
+        refresh_hash TEXT UNIQUE, client_id TEXT NOT NULL, username TEXT NOT NULL, scope TEXT,
+        expires_at TEXT NOT NULL, refresh_expires_at TEXT, created_at TEXT NOT NULL, last_used_at TEXT
+      );
+    `);
+    db.prepare(
+      `INSERT INTO oauth_tokens (access_hash, refresh_hash, client_id, username, scope, expires_at, refresh_expires_at, created_at)
+       VALUES ('a1', 'r1', 'c1', 'owner', 'tally:read', '2099-01-01T00:00:00.000Z', '2099-02-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z')`,
+    ).run();
+
+    initDb(db);
+    initDb(db); // idempotent: a second start must not fail on the existing columns
+
+    const cols = (db.prepare('PRAGMA table_info(oauth_tokens)').all() as Array<{ name: string }>).map((c) => c.name);
+    expect(cols).toEqual(expect.arrayContaining(['rotated_at', 'session_started_at']));
+    expect(db.prepare('SELECT access_hash, refresh_expires_at, rotated_at, session_started_at FROM oauth_tokens').all()).toEqual([
+      { access_hash: 'a1', refresh_expires_at: '2099-02-01T00:00:00.000Z', rotated_at: null, session_started_at: null },
+    ]);
+  });
+});
+
 describe('profiles migration', () => {
   it('creates the default profile and turns owner tags into profiles', () => {
     const db = legacyDb();

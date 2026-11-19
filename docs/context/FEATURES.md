@@ -289,7 +289,10 @@ documented but never sent, so every Item had 90 days. Now:
   Install-wide keys are only offered on the default profile.
 - **Security:** connector URL (the legacy secret is revealed only on an explicit
   POST), authorized MCP apps with revoke, TOTP enrol and disable, active sessions
-  and "sign out everywhere".
+  and "sign out everywhere". An authorized MCP app stays signed in for
+  `MCP_SESSION_DAYS` (30) since it was last used: every tool call and refresh
+  resets the window (`src/oauth.ts`, pinned by `test/oauth-session.test.ts`).
+  `MCP_SESSION_MAX_DAYS` (off by default) adds an absolute cap from authorization.
 
 ## 15. Built-in assistant (optional, off by default)
 
