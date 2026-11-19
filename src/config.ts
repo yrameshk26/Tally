@@ -27,6 +27,16 @@ function list(name: string, fallback: string[]): string[] {
     .filter(Boolean);
 }
 
+export const DEFAULT_MCP_SESSION_DAYS = 30;
+
+/** `MCP_SESSION_DAYS`: a whole number of days, 1 to 365, else the default. */
+export function sessionDays(raw: string | undefined): number {
+  if (raw === undefined || raw.trim() === '') return DEFAULT_MCP_SESSION_DAYS;
+  const n = Number(raw.trim());
+  if (!Number.isInteger(n) || n < 1 || n > 365) return DEFAULT_MCP_SESSION_DAYS;
+  return n;
+}
+
 export type OwnerTag = 'me' | 'spouse' | 'joint';
 
 export const config = {
@@ -122,6 +132,15 @@ export const config = {
    * cookie, so Claude keeps working while the browser signs out.
    */
   sessionIdleMinutes: int('SESSION_IDLE_MINUTES', 30),
+  /**
+   * How long an MCP connector stays signed in without being used, in days.
+   * Sliding: every authenticated /mcp request and every refresh pushes the
+   * refresh token's expiry back to this full window, so a connector in use
+   * never has to sign in again. Access tokens stay short (an hour); this is
+   * the window that decides when a connector is signed out. 30 by default;
+   * values below 1 or above 365 fall back to 30.
+   */
+  mcpSessionDays: sessionDays(str('MCP_SESSION_DAYS')),
 
   tokenEncKey: str('TOKEN_ENC_KEY'),
 } as const;

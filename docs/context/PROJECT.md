@@ -125,7 +125,7 @@ native currency (`amount`) and CAD (`amount_cad`).
 | `sessions` | browser sessions | Two clocks: idle and absolute (7 days); `pending` while awaiting TOTP |
 | `oauth_clients` | dynamically registered MCP clients | |
 | `oauth_codes` | one-time authorization codes (PKCE S256) | |
-| `oauth_tokens` | hashed access and refresh tokens | Raw tokens never stored |
+| `oauth_tokens` | hashed access and refresh tokens; `refresh_expires_at` slides on use, `rotated_at` marks a retired pair in its grace window | Raw tokens never stored |
 | `tx_overrides` | per-transaction merchant, category, note | The note is MCP-only and not shown in the UI |
 | `tx_tags` | tag per transaction | `COLLATE NOCASE`; primary key (transaction, tag) |
 | `merchant_rules` | rewrite rules | `match_type` contains, prefix, exact or merchant; ordered by `position`, first match wins |
@@ -209,6 +209,14 @@ the pending row's tags and, if the posted row has none, its override.
   redirect origin in `form-action`. Registration accepts only `https` and
   loopback `http` redirect URIs; a client offering only a custom scheme
   (`cursor://...`) is refused at `/oauth/register`.
+  Connector sessions (`src/oauth.ts`): access tokens last an hour; the refresh
+  token lasts `MCP_SESSION_DAYS` (30) and slides, reset to the full window by
+  every authenticated `/mcp` request (`verifyAccessToken`) and every refresh.
+  An expired access token is refused without deleting its row, because the row
+  also holds the refresh token. Rotation retires the old pair (`rotated_at`)
+  for `REFRESH_REUSE_GRACE_MS` (2 minutes) instead of deleting it, so
+  concurrent or retried refreshes succeed; a retired pair never slides.
+  Expired rows are purged after each refresh.
 - Uploaded logos are raster only (never SVG), served sandboxed.
 - Every absolute URL is built by `originOf(req)` (first `X-Forwarded-Proto`
   entry); behind a proxy `TRUST_PROXY` must be the number of hops.
@@ -308,7 +316,7 @@ template). Defaults in parentheses.
 | Plaid | `PLAID_CLIENT_ID`, `PLAID_SECRET`, `PLAID_ENV` (production), `PLAID_PRODUCTS` (transactions), `PLAID_OPTIONAL_PRODUCTS` (liabilities), `PLAID_COUNTRY_CODES` (US,CA), `PLAID_LINK_PORT` (8788), `PLAID_REDIRECT_URI`, `PLAID_STATEMENT_MONTHS` (24) |
 | Wise | `WISE_API_TOKEN`, `WISE_API_BASE` |
 | Assistant | `LLM_PROVIDER` (anthropic), `LLM_API_KEY`, `LLM_MODEL`, `LLM_BASE_URL`, `LLM_MAX_STEPS` (8), `LLM_TIMEOUT_MS` (120000) |
-| Web UI | `UI_ENABLED` (false), `ADMIN_USERNAME`, `ADMIN_PASSWORD_HASH`, `COOKIE_SECURE`, `LOGIN_RATE_LIMIT` (10/15 min), `SESSION_IDLE_MINUTES` (30; 0 off) |
+| Web UI | `UI_ENABLED` (false), `ADMIN_USERNAME`, `ADMIN_PASSWORD_HASH`, `COOKIE_SECURE`, `LOGIN_RATE_LIMIT` (10/15 min), `SESSION_IDLE_MINUTES` (30; 0 off), `MCP_SESSION_DAYS` (30; sliding MCP connector sign-in, 1 to 365) |
 | Crypto | `TOKEN_ENC_KEY` (required to store secrets or encrypt tokens) |
 
 **Managed settings** (`MANAGED_KEYS` in `src/settings.ts`, editable on the

@@ -17,13 +17,27 @@
  *    password and a TOTP code.
  */
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
+import { config } from './config.ts';
 import type { DB } from './db.ts';
 import { nowISO } from './lib/money.ts';
 
 /** Short, because a code is exchanged immediately by a well-behaved client. */
 export const CODE_TTL_MS = 60_000;
 export const ACCESS_TTL_MS = 60 * 60 * 1000;
-export const REFRESH_TTL_MS = 30 * 24 * 60 * 60 * 1000;
+const DAY_MS = 24 * 60 * 60 * 1000;
+/**
+ * How long a connector stays signed in without being used: `MCP_SESSION_DAYS`
+ * (30 by default). Sliding, not absolute: every authenticated /mcp request and
+ * every refresh moves the refresh token's expiry to now + this window.
+ */
+export const REFRESH_TTL_MS = config.mcpSessionDays * DAY_MS;
+/**
+ * A rotated refresh token keeps working this long. Two parallel requests that
+ * both find the access token expired refresh with the same token, and a client
+ * whose first refresh response was lost on the network retries it; strict
+ * single use signed both of those out.
+ */
+export const REFRESH_REUSE_GRACE_MS = 2 * 60 * 1000;
 export const SCOPE = 'tally:read';
 
 export function newToken(): string {
@@ -206,10 +220,11 @@ export type IssuedTokens = {
 export function issueTokens(
   db: DB,
   opts: { client_id: string; username: string; scope: string | null },
+  ttlMs: number = REFRESH_TTL_MS,
+  now: number = Date.now(),
 ): IssuedTokens {
   const access = newToken();
   const refresh = newToken();
-  const now = Date.now();
   db.prepare(
     `INSERT INTO oauth_tokens (access_hash, refresh_hash, client_id, username, scope,
                                expires_at, refresh_expires_at, created_at)
@@ -221,7 +236,7 @@ export function issueTokens(
     opts.username,
     opts.scope ?? SCOPE,
     nowISO(new Date(now + ACCESS_TTL_MS)),
-    nowISO(new Date(now + REFRESH_TTL_MS)),
+    nowISO(new Date(now + ttlMs)),
     nowISO(new Date(now)),
   );
   db.prepare('UPDATE oauth_clients SET last_used_at = ? WHERE client_id = ?').run(
@@ -237,38 +252,99 @@ export function issueTokens(
   };
 }
 
-/** Refresh tokens rotate: using one invalidates it and issues a fresh pair. */
+type TokenRow = {
+  id: number;
+  client_id: string;
+  username: string;
+  scope: string | null;
+  expires_at: string;
+  refresh_expires_at: string | null;
+  rotated_at: string | null;
+};
+
+/**
+ * Refresh tokens rotate: using one issues a fresh pair with the full session
+ * window, and the old one is retired. Retired, not deleted: it keeps working
+ * for REFRESH_REUSE_GRACE_MS so concurrent refreshes and a retried refresh
+ * whose response was lost do not sign the connector out. After the grace
+ * window it is refused (and purged).
+ */
 export function refreshTokens(
   db: DB,
   refreshToken: string,
   clientId: string,
+  ttlMs: number = REFRESH_TTL_MS,
+  now: number = Date.now(),
 ): IssuedTokens | null {
-  const row = db
-    .prepare('SELECT * FROM oauth_tokens WHERE refresh_hash = ?')
-    .get(hashToken(refreshToken)) as
-    | { id: number; client_id: string; username: string; scope: string | null; refresh_expires_at: string }
-    | undefined;
-  if (!row) return null;
-  if (row.client_id !== clientId) return null;
-  if (Date.parse(row.refresh_expires_at) <= Date.now()) return null;
+  const run = db.transaction((): IssuedTokens | null => {
+    const row = db
+      .prepare('SELECT * FROM oauth_tokens WHERE refresh_hash = ?')
+      .get(hashToken(refreshToken)) as TokenRow | undefined;
+    if (!row) return null;
+    if (row.client_id !== clientId) return null;
+    if (!row.refresh_expires_at || Date.parse(row.refresh_expires_at) <= now) return null;
 
-  db.prepare('DELETE FROM oauth_tokens WHERE id = ?').run(row.id);
-  return issueTokens(db, { client_id: row.client_id, username: row.username, scope: row.scope });
+    if (row.rotated_at === null) {
+      // Retire it: the refresh token and its access token now end with the
+      // grace window, whichever is sooner.
+      const graceEnd = now + REFRESH_REUSE_GRACE_MS;
+      db.prepare(
+        `UPDATE oauth_tokens SET rotated_at = ?, refresh_expires_at = ?,
+                expires_at = CASE WHEN expires_at < ? THEN expires_at ELSE ? END
+          WHERE id = ?`,
+      ).run(
+        nowISO(new Date(now)),
+        nowISO(new Date(Math.min(Date.parse(row.refresh_expires_at), graceEnd))),
+        nowISO(new Date(graceEnd)),
+        nowISO(new Date(graceEnd)),
+        row.id,
+      );
+    }
+    // Rotated within the grace window, or just retired: a fresh pair either way.
+    return issueTokens(db, { client_id: row.client_id, username: row.username, scope: row.scope }, ttlMs, now);
+  });
+  const issued = run();
+  if (issued) purgeExpiredOauth(db, now);
+  return issued;
 }
 
 export type TokenIdentity = { username: string; client_id: string; scope: string | null };
 
-/** Validate a bearer token. Expired rows are deleted rather than left to rot. */
-export function verifyAccessToken(db: DB, token: string): TokenIdentity | null {
+/**
+ * Validate a bearer token, and slide the session: a valid token pushes its
+ * refresh token's expiry back to the full window, so a connector that is used
+ * never signs out.
+ *
+ * An expired access token is refused but its row is kept while its refresh
+ * token is still good. Deleting the row here (as this used to) deleted the
+ * refresh token with it, so a client that tried its stale access token before
+ * refreshing, which is what most clients do after being idle for an hour, was
+ * signed out and had to go through the password and authenticator again.
+ */
+export function verifyAccessToken(
+  db: DB,
+  token: string,
+  ttlMs: number = REFRESH_TTL_MS,
+  now: number = Date.now(),
+): TokenIdentity | null {
   const row = db.prepare('SELECT * FROM oauth_tokens WHERE access_hash = ?').get(hashToken(token)) as
-    | { id: number; username: string; client_id: string; scope: string | null; expires_at: string }
+    | TokenRow
     | undefined;
   if (!row) return null;
-  if (Date.parse(row.expires_at) <= Date.now()) {
-    db.prepare('DELETE FROM oauth_tokens WHERE id = ?').run(row.id);
+  if (Date.parse(row.expires_at) <= now) {
+    const refreshAlive = row.refresh_expires_at !== null && Date.parse(row.refresh_expires_at) > now;
+    if (!refreshAlive) db.prepare('DELETE FROM oauth_tokens WHERE id = ?').run(row.id);
     return null;
   }
-  db.prepare('UPDATE oauth_tokens SET last_used_at = ? WHERE id = ?').run(nowISO(), row.id);
+  if (row.rotated_at === null) {
+    db.prepare('UPDATE oauth_tokens SET last_used_at = ?, refresh_expires_at = ? WHERE id = ?').run(
+      nowISO(new Date(now)),
+      nowISO(new Date(now + ttlMs)),
+      row.id,
+    );
+  } else {
+    db.prepare('UPDATE oauth_tokens SET last_used_at = ? WHERE id = ?').run(nowISO(new Date(now)), row.id);
+  }
   return { username: row.username, client_id: row.client_id, scope: row.scope };
 }
 

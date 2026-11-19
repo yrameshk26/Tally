@@ -203,7 +203,9 @@ describe('the full flow', () => {
     expect(ok.status).toBe(200);
     expect(await ok.text()).toContain('get_net_worth');
 
-    // Refresh rotates: the new pair works, the old refresh token is dead.
+    // Refresh rotates: the new pair works. The old refresh token is kept for a
+    // short grace window (concurrent or retried refreshes), then refused;
+    // test/oauth-session.test.ts covers the window itself.
     const r1 = await fetch(`${base}/oauth/token`, {
       method: 'POST',
       headers: { 'content-type': 'application/x-www-form-urlencoded' },
@@ -217,7 +219,13 @@ describe('the full flow', () => {
       headers: { 'content-type': 'application/x-www-form-urlencoded' },
       body: new URLSearchParams({ grant_type: 'refresh_token', refresh_token: t.refresh_token, client_id: clientId }),
     });
-    expect(r2.status).toBe(400);
+    expect(r2.status).toBe(200);
+    const r3 = await fetch(`${base}/oauth/token`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({ grant_type: 'refresh_token', refresh_token: 'not-a-real-refresh-token', client_id: clientId }),
+    });
+    expect(r3.status).toBe(400);
 
     // Revoking from Security kills every token for that app immediately.
     const home = await (await fetch(`${base}/`, { headers: { cookie } })).text();

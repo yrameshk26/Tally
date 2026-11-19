@@ -81,6 +81,13 @@ history is public too.
    continuous use will expire early. MCP is not covered by any of this: a
    connector holds an OAuth token, not this cookie, and signing the browser out
    must never break it.
+   The connector's own sign-in is the refresh token in `src/oauth.ts`: it
+   lasts `MCP_SESSION_DAYS` (30) and slides on every authenticated `/mcp`
+   request and every refresh. Never delete an `oauth_tokens` row because its
+   *access* token expired (the row holds the refresh token too; that bug
+   signed the owner out of connectors), and never make rotation strictly
+   single use again: the retired pair keeps a short grace window for
+   concurrent and retried refreshes. `test/oauth-session.test.ts` pins both.
 12. **What counts as spending is defined once.** `NOT_SPENDING_CATEGORIES` in
    `src/queries.ts` (transfers in and out, and card/loan payments) is excluded
    by cashflow, the Transactions tab's totals, the period report, the Merchants

@@ -3,6 +3,21 @@
 Dated, append-only. Each entry says what was chosen, what it was chosen over,
 and why.
 
+## 2026-11-18 — MCP connector sessions slide, and rotation has a grace window
+
+Connectors were being signed out roughly weekly. The refresh token now lasts
+`MCP_SESSION_DAYS` (30) since last use, reset by every authenticated request and
+every refresh, chosen over an absolute lifetime from sign-in (what a browser
+session does, hard rule 11): a connector is a standing grant the owner already
+approved behind password and TOTP, and re-consenting every month buys little
+while breaking scheduled jobs. Revocation on the Security page still ends it at
+once. A rotated refresh token keeps working for two minutes, chosen over strict
+single use with replay detection (which revokes the family): with one household
+and hashed tokens, the realistic reuse is a client racing itself, not a thief,
+and strict reuse turned those races into sign-outs. The access token stays one
+hour. Extending the window on each request costs nothing new: the same `UPDATE`
+already wrote `last_used_at`.
+
 ## 2026-10-09 — Allow is followed by a page, not a bare redirect
 
 The owner pressed Allow when connecting Cursor and nothing happened. In a
