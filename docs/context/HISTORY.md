@@ -280,6 +280,20 @@ Entry template:
   working, the next refresh gets the new behaviour. A connector already signed
   out has to sign in once more.
 
+## 2026-11-19: review of the sliding connector session
+
+- Asked: review pull request 20, then "fix them on the same PR".
+- Found: (1) the new purge deleted used authorization codes after 60 seconds, so
+  a replayed code stopped revoking its tokens after a minute (it had worked
+  indefinitely because the purge was never called); (2) no ceiling on a sliding
+  session; plus test gaps and a loose day parser.
+- Done: used codes kept 30 days past expiry; optional `MCP_SESSION_MAX_DAYS` with
+  `session_started_at` (migration, carried across rotations); digits-only day
+  parsing; tests for each, a migration test from the old schema, and an HTTP test
+  that a real `/mcp` request slides the window. DECISIONS 2026-11-19.
+- Verified: the new replay tests fail with the previous purge and pass with the
+  fix (checked by putting the old line back); `npm run check` and `npm run build`.
+
 ## Lessons that apply to future work
 
 - A change to link tokens cannot be proved by tests; keep it behind a setting that

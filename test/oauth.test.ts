@@ -26,6 +26,8 @@ process.env['MCP_ALLOW_PATH_SECRET'] = 'false';
 const { hashPassword } = await import('../src/auth/password.ts');
 process.env['ADMIN_PASSWORD_HASH'] = await hashPassword(PASSWORD);
 const { createApp } = await import('../src/index.ts');
+const { getDb } = await import('../src/db.ts');
+const { hashToken } = await import('../src/oauth.ts');
 
 let server: Server;
 let base: string;
@@ -132,6 +134,47 @@ async function mcp(token?: string): Promise<Response> {
     body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list' }),
   });
 }
+
+describe('a connector in use stays signed in', () => {
+  it('every /mcp request pushes the refresh token out to the full window', async () => {
+    const clientId = await register();
+    const { verifier, challenge } = pkce();
+    const first = await exchange(clientId, await authorize(clientId, challenge, await login()), verifier);
+    const t = (await first.json()) as { access_token: string; refresh_token: string };
+    const expiry = (): number =>
+      Date.parse(
+        (getDb().prepare('SELECT refresh_expires_at AS e FROM oauth_tokens WHERE refresh_hash = ?').get(hashToken(t.refresh_token)) as {
+          e: string;
+        }).e,
+      );
+    // Pretend it was issued almost a month ago: one day left on the refresh token.
+    getDb()
+      .prepare('UPDATE oauth_tokens SET refresh_expires_at = ? WHERE refresh_hash = ?')
+      .run(new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(), hashToken(t.refresh_token));
+    expect(expiry() - Date.now()).toBeLessThan(2 * 24 * 60 * 60 * 1000);
+
+    expect((await mcp(t.access_token)).status).toBe(200);
+    expect(expiry() - Date.now()).toBeGreaterThan(29 * 24 * 60 * 60 * 1000);
+  });
+
+  it('a stale access token is refused and its refresh token still works', async () => {
+    const clientId = await register();
+    const { verifier, challenge } = pkce();
+    const first = await exchange(clientId, await authorize(clientId, challenge, await login()), verifier);
+    const t = (await first.json()) as { access_token: string; refresh_token: string };
+    getDb().prepare('UPDATE oauth_tokens SET expires_at = ? WHERE access_hash = ?').run(new Date(Date.now() - 1000).toISOString(), hashToken(t.access_token));
+
+    expect((await mcp(t.access_token)).status).toBe(401);
+    const refreshed = await fetch(`${base}/oauth/token`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({ grant_type: 'refresh_token', refresh_token: t.refresh_token, client_id: clientId }),
+    });
+    expect(refreshed.status).toBe(200);
+    const next = (await refreshed.json()) as { access_token: string };
+    expect((await mcp(next.access_token)).status).toBe(200);
+  });
+});
 
 describe('discovery', () => {
   it('answers an unauthenticated /mcp with a 401 that points at the metadata', async () => {

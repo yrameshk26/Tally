@@ -38,6 +38,18 @@ export const REFRESH_TTL_MS = config.mcpSessionDays * DAY_MS;
  * single use signed both of those out.
  */
 export const REFRESH_REUSE_GRACE_MS = 2 * 60 * 1000;
+/**
+ * Optional absolute cap on a connector's sign-in (`MCP_SESSION_MAX_DAYS`,
+ * 0 = none): counted from authorization, never reset by sliding or rotation.
+ */
+export const SESSION_MAX_MS = config.mcpSessionMaxDays * DAY_MS;
+/**
+ * A used authorization code is kept this long after it expires. `consumeCode`
+ * recognises a replayed code by finding its row, and a replay revokes the
+ * tokens issued from it, so purging used codes when their 60 seconds are up
+ * would turn that into a 60 second window.
+ */
+export const CODE_RETENTION_MS = 30 * DAY_MS;
 export const SCOPE = 'tally:read';
 
 export function newToken(): string {
@@ -217,18 +229,31 @@ export type IssuedTokens = {
   token_type: 'Bearer';
 };
 
+/**
+ * When a refresh token expires: a full window from now, but never past the
+ * optional absolute cap counted from `startedAt` (when the connector was
+ * authorized).
+ */
+function refreshDeadline(now: number, ttlMs: number, startedAt: number, maxMs: number): number {
+  const slid = now + ttlMs;
+  return maxMs > 0 ? Math.min(slid, startedAt + maxMs) : slid;
+}
+
 export function issueTokens(
   db: DB,
   opts: { client_id: string; username: string; scope: string | null },
   ttlMs: number = REFRESH_TTL_MS,
   now: number = Date.now(),
+  /** When this sign-in began. A rotation passes the original so the cap holds. */
+  startedAt: number = now,
+  maxMs: number = SESSION_MAX_MS,
 ): IssuedTokens {
   const access = newToken();
   const refresh = newToken();
   db.prepare(
     `INSERT INTO oauth_tokens (access_hash, refresh_hash, client_id, username, scope,
-                               expires_at, refresh_expires_at, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+                               expires_at, refresh_expires_at, created_at, session_started_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     hashToken(access),
     hashToken(refresh),
@@ -236,8 +261,9 @@ export function issueTokens(
     opts.username,
     opts.scope ?? SCOPE,
     nowISO(new Date(now + ACCESS_TTL_MS)),
-    nowISO(new Date(now + ttlMs)),
+    nowISO(new Date(refreshDeadline(now, ttlMs, startedAt, maxMs))),
     nowISO(new Date(now)),
+    nowISO(new Date(startedAt)),
   );
   db.prepare('UPDATE oauth_clients SET last_used_at = ? WHERE client_id = ?').run(
     nowISO(new Date(now)),
@@ -260,7 +286,12 @@ type TokenRow = {
   expires_at: string;
   refresh_expires_at: string | null;
   rotated_at: string | null;
+  created_at: string;
+  session_started_at: string | null;
 };
+
+/** When a row's sign-in began; rows from before the column count from their own issue. */
+const startedAtOf = (row: TokenRow): number => Date.parse(row.session_started_at ?? row.created_at);
 
 /**
  * Refresh tokens rotate: using one issues a fresh pair with the full session
@@ -275,6 +306,7 @@ export function refreshTokens(
   clientId: string,
   ttlMs: number = REFRESH_TTL_MS,
   now: number = Date.now(),
+  maxMs: number = SESSION_MAX_MS,
 ): IssuedTokens | null {
   const run = db.transaction((): IssuedTokens | null => {
     const row = db
@@ -283,6 +315,8 @@ export function refreshTokens(
     if (!row) return null;
     if (row.client_id !== clientId) return null;
     if (!row.refresh_expires_at || Date.parse(row.refresh_expires_at) <= now) return null;
+    const startedAt = startedAtOf(row);
+    if (maxMs > 0 && startedAt + maxMs <= now) return null;
 
     if (row.rotated_at === null) {
       // Retire it: the refresh token and its access token now end with the
@@ -301,7 +335,14 @@ export function refreshTokens(
       );
     }
     // Rotated within the grace window, or just retired: a fresh pair either way.
-    return issueTokens(db, { client_id: row.client_id, username: row.username, scope: row.scope }, ttlMs, now);
+    return issueTokens(
+      db,
+      { client_id: row.client_id, username: row.username, scope: row.scope },
+      ttlMs,
+      now,
+      startedAt,
+      maxMs,
+    );
   });
   const issued = run();
   if (issued) purgeExpiredOauth(db, now);
@@ -326,6 +367,7 @@ export function verifyAccessToken(
   token: string,
   ttlMs: number = REFRESH_TTL_MS,
   now: number = Date.now(),
+  maxMs: number = SESSION_MAX_MS,
 ): TokenIdentity | null {
   const row = db.prepare('SELECT * FROM oauth_tokens WHERE access_hash = ?').get(hashToken(token)) as
     | TokenRow
@@ -339,7 +381,7 @@ export function verifyAccessToken(
   if (row.rotated_at === null) {
     db.prepare('UPDATE oauth_tokens SET last_used_at = ?, refresh_expires_at = ? WHERE id = ?').run(
       nowISO(new Date(now)),
-      nowISO(new Date(now + ttlMs)),
+      nowISO(new Date(refreshDeadline(now, ttlMs, startedAtOf(row), maxMs))),
       row.id,
     );
   } else {
@@ -350,7 +392,9 @@ export function verifyAccessToken(
 
 export function purgeExpiredOauth(db: DB, now = Date.now()): number {
   const ts = nowISO(new Date(now));
-  const codes = db.prepare('DELETE FROM oauth_codes WHERE expires_at <= ?').run(ts).changes;
+  // Codes are kept for CODE_RETENTION_MS past expiry so a replay is still recognised.
+  const codeCutoff = nowISO(new Date(now - CODE_RETENTION_MS));
+  const codes = db.prepare('DELETE FROM oauth_codes WHERE expires_at <= ?').run(codeCutoff).changes;
   const tokens = db
     .prepare('DELETE FROM oauth_tokens WHERE COALESCE(refresh_expires_at, expires_at) <= ?')
     .run(ts).changes;

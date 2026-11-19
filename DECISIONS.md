@@ -3,6 +3,29 @@
 Dated, append-only. Each entry says what was chosen, what it was chosen over,
 and why.
 
+## 2026-11-19 — Review follow-up on the sliding connector session
+
+Review of the sliding session found two things, both fixed on the same pull
+request.
+
+- **Purging codes weakened replay detection.** The change started calling
+  `purgeExpiredOauth` (never called before), which deleted authorization codes
+  when their 60 seconds were up. `consumeCode` recognises a replayed code by its
+  row (`used = 1`) and revokes the tokens issued from it, so a replay after a
+  minute silently stopped revoking. Codes are now kept `CODE_RETENTION_MS` (30
+  days) past expiry, chosen over keeping them forever (the table would only grow)
+  and over purging only unused ones (the used ones are the point).
+- **A sliding session had no ceiling.** Added `MCP_SESSION_MAX_DAYS`, **off by
+  default** so nothing changes unless asked, chosen over making the cap default
+  to a year (re-consent would break scheduled jobs the owner relies on). It counts
+  from authorization via `session_started_at`, copied on every rotation, and the
+  refresh expiry is `min(now + window, started + cap)`, so neither sliding nor a
+  refresh inside the grace window can reach past it. Rows from before the column
+  count from their own issue time.
+- Also: day counts are digits only (`1e2` and `0x10` are no longer days), and the
+  README says plainly that the grace window is a deliberate step away from the
+  strict one-time refresh tokens OAuth 2.1 recommends for public clients.
+
 ## 2026-11-18 — MCP connector sessions slide, and rotation has a grace window
 
 Connectors were being signed out roughly weekly. The refresh token now lasts

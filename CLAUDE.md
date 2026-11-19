@@ -88,6 +88,12 @@ history is public too.
    signed the owner out of connectors), and never make rotation strictly
    single use again: the retired pair keeps a short grace window for
    concurrent and retried refreshes. `test/oauth-session.test.ts` pins both.
+   `MCP_SESSION_MAX_DAYS` (off by default) is an absolute cap counted from
+   authorization (`session_started_at`, carried across rotations), which
+   sliding and the grace window can never move. A used authorization code is
+   kept `CODE_RETENTION_MS` (30 days) past its expiry, because a replayed code
+   is recognised by its row and revokes the tokens issued from it; purging it
+   after its 60 seconds would shrink that to a minute.
 12. **What counts as spending is defined once.** `NOT_SPENDING_CATEGORIES` in
    `src/queries.ts` (transfers in and out, and card/loan payments) is excluded
    by cashflow, the Transactions tab's totals, the period report, the Merchants

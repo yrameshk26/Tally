@@ -29,12 +29,30 @@ function list(name: string, fallback: string[]): string[] {
 
 export const DEFAULT_MCP_SESSION_DAYS = 30;
 
+/** Digits only, so "1e2", "0x10", "1.5" and "-3" are not days. */
+function wholeDays(raw: string): number | null {
+  const t = raw.trim();
+  return /^\d+$/.test(t) ? Number(t) : null;
+}
+
 /** `MCP_SESSION_DAYS`: a whole number of days, 1 to 365, else the default. */
 export function sessionDays(raw: string | undefined): number {
   if (raw === undefined || raw.trim() === '') return DEFAULT_MCP_SESSION_DAYS;
-  const n = Number(raw.trim());
-  if (!Number.isInteger(n) || n < 1 || n > 365) return DEFAULT_MCP_SESSION_DAYS;
+  const n = wholeDays(raw);
+  if (n === null || n < 1 || n > 365) return DEFAULT_MCP_SESSION_DAYS;
   return n;
+}
+
+/**
+ * `MCP_SESSION_MAX_DAYS`: an optional absolute cap on a connector's sign-in,
+ * counted from the day it was authorized and not extended by use. 0 means no
+ * cap (the default); otherwise a whole number of days, 1 to 3650. Anything
+ * else is no cap.
+ */
+export function sessionMaxDays(raw: string | undefined): number {
+  if (raw === undefined || raw.trim() === '') return 0;
+  const n = wholeDays(raw);
+  return n === null || n < 1 || n > 3650 ? 0 : n;
 }
 
 export type OwnerTag = 'me' | 'spouse' | 'joint';
@@ -141,6 +159,11 @@ export const config = {
    * values below 1 or above 365 fall back to 30.
    */
   mcpSessionDays: sessionDays(str('MCP_SESSION_DAYS')),
+  /**
+   * Optional hard limit on a connector's sign-in, from the day it was
+   * authorized: sliding never goes past it, rotation never resets it. 0 = off.
+   */
+  mcpSessionMaxDays: sessionMaxDays(str('MCP_SESSION_MAX_DAYS')),
 
   tokenEncKey: str('TOKEN_ENC_KEY'),
 } as const;
